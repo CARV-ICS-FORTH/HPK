@@ -1,0 +1,38 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: npb-with-mpi-
+spec:
+  entrypoint: npb-with-mpi
+  templates:
+  - name: npb-with-mpi
+    dag:
+      tasks:
+      - name: A
+        template: npb
+        arguments:
+          parameters:
+          - {name: cpus, value: "{{item}}"}
+        withItems:
+        - 2
+        - 4
+        - 8
+        - 16
+  - name: npb
+    metadata:
+      annotations:
+        slurm-job.knoc.io/flags: "--mem=8G --nodes=3 --nodelist=tie0,tie1,tie3 --ntasks={{inputs.parameters.cpus}}"
+        slurm-job.knoc.io/mpi-flags: "--mca btl self,tcp,vader --mca btl_tcp_if_include ib0 "
+    inputs:
+      parameters:
+      - name: cpus
+    container:
+      image: registry.platform.science-hangar.eu/malvag/mpi-npb:latest
+      command: ["/work/NPB3.3-MPI/bin/ep.A.{{inputs.parameters.cpus}}"]
+  nodeSelector:
+    kubernetes.io/role: agent
+    beta.kubernetes.io/os: linux
+    type: virtual-kubelet
+  tolerations:
+  - key: virtual-kubelet.io/provider
+    operator: Exists

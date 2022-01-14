@@ -1,0 +1,28 @@
+# Example of loops using DAGs
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: singularity-local-sif-test-
+spec:
+  entrypoint: singularity-local-sif
+  templates:
+  - name: singularity-local-sif
+    dag:
+      tasks:
+      - name: A
+        template: test
+  - name: test
+    metadata:
+      annotations:
+        slurm-job.knoc.io/flags: "--mem=1G --nodelist=tie0,tie1,tie3"
+        slurm-job.knoc.io/image-root: "./singularity/images"
+    container:
+      image: /alpine.sif
+      command: ["hostname"]
+  nodeSelector:
+    kubernetes.io/role: agent
+    beta.kubernetes.io/os: linux
+    type: virtual-kubelet
+  tolerations:
+  - key: virtual-kubelet.io/provider
+    operator: Exists
