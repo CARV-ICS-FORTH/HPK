@@ -2,20 +2,20 @@ apiVersion: skaffold/v2beta11
 kind: Config
 build:
   artifacts:
-  - image: carvicsforth/knoc
-    docker:
-      # Use a Dockerfile specific for development only.
-      dockerfile: deploy/Dockerfile
+    - image: carvicsforth/knoc
+      docker:
+        # Use a Dockerfile specific for development only.
+        dockerfile: deploy/Dockerfile
 deploy:
   kubectl:
     manifests:
-    - deploy/base.yml
-    - deploy/pod.yml
-    - deploy/setup_kubeconfig.yaml
+      - deploy/base.yml
+      - deploy/pod.yml
+      - deploy/setup_kubeconfig.yaml
 profiles:
-- name: local
-  build:
-    tagPolicy:
-      gitCommit:
-        variant: Tags
-    local: {}
+  - name: local
+    build:
+      tagPolicy:
+        gitCommit:
+          variant: Tags
+      local: { }

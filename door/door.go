@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.package main
 
-package main
+package door
 
 import (
 	b64 "encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,119 +26,101 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/akamensky/argparse"
-	log "github.com/sirupsen/logrus"
+	"github.com/carv-ics-forth/knoc/api"
+	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 )
 
 const (
-	SUBMIT  = 0
-	STOP    = 1
-	UNKNOWN = 2
 	SBATCH  = "/usr/bin/sbatch"
 	SCANCEL = "/usr/bin/scancel"
 )
 
 var buildVersion = "dev"
 
-func args_parser() (int, string) {
-	// Create new parser object
-	parser := argparse.NewParser("door", "KNoC's sidekick, he's deadly!")
-	// Create string flag
-	// log.Infoln(buildVersion)
-	var action *string = parser.Selector("a", "action", []string{"submit", "stop"}, &argparse.Options{Required: false, Help: "Action required for door"})
-	var container *string = parser.String("c", "container", &argparse.Options{Required: false, Help: "Container required for action"})
-	verbose := parser.Flag("V", "verbose", &argparse.Options{Required: false, Help: "Verbose flag sets log level to DEBUG"})
-	version := parser.Flag("v", "version", &argparse.Options{Required: false, Help: "version"})
-
-	// Parse input
-	err := parser.Parse(os.Args)
-	if err != nil {
-		// In case of error print error and print usage
-		// This can also be done by passing -h or --help flags
-		fmt.Print(parser.Usage(err))
-	}
-
-	if *version {
-		log.Infoln(buildVersion)
-		os.Exit(0)
-	}
-
-	if *verbose {
-		log.SetLevel(log.DebugLevel)
-	}
-	// log.Debugln(*action, *container)
-	if *action == "submit" {
-		return SUBMIT, *container
-	} else if *action == "stop" {
-		return STOP, *container
-	}
-	fmt.Println(parser.Usage(""))
-	return 3, ""
-}
-
-func prepare_env(c DoorContainer) []string {
+func prepareEnv(c *api.DoorContainer) []string {
 	env := make([]string, 1)
 	env = append(env, "--env")
-	env_data := ""
-	for _, env_var := range c.Env {
-		tmp := (env_var.Name + "=" + env_var.Value + ",")
-		env_data += tmp
+	envData := ""
+
+	for _, envVar := range c.Env {
+		tmp := envVar.Name + "=" + envVar.Value + ","
+		envData += tmp
 	}
-	if last := len(env_data) - 1; last >= 0 && env_data[last] == ',' {
-		env_data = env_data[:last]
+
+	if last := len(envData) - 1; last >= 0 && envData[last] == ',' {
+		envData = envData[:last]
 	}
-	return append(env, env_data)
+
+	return append(env, envData)
 }
 
-func prepare_mounts(c DoorContainer) []string {
+func prepareMounts(c *api.DoorContainer) []string {
 	mount := make([]string, 1)
 	mount = append(mount, "--bind")
-	mount_data := ""
-	pod_name := strings.Split(c.Name, "-")
-	for _, mount_var := range c.VolumeMounts {
-		path := (".knoc/" + strings.Join(pod_name[:6], "-") + "/" + mount_var.Name + ":" + mount_var.MountPath + ",")
-		mount_data += path
+	mountData := ""
+	podName := strings.Split(c.Name, "-")
+
+	for _, mountVar := range c.Template.S.VolumeMounts {
+		path := ".knoc/" + strings.Join(podName[:6], "-") + "/" + mountVar.Name + ":" + mountVar.MountPath + ","
+		mountData += path
 	}
-	if last := len(mount_data) - 1; last >= 0 && mount_data[last] == ',' {
-		mount_data = mount_data[:last]
+
+	if last := len(mountData) - 1; last >= 0 && mountData[last] == ',' {
+		mountData = mountData[:last]
 	}
-	return append(mount, mount_data)
+
+	return append(mount, mountData)
 }
 
-func produce_slurm_script(c DoorContainer, command []string) string {
+func produceSlurmScript(c *api.DoorContainer, command []string) (string, error) {
 	newpath := filepath.Join(".", ".tmp")
 	err := os.MkdirAll(newpath, os.ModePerm)
+
 	f, err := os.Create(".tmp/" + c.Name + ".sh")
 	if err != nil {
-		log.Fatalln("Cant create slurm_script")
+		return "", errors.Wrap(err, "Cant create slurm_script")
 	}
-	var sbatch_flags_from_argo []string
-	var sbatch_flags_as_string = ""
-	if slurm_flags, ok := c.Metadata.Annotations["slurm-job.knoc.io/flags"]; ok {
-		sbatch_flags_from_argo = strings.Split(slurm_flags, " ")
-		log.Debugln(sbatch_flags_from_argo)
+
+	var sbatchFlagsFromArgo []string
+
+	var sbatchFlagsAsString = ""
+	if slurmFlags, ok := c.Metadata.Annotations["slurm-job.knoc.io/flags"]; ok {
+		sbatchFlagsFromArgo = strings.Split(slurmFlags, " ")
+
+		logrus.Debugln(sbatchFlagsFromArgo)
 	}
-	if mpi_flags, ok := c.Metadata.Annotations["slurm-job.knoc.io/mpi-flags"]; ok {
-		if mpi_flags != "true" {
-			mpi := append([]string{"mpiexec", "-np", "$SLURM_NTASKS"}, strings.Split(mpi_flags, " ")...)
+
+	if mpiFlags, ok := c.Metadata.Annotations["slurm-job.knoc.io/mpi-flags"]; ok {
+		if mpiFlags != "true" {
+			mpi := append([]string{"mpiexec", "-np", "$SLURM_NTASKS"}, strings.Split(mpiFlags, " ")...)
 			command = append(mpi, command...)
 		}
-		log.Debugln(mpi_flags)
+
+		logrus.Debugln(mpiFlags)
 	}
-	for _, slurm_flag := range sbatch_flags_from_argo {
-		sbatch_flags_as_string += "\n#SBATCH " + slurm_flag
+
+	for _, slurmFlag := range sbatchFlagsFromArgo {
+		sbatchFlagsAsString += "\n#SBATCH " + slurmFlag
 	}
-	sbatch_macros := "#!/bin/bash" +
+
+	sbatchMacros := "#!/bin/bash" +
 		"\n#SBATCH --job-name=" + c.Name +
-		sbatch_flags_as_string +
+		sbatchFlagsAsString +
 		"\n. ~/.bash_profile" +
 		"\npwd; hostname; date\n"
-	f.WriteString(sbatch_macros + "\n" + strings.Join(command[:], " ") + " >> " + ".knoc/" + c.Name + ".out 2>> " + ".knoc/" + c.Name + ".err \n echo $? > " + ".knoc/" + c.Name + ".status")
-	f.Close()
-	return ".tmp/" + c.Name + ".sh"
+
+	// TODO: fix the malakia
+	f.WriteString(sbatchMacros + "\n" + strings.Join(command[:], " ") + " >> " + ".knoc/" + c.Name + ".out 2>> " + ".knoc/" + c.Name + ".err \n echo $? > " + ".knoc/" + c.Name + ".status")
+
+	if err := f.Close(); err != nil {
+		return "", errors.Wrap(err, "Close")
+	}
+
+	return ".tmp/" + c.Name + ".sh", nil
 }
 
-func slurm_batch_submit(path string, c DoorContainer) string {
+func slurmBatchSubmit(path string) string {
 	var output []byte
 	var err error
 	output, err = exec.Command(SBATCH, path).Output()
@@ -148,93 +131,220 @@ func slurm_batch_submit(path string, c DoorContainer) string {
 
 }
 
-func handle_jid(c DoorContainer, output string) {
+func handleJobID(c *api.DoorContainer, output string) error {
 	r := regexp.MustCompile(`Submitted batch job (?P<jid>\d+)`)
 	jid := r.FindStringSubmatch(output)
 	f, err := os.Create(".knoc/" + c.Name + ".jid")
 	if err != nil {
-		log.Fatalln("Cant create jid_file")
+		return errors.Wrap(err, "Cant create jid_file")
 	}
 	f.WriteString(jid[1])
-	f.Close()
+
+	return f.Close()
 }
 
-func create_container(c DoorContainer) {
-	log.Debugln("create_container")
+func CreateContainer(c *api.DoorContainer) error {
+	logrus.Debugln("create_container")
 
-	commstr1 := []string{"singularity", "exec"}
+	command := []string{"singularity", "exec"}
 
-	envs := prepare_env(c)
-	image := ""
-	mounts := prepare_mounts(c)
+	envs := prepareEnv(c)
+	mounts := prepareMounts(c)
+
+	image := "docker://" + c.Image
+
 	if strings.HasPrefix(c.Image, "/") {
-		if image_uri, ok := c.Metadata.Annotations["slurm-job.knoc.io/image-root"]; ok {
-			log.Debugln(image_uri)
-			image = image_uri + c.Image
+
+		if imageURI, ok := c.GetObjectMeta().GetAnnotations()["slurm-job.knoc.io/image-root"]; ok {
+			logrus.Debugln(imageURI)
+			image = imageURI + c.Image
 		} else {
-			log.Errorln("image-uri annotation not specified for path in remote filesystem")
+			return errors.Errorf("image-uri annotation not specified for path in remote filesystem")
 		}
-	} else {
-		image = "docker://" + c.Image
 	}
-	singularity_command := append(commstr1, envs...)
-	singularity_command = append(singularity_command, mounts...)
-	singularity_command = append(singularity_command, image)
-	singularity_command = append(singularity_command, c.Command...)
-	singularity_command = append(singularity_command, c.Args...)
 
-	path := produce_slurm_script(c, singularity_command)
-	out := slurm_batch_submit(path, c)
-	handle_jid(c, out)
-	log.Debugln(singularity_command)
-	log.Infoln(out)
+	singularityCommand := append(command, envs...)
+	singularityCommand = append(singularityCommand, mounts...)
+	singularityCommand = append(singularityCommand, image)
+	singularityCommand = append(singularityCommand, c.Command...)
+	singularityCommand = append(singularityCommand, c.Args...)
 
+	path, err := produceSlurmScript(c, singularityCommand)
+	if err != nil {
+		return errors.Wrap(err, "cannot generate slurm script")
+	}
+
+	out := slurmBatchSubmit(path)
+
+	if err := handleJobID(c, out); err != nil {
+		return errors.Wrapf(err, "handleJobID")
+	}
+
+	logrus.Debugln(singularityCommand)
+	logrus.Infoln(out)
+
+	return nil
 }
 
-func delete_container(c DoorContainer) {
-	data, err := os.ReadFile(".knoc/" + c.Name + ".jid")
+func DeleteContainer(c *api.DoorContainer) error {
+	data, err := os.ReadFile(".knoc/" + c.Name + ".jobID")
 	if err != nil {
-		log.Fatalln("Can't find job id of container")
+		return errors.Wrapf(err, "Can't find job id of container '%s'", c.Name)
 	}
-	jid, err := strconv.Atoi(string(data))
+
+	jobID, err := strconv.Atoi(string(data))
 	if err != nil {
-		log.Fatalln("Can't find job id of container")
+		return errors.Wrapf(err, "Can't find job id of container '%s'", c.Name)
 	}
-	_, err = exec.Command(SCANCEL, fmt.Sprint(jid)).Output()
+
+	_, err = exec.Command(SCANCEL, fmt.Sprint(jobID)).Output()
 	if err != nil {
-		log.Fatalln("Could not delete job", jid)
+		return errors.Wrapf(err, "Could not delete job '%s'", c.Name)
 	}
+
 	exec.Command("rm", "-f ", ".knoc/"+c.Name+".out")
 	exec.Command("rm", "-f ", ".knoc/"+c.Name+".err")
 	exec.Command("rm", "-f ", ".knoc/"+c.Name+".status")
-	exec.Command("rm", "-f ", ".knoc/"+c.Name+".jid")
+	exec.Command("rm", "-f ", ".knoc/"+c.Name+".jobID")
 	exec.Command("rm", "-rf", " .knoc/"+c.Name)
-	log.Infoln("Delete job", jid)
+
+	logrus.Info("Delete job", jobID)
+
+	return nil
 }
 
-func importContainerb64Json(containerSpec string) DoorContainer {
-	dc := DoorContainer{}
+func ImportContainerb64Json(containerSpec string) (*api.DoorContainer, error) {
+	dc := api.DoorContainer{}
+
 	sDec, err := b64.StdEncoding.DecodeString(containerSpec)
 	if err != nil {
-		log.Fatalln("Wrong containerSpec!")
+		return nil, errors.Wrap(err, "Wrong containerSpec!")
 	}
-	err = json.Unmarshal(sDec, &dc)
-	if err != nil {
-		log.Fatalln("Wrong type of doorContainer!")
+
+	if err = json.Unmarshal(sDec, &dc); err != nil {
+		return nil, errors.Wrap(err, "Wrong type of doorContainer!")
 	}
-	return dc
+
+	return &dc, nil
 }
 
-func main() {
-	action, containerSpec := args_parser()
-	if action == 3 {
-		os.Exit(1)
+/*
+func normalizeImageName(instanceName string) string {
+	instancesStr := strings.Split(instanceName, "/")
+	finalName := ""
+	firstIter := true
+
+	for _, strings := range instancesStr {
+		if firstIter {
+			finalName = strings
+			firstIter = false
+			continue
+		}
+		finalName = finalName + "-" + strings
 	}
-	dc := importContainerb64Json(containerSpec)
-	switch action {
-	case SUBMIT:
-		create_container(dc)
-	case STOP:
-		delete_container(dc)
-	}
+
+	return strings.Split(finalName, ":")[0]
 }
+
+func BuildRemoteExecutionInstanceName(pod *corev1.Pod, container *corev1.Container) string {
+	return pod.Namespace + "-" + string(pod.UID) + "-" + normalizeImageName(container.Image)
+}
+func BuildRemoteExecutionPodName(pod *corev1.Pod) string {
+	return pod.Namespace + "-" + string(pod.UID)
+}
+
+*/
+
+/*
+
+	// in case we have initContainers we need to stop main containers from executing for now ...
+	if len(pod.Spec.InitContainers) > 0 {
+		state = waitingState
+		hasInitContainers = true
+
+		// run init container with remote execution enabled
+		for i := range pod.Spec.InitContainers {
+			// MUST TODO: Run init containers sequentialy and NOT all-together
+			if err := RemoteExecution(p, ctx, api.SUBMIT, pod, &pod.Spec.InitContainers[i]); err != nil {
+				return errors.Wrap(err, "remote execution failed")
+			}
+		}
+
+		pod.Status = corev1.PodStatus{
+			Phase:     corev1.PodRunning,
+			HostIP:    "127.0.0.1",
+			PodIP:     "127.0.0.1",
+			StartTime: &now,
+			Conditions: []corev1.PodCondition{
+				{
+					Type:   corev1.PodInitialized,
+					Status: corev1.ConditionFalse,
+				},
+				{
+					Type:   corev1.PodReady,
+					Status: corev1.ConditionFalse,
+				},
+				{
+					Type:   corev1.PodScheduled,
+					Status: corev1.ConditionTrue,
+				},
+			},
+		}
+	} else {
+		pod.Status = corev1.PodStatus{
+			Phase:     corev1.PodRunning,
+			HostIP:    "127.0.0.1",
+			PodIP:     "127.0.0.1",
+			StartTime: &now,
+			Conditions: []corev1.PodCondition{
+				{
+					Type:   corev1.PodInitialized,
+					Status: corev1.ConditionTrue,
+				},
+				{
+					Type:   corev1.PodReady,
+					Status: corev1.ConditionTrue,
+				},
+				{
+					Type:   corev1.PodScheduled,
+					Status: corev1.ConditionTrue,
+				},
+			},
+		}
+	}
+	// deploy main containers
+	for i, container := range pod.Spec.Containers {
+		var err error
+
+		if !hasInitContainers {
+			if err := RemoteExecution(p, ctx, api.SUBMIT, pod, i); err != nil {
+				return errors.Wrapf(err, "cannot execute container '%s'", container.Name)
+			}
+		}
+		if err != nil {
+			pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, corev1.ContainerStatus{
+				Name:         container.Name,
+				Image:        container.Image,
+				Ready:        false,
+				RestartCount: 1,
+				State: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						Message:   "Could not reach remote cluster",
+						StartedAt: now,
+						ExitCode:  130,
+					},
+				},
+			})
+			pod.Status.Phase = corev1.PodFailed
+			continue
+		}
+		pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, corev1.ContainerStatus{
+			Name:         container.Name,
+			Image:        container.Image,
+			Ready:        !hasInitContainers,
+			RestartCount: 1,
+			State:        state,
+		})
+
+	}
+*/

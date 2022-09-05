@@ -19,17 +19,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/CARV-ICS-FORTH/knoc"
-	"github.com/sirupsen/logrus"
-	cli "github.com/virtual-kubelet/node-cli"
-	logruscli "github.com/virtual-kubelet/node-cli/logrus"
-	opencensuscli "github.com/virtual-kubelet/node-cli/opencensus"
-	"github.com/virtual-kubelet/node-cli/opts"
-	"github.com/virtual-kubelet/node-cli/provider"
-	"github.com/virtual-kubelet/virtual-kubelet/log"
-	logruslogger "github.com/virtual-kubelet/virtual-kubelet/log/logrus"
-	"github.com/virtual-kubelet/virtual-kubelet/trace"
-	"github.com/virtual-kubelet/virtual-kubelet/trace/opencensus"
+	"github.com/carv-ics-forth/knoc/provider"
 )
 
 var (
@@ -44,15 +34,6 @@ func main() {
 	ctx = cli.ContextWithCancelOnSignal(ctx)
 
 	logger := logrus.StandardLogger()
-	log.L = logruslogger.FromLogrus(logrus.NewEntry(logger))
-	logConfig := &logruscli.Config{LogLevel: "info"}
-
-	trace.T = opencensus.Adapter{}
-	traceConfig := opencensuscli.Config{
-		AvailableExporters: map[string]opencensuscli.ExporterInitFunc{
-			"ocagent": initOCAgent,
-		},
-	}
 
 	o := opts.New()
 	o.Provider = "knoc"
@@ -61,7 +42,7 @@ func main() {
 		cli.WithBaseOpts(o),
 		cli.WithCLIVersion(buildVersion, buildTime),
 		cli.WithProvider("knoc", func(cfg provider.InitConfig) (provider.Provider, error) {
-			return knoc.NewProvider(cfg.ConfigPath, cfg.NodeName, cfg.OperatingSystem, cfg.InternalIP, cfg.ResourceManager, cfg.DaemonPort)
+			return provider.NewProvider(cfg.ConfigPath, cfg.NodeName, cfg.OperatingSystem, cfg.InternalIP, cfg.ResourceManager, cfg.DaemonPort)
 		}),
 		cli.WithPersistentFlags(logConfig.FlagSet()),
 		cli.WithPersistentPreRunCallback(func() error {

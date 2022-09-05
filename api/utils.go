@@ -12,79 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.package common
 
-package common
+package api
 
 import (
 	"fmt"
-	"io"
-	"io/fs"
-	"os"
 	"strings"
 
-	"github.com/pkg/sftp"
-	"github.com/sfreiberg/simplessh"
 	v1 "k8s.io/api/core/v1"
 )
-
-func UploadData(client *simplessh.Client, data []byte, remote string, mode fs.FileMode) error {
-	c, err := sftp.NewClient(client.SSHClient)
-	if err != nil {
-		fmt.Println("Could not connect over sftp on the remote system ")
-		return err
-	}
-	defer c.Close()
-
-	remoteFile, err := c.Create(remote)
-	if err != nil {
-		fmt.Println("Could not create file over sftp on the remote system ")
-		return err
-	}
-
-	_, err = remoteFile.Write(data)
-
-	if err != nil {
-		fmt.Println("Could not write content on the remote system ")
-		return err
-	}
-	err = c.Chmod(remote, mode)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func UploadFile(client *simplessh.Client, local string, remote string, mode fs.FileMode) error {
-	c, err := sftp.NewClient(client.SSHClient)
-	if err != nil {
-		fmt.Println("Could not connect over sftp on the remote system ")
-		return err
-	}
-	defer c.Close()
-
-	localFile, err := os.Open(local)
-	if err != nil {
-		fmt.Println("Could not open local file in path: " + local)
-		return err
-	}
-	defer localFile.Close()
-
-	remoteFile, err := c.Create(remote)
-	if err != nil {
-		fmt.Println("Could not create file over sftp on the remote system ")
-		return err
-	}
-
-	_, err = io.Copy(remoteFile, localFile)
-	if err != nil {
-		fmt.Println("Could not copy file on the remote system: ")
-		return err
-	}
-	err = c.Chmod(remote, mode)
-	if err != nil {
-		return err
-	}
-	return nil
-}
 
 func NormalizeImageName(instance_name string) string {
 	instances_str := strings.Split(string(instance_name), "/")

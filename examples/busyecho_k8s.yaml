@@ -6,18 +6,18 @@ metadata:
     slurm-job.knoc.io/flags: "--job-name=testcoin"
 spec:
   containers:
-  - image: argoproj/argosay:v2
-    command:
-      - sleep 30
-    imagePullPolicy: Always
-    name: busyecho
+    - image: argoproj/argosay:v2
+      command:
+        - sleep 30
+      imagePullPolicy: Always
+      name: busyecho
   dnsPolicy: ClusterFirst
   nodeSelector:
     kubernetes.io/role: agent
     beta.kubernetes.io/os: linux
     type: virtual-kubelet
   tolerations:
-  - key: virtual-kubelet.io/provider
-    operator: Exists
-  - key: azure.com/aci
-    effect: NoSchedule
+    - key: virtual-kubelet.io/provider
+      operator: Exists
+    - key: azure.com/aci
+      effect: NoSchedule

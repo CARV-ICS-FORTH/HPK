@@ -12,70 +12,71 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.package main
 
-package knoc
+package provider
 
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"io/ioutil"
-	"math/rand"
 	"os"
 	"strings"
 	"time"
 
-	common "github.com/CARV-ICS-FORTH/knoc/common"
-
+	"github.com/carv-ics-forth/knoc/api"
+	"github.com/pkg/errors"
 	"github.com/sfreiberg/simplessh"
 	"github.com/virtual-kubelet/node-cli/manager"
 	"github.com/virtual-kubelet/virtual-kubelet/errdefs"
 	"github.com/virtual-kubelet/virtual-kubelet/log"
-	"github.com/virtual-kubelet/virtual-kubelet/node/api"
+	vkapi "github.com/virtual-kubelet/virtual-kubelet/node/api"
 	"github.com/virtual-kubelet/virtual-kubelet/trace"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	stats "k8s.io/kubernetes/pkg/kubelet/apis/stats/v1alpha1"
 )
 
-// KNOCProvider implements the virtual-kubelet provider interface and stores pods in memory.
-type KNOCProvider struct { // nolint:golint
+// Provider implements the virtual-kubelet provider interface and stores pods in memory.
+type Provider struct {
 	nodeName           string
 	operatingSystem    string
 	internalIP         string
 	daemonEndpointPort int32
-	pods               map[string]*v1.Pod
-	config             KNOCConfig
+	pods               map[string]*corev1.Pod
+	config             Config
 	startTime          time.Time
 	resourceManager    *manager.ResourceManager
-	notifier           func(*v1.Pod)
+	notifier           func(*corev1.Pod)
 }
-type KNOCConfig struct { // nolint:golint
+
+type Config struct {
 	CPU    string `json:"cpu,omitempty"`
 	Memory string `json:"memory,omitempty"`
 	Pods   string `json:"pods,omitempty"`
 }
 
 // NewProviderConfig creates a new KNOCV0Provider. KNOC legacy provider does not implement the new asynchronous podnotifier interface
-func NewProviderConfig(config KNOCConfig, nodeName, operatingSystem string, internalIP string, rm *manager.ResourceManager, daemonEndpointPort int32) (*KNOCProvider, error) {
+func NewProviderConfig(config Config, nodeName, operatingSystem string, internalIP string, rm *manager.ResourceManager, daemonEndpointPort int32) (*Provider, error) {
 	// set defaults
 	if config.CPU == "" {
-		config.CPU = common.DefaultCPUCapacity
+		config.CPU = api.DefaultCPUCapacity
 	}
+
 	if config.Memory == "" {
-		config.Memory = common.DefaultMemoryCapacity
+		config.Memory = api.DefaultMemoryCapacity
 	}
+
 	if config.Pods == "" {
-		config.Pods = common.DefaultPodCapacity
+		config.Pods = api.DefaultPodCapacity
 	}
-	provider := KNOCProvider{
+
+	provider := Provider{
 		nodeName:           nodeName,
 		operatingSystem:    operatingSystem,
 		internalIP:         internalIP,
 		daemonEndpointPort: daemonEndpointPort,
 		resourceManager:    rm,
-		pods:               make(map[string]*v1.Pod),
+		pods:               make(map[string]*corev1.Pod),
 		config:             config,
 		startTime:          time.Now(),
 	}
@@ -84,7 +85,7 @@ func NewProviderConfig(config KNOCConfig, nodeName, operatingSystem string, inte
 }
 
 // NewProvider creates a new Provider, which implements the PodNotifier interface
-func NewProvider(providerConfig, nodeName, operatingSystem string, internalIP string, rm *manager.ResourceManager, daemonEndpointPort int32) (*KNOCProvider, error) {
+func NewProvider(providerConfig, nodeName, operatingSystem string, internalIP string, rm *manager.ResourceManager, daemonEndpointPort int32) (*Provider, error) {
 	config, err := loadConfig(providerConfig, nodeName)
 	if err != nil {
 		return nil, err
@@ -93,153 +94,72 @@ func NewProvider(providerConfig, nodeName, operatingSystem string, internalIP st
 }
 
 // loadConfig loads the given json configuration files.
-func loadConfig(providerConfig, nodeName string) (config KNOCConfig, err error) {
-	data, err := ioutil.ReadFile(providerConfig)
+func loadConfig(providerConfig, nodeName string) (config Config, err error) {
+	data, err := os.ReadFile(providerConfig)
 	if err != nil {
-		return config, err
+		return config, errors.Wrapf(err, "cannot read file '%s'", providerConfig)
 	}
-	configMap := map[string]KNOCConfig{}
-	err = json.Unmarshal(data, &configMap)
-	if err != nil {
-		return config, err
+
+	configMap := map[string]Config{}
+
+	if err := json.Unmarshal(data, &configMap); err != nil {
+		return config, errors.Wrapf(err, "cannot unmarshal")
 	}
+
 	if _, exist := configMap[nodeName]; exist {
 		config = configMap[nodeName]
 		if config.CPU == "" {
-			config.CPU = common.DefaultCPUCapacity
+			config.CPU = api.DefaultCPUCapacity
 		}
 		if config.Memory == "" {
-			config.Memory = common.DefaultMemoryCapacity
+			config.Memory = api.DefaultMemoryCapacity
 		}
 		if config.Pods == "" {
-			config.Pods = common.DefaultPodCapacity
+			config.Pods = api.DefaultPodCapacity
 		}
 	}
 
-	if _, err = resource.ParseQuantity(config.CPU); err != nil {
-		return config, fmt.Errorf("Invalid CPU value %v", config.CPU)
+	if _, err := resource.ParseQuantity(config.CPU); err != nil {
+		return config, errors.Wrapf(err, "Invalid CPU Value")
 	}
-	if _, err = resource.ParseQuantity(config.Memory); err != nil {
-		return config, fmt.Errorf("Invalid memory value %v", config.Memory)
+	if _, err := resource.ParseQuantity(config.Memory); err != nil {
+		return config, errors.Wrapf(err, "Invalid Memory Value")
 	}
-	if _, err = resource.ParseQuantity(config.Pods); err != nil {
-		return config, fmt.Errorf("Invalid pods value %v", config.Pods)
+	if _, err := resource.ParseQuantity(config.Pods); err != nil {
+		return config, errors.Wrapf(err, "Invalid pods value %v", config.Pods)
 	}
 	return config, nil
 }
 
 // CreatePod accepts a Pod definition and stores it in memory.
-func (p *KNOCProvider) CreatePod(ctx context.Context, pod *v1.Pod) error {
-	ctx, span := trace.StartSpan(ctx, "CreatePod")
-	var hasInitContainers bool = false
-	var state v1.ContainerState
-	defer span.End()
-	distribution := "docker://"
+func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
+	var hasInitContainers = false
+	var state corev1.ContainerState
+
 	// Add the pod's coordinates to the current span.
-	ctx = addAttributes(ctx, span, common.NamespaceKey, pod.Namespace, common.NameKey, pod.Name)
-	key, err := common.BuildKey(pod)
+	key, err := api.BuildKey(pod)
 	if err != nil {
 		return err
 	}
+
+	if err := RemoteExecution(p, ctx, api.SUBMIT, pod); err != nil {
+		return errors.Wrapf(err, "Failed to Delete pod '%s'", pod.GetName())
+	}
+
 	now := metav1.NewTime(time.Now())
-	running_state := v1.ContainerState{
-		Running: &v1.ContainerStateRunning{
+
+	runningState := corev1.ContainerState{
+		Running: &corev1.ContainerStateRunning{
 			StartedAt: now,
 		},
 	}
-	waiting_state := v1.ContainerState{
-		Waiting: &v1.ContainerStateWaiting{
+
+	waitingState := corev1.ContainerState{
+		Waiting: &corev1.ContainerStateWaiting{
 			Reason: "Waiting for InitContainers",
 		},
 	}
-	state = running_state
-
-	// in case we have initContainers we need to stop main containers from executing for now ...
-	if len(pod.Spec.InitContainers) > 0 {
-		state = waiting_state
-		hasInitContainers = true
-		// run init container with remote execution enabled
-		for _, container := range pod.Spec.InitContainers {
-			// MUST TODO: Run init containers sequentialy and NOT all-together
-			RemoteExecution(p, ctx, common.CREATE, distribution+container.Image, pod, container)
-		}
-
-		pod.Status = v1.PodStatus{
-			Phase:     v1.PodRunning,
-			HostIP:    "127.0.0.1",
-			PodIP:     "127.0.0.1",
-			StartTime: &now,
-			Conditions: []v1.PodCondition{
-				{
-					Type:   v1.PodInitialized,
-					Status: v1.ConditionFalse,
-				},
-				{
-					Type:   v1.PodReady,
-					Status: v1.ConditionFalse,
-				},
-				{
-					Type:   v1.PodScheduled,
-					Status: v1.ConditionTrue,
-				},
-			},
-		}
-	} else {
-		pod.Status = v1.PodStatus{
-			Phase:     v1.PodRunning,
-			HostIP:    "127.0.0.1",
-			PodIP:     "127.0.0.1",
-			StartTime: &now,
-			Conditions: []v1.PodCondition{
-				{
-					Type:   v1.PodInitialized,
-					Status: v1.ConditionTrue,
-				},
-				{
-					Type:   v1.PodReady,
-					Status: v1.ConditionTrue,
-				},
-				{
-					Type:   v1.PodScheduled,
-					Status: v1.ConditionTrue,
-				},
-			},
-		}
-	}
-	// deploy main containers
-	for _, container := range pod.Spec.Containers {
-		var err error
-
-		if !hasInitContainers {
-			err = RemoteExecution(p, ctx, common.CREATE, distribution+container.Image, pod, container)
-
-		}
-		if err != nil {
-			pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, v1.ContainerStatus{
-				Name:         container.Name,
-				Image:        container.Image,
-				Ready:        false,
-				RestartCount: 1,
-				State: v1.ContainerState{
-					Terminated: &v1.ContainerStateTerminated{
-						Message:   "Could not reach remote cluster",
-						StartedAt: now,
-						ExitCode:  130,
-					},
-				},
-			})
-			pod.Status.Phase = v1.PodFailed
-			continue
-		}
-		pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, v1.ContainerStatus{
-			Name:         container.Name,
-			Image:        container.Image,
-			Ready:        !hasInitContainers,
-			RestartCount: 1,
-			State:        state,
-		})
-
-	}
+	state = runningState
 
 	p.pods[key] = pod
 	p.notifier(pod)
@@ -248,16 +168,16 @@ func (p *KNOCProvider) CreatePod(ctx context.Context, pod *v1.Pod) error {
 }
 
 // UpdatePod accepts a Pod definition and updates its reference.
-func (p *KNOCProvider) UpdatePod(ctx context.Context, pod *v1.Pod) error {
+func (p *Provider) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	ctx, span := trace.StartSpan(ctx, "UpdatePod")
 	defer span.End()
 
 	// Add the pod's coordinates to the current span.
-	ctx = addAttributes(ctx, span, common.NamespaceKey, pod.Namespace, common.NameKey, pod.Name)
+	ctx = addAttributes(ctx, span, api.NamespaceKey, pod.Namespace, api.NameKey, pod.Name)
 
 	log.G(ctx).Infof("receive UpdatePod %q", pod.Name)
 
-	key, err := common.BuildKey(pod)
+	key, err := api.BuildKey(pod)
 	if err != nil {
 		return err
 	}
@@ -269,16 +189,16 @@ func (p *KNOCProvider) UpdatePod(ctx context.Context, pod *v1.Pod) error {
 }
 
 // DeletePod deletes the specified pod out of memory.
-func (p *KNOCProvider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
+func (p *Provider) DeletePod(ctx context.Context, pod *corev1.Pod) (err error) {
 	ctx, span := trace.StartSpan(ctx, "DeletePod")
 	defer span.End()
 
 	// Add the pod's coordinates to the current span.
-	ctx = addAttributes(ctx, span, common.NamespaceKey, pod.Namespace, common.NameKey, pod.Name)
+	ctx = addAttributes(ctx, span, api.NamespaceKey, pod.Namespace, api.NameKey, pod.Name)
 
 	log.G(ctx).Infof("receive DeletePod %q", pod.Name)
 
-	key, err := common.BuildKey(pod)
+	key, err := api.BuildKey(pod)
 	if err != nil {
 		return err
 	}
@@ -288,34 +208,33 @@ func (p *KNOCProvider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 	}
 
 	now := metav1.Now()
-	pod.Status.Phase = v1.PodSucceeded
+	pod.Status.Phase = corev1.PodSucceeded
 	pod.Status.Reason = "KNOCProviderPodDeleted"
 
-	for _, container := range pod.Spec.Containers {
-		RemoteExecution(p, ctx, common.DELETE, "", pod, container)
+	if err := RemoteExecution(p, ctx, api.DELETE, pod); err != nil {
+		return errors.Wrapf(err, "Failed to Delete pod '%s'", pod.GetName())
 	}
-	for _, container := range pod.Spec.InitContainers {
-		RemoteExecution(p, ctx, common.DELETE, "", pod, container)
-	}
-	for idx := range pod.Status.ContainerStatuses {
-		pod.Status.ContainerStatuses[idx].Ready = false
-		pod.Status.ContainerStatuses[idx].State = v1.ContainerState{
-			Terminated: &v1.ContainerStateTerminated{
+
+	for i := range pod.Status.ContainerStatuses {
+		pod.Status.ContainerStatuses[i].Ready = false
+		pod.Status.ContainerStatuses[i].State = corev1.ContainerState{
+			Terminated: &corev1.ContainerStateTerminated{
 				Message:    "KNOC provider terminated container upon deletion",
 				FinishedAt: now,
 				Reason:     "KNOCProviderPodContainerDeleted",
-				// StartedAt:  pod.Status.ContainerStatuses[idx].State.Running.StartedAt,
+				// StartedAt:  pod.Status.ContainerStatuses[i].State.Running.StartedAt,
 			},
 		}
 	}
+
 	for idx := range pod.Status.InitContainerStatuses {
 		pod.Status.InitContainerStatuses[idx].Ready = false
-		pod.Status.InitContainerStatuses[idx].State = v1.ContainerState{
-			Terminated: &v1.ContainerStateTerminated{
+		pod.Status.InitContainerStatuses[idx].State = corev1.ContainerState{
+			Terminated: &corev1.ContainerStateTerminated{
 				Message:    "KNOC provider terminated container upon deletion",
 				FinishedAt: now,
 				Reason:     "KNOCProviderPodContainerDeleted",
-				// StartedAt:  pod.Status.InitContainerStatuses[idx].State.Running.StartedAt,
+				// StartedAt:  pod.Status.InitContainerStatuses[i].State.Running.StartedAt,
 			},
 		}
 	}
@@ -327,7 +246,7 @@ func (p *KNOCProvider) DeletePod(ctx context.Context, pod *v1.Pod) (err error) {
 }
 
 // GetPod returns a pod by name that is stored in memory.
-func (p *KNOCProvider) GetPod(ctx context.Context, namespace, name string) (pod *v1.Pod, err error) {
+func (p *Provider) GetPod(ctx context.Context, namespace, name string) (pod *corev1.Pod, err error) {
 	ctx, span := trace.StartSpan(ctx, "GetPod")
 	defer func() {
 		span.SetStatus(err)
@@ -335,11 +254,11 @@ func (p *KNOCProvider) GetPod(ctx context.Context, namespace, name string) (pod 
 	}()
 
 	// Add the pod's coordinates to the current span.
-	ctx = addAttributes(ctx, span, common.NamespaceKey, namespace, common.NameKey, name)
+	ctx = addAttributes(ctx, span, api.NamespaceKey, namespace, api.NameKey, name)
 
 	log.G(ctx).Infof("receive GetPod %q", name)
 
-	key, err := common.BuildKeyFromNames(namespace, name)
+	key, err := api.BuildKeyFromNames(namespace, name)
 	if err != nil {
 		return nil, err
 	}
@@ -351,12 +270,12 @@ func (p *KNOCProvider) GetPod(ctx context.Context, namespace, name string) (pod 
 }
 
 // GetContainerLogs retrieves the logs of a container by name from the provider.
-func (p *KNOCProvider) GetContainerLogs(ctx context.Context, namespace, podName, containerName string, opts api.ContainerLogOpts) (io.ReadCloser, error) {
+func (p *Provider) GetContainerLogs(ctx context.Context, namespace, podName, containerName string, _ vkapi.ContainerLogOpts) (io.ReadCloser, error) {
 	ctx, span := trace.StartSpan(ctx, "GetContainerLogs")
 	defer span.End()
 
 	// Add pod and container attributes to the current span.
-	ctx = addAttributes(ctx, span, common.NamespaceKey, namespace, common.NameKey, podName, common.ContainerNameKey, containerName)
+	ctx = addAttributes(ctx, span, api.NamespaceKey, namespace, api.NameKey, podName, api.ContainerNameKey, containerName)
 
 	log.G(ctx).Infof("receive GetContainerLogs %q", podName)
 	client, err := simplessh.ConnectWithKey(os.Getenv("REMOTE_HOST")+":"+os.Getenv("REMOTE_PORT"), os.Getenv("REMOTE_USER"), os.Getenv("REMOTE_KEY"))
@@ -364,51 +283,56 @@ func (p *KNOCProvider) GetContainerLogs(ctx context.Context, namespace, podName,
 		panic(err)
 	}
 	defer client.Close()
-	key, err := common.BuildKeyFromNames(namespace, podName)
+	key, err := api.BuildKeyFromNames(namespace, podName)
 	if err != nil {
 		return nil, err
 	}
 
 	pod := p.pods[key]
-	instance_name := ""
-	for iter := range pod.Spec.InitContainers {
-		if pod.Spec.InitContainers[iter].Name == containerName {
-			instance_name = BuildRemoteExecutionInstanceName(pod.Spec.InitContainers[iter], pod)
+	instanceName := ""
+
+	for i := range pod.Spec.InitContainers {
+		if pod.Spec.InitContainers[i].Name == containerName {
+			instanceName = BuildRemoteExecutionInstanceName(&pod.Spec.InitContainers[i], pod)
 		}
 	}
-	for iter := range pod.Spec.Containers {
-		if pod.Spec.Containers[iter].Name == containerName {
-			instance_name = BuildRemoteExecutionInstanceName(pod.Spec.Containers[iter], pod)
+
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name == containerName {
+			instanceName = BuildRemoteExecutionInstanceName(&pod.Spec.Containers[i], pod)
 		}
 	}
 	// in case we dont find it or if it hasnt run yet we should return empty string
-	output, _ := client.Exec("cat " + ".knoc/" + instance_name + ".out ")
+	output, _ := client.Exec("cat " + ".knoc/" + instanceName + ".out ")
 
 	return ioutil.NopCloser(strings.NewReader(string(output))), nil
 }
 
 // RunInContainer executes a command in a container in the pod, copying data
 // between in/out/err and the container's stdin/stdout/stderr.
-func (p *KNOCProvider) RunInContainer(ctx context.Context, namespace, name, container string, cmd []string, attach api.AttachIO) error {
+func (p *Provider) RunInContainer(ctx context.Context, namespace, name, container string, cmd []string, attach vkapi.AttachIO) error {
 	client, err := simplessh.ConnectWithKey(os.Getenv("REMOTE_HOST")+":"+os.Getenv("REMOTE_PORT"), os.Getenv("REMOTE_USER"), os.Getenv("REMOTE_KEY"))
 	if err != nil {
-		panic(err)
+		return errors.Wrapf(err, "connect with key")
 	}
+
 	defer client.Close()
 
-	client.Exec(strings.Join(cmd, " "))
-	log.G(context.TODO()).Infof("receive ExecInContainer %q", strings.Join(cmd, " "))
+	if _, err := client.Exec(strings.Join(cmd, " ")); err != nil {
+		return errors.Wrapf(err, "run in container")
+	}
+
 	return nil
 }
 
 // GetPodStatus returns the status of a pod by name that is "running".
 // returns nil if a pod by that name is not found.
-func (p *KNOCProvider) GetPodStatus(ctx context.Context, namespace, name string) (*v1.PodStatus, error) {
+func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*corev1.PodStatus, error) {
 	ctx, span := trace.StartSpan(ctx, "GetPodStatus")
 	defer span.End()
 
 	// Add namespace and name as attributes to the current span.
-	ctx = addAttributes(ctx, span, common.NamespaceKey, namespace, common.NameKey, name)
+	ctx = addAttributes(ctx, span, api.NamespaceKey, namespace, api.NameKey, name)
 
 	log.G(ctx).Infof("receive GetPodStatus %q", name)
 
@@ -421,13 +345,13 @@ func (p *KNOCProvider) GetPodStatus(ctx context.Context, namespace, name string)
 }
 
 // GetPods returns a list of all pods known to be "running".
-func (p *KNOCProvider) GetPods(ctx context.Context) ([]*v1.Pod, error) {
+func (p *Provider) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
 	ctx, span := trace.StartSpan(ctx, "GetPods")
 	defer span.End()
 
 	log.G(ctx).Info("receive GetPods")
 
-	var pods []*v1.Pod
+	var pods []*corev1.Pod
 
 	for _, pod := range p.pods {
 		pods = append(pods, pod)
@@ -436,7 +360,7 @@ func (p *KNOCProvider) GetPods(ctx context.Context) ([]*v1.Pod, error) {
 	return pods, nil
 }
 
-func (p *KNOCProvider) ConfigureNode(ctx context.Context, n *v1.Node) { // nolint:golint
+func (p *Provider) ConfigureNode(ctx context.Context, n *corev1.Node) { // nolint:golint
 	ctx, span := trace.StartSpan(ctx, "KNOC.ConfigureNode") // nolint:staticcheck,ineffassign
 	defer span.End()
 
@@ -445,6 +369,7 @@ func (p *KNOCProvider) ConfigureNode(ctx context.Context, n *v1.Node) { // nolin
 	n.Status.Conditions = p.nodeConditions()
 	n.Status.Addresses = p.nodeAddresses()
 	n.Status.DaemonEndpoints = p.nodeDaemonEndpoints()
+
 	os := p.operatingSystem
 	if os == "" {
 		os = "Linux"
@@ -456,8 +381,8 @@ func (p *KNOCProvider) ConfigureNode(ctx context.Context, n *v1.Node) { // nolin
 }
 
 // Capacity returns a resource list containing the capacity limits.
-func (p *KNOCProvider) capacity() v1.ResourceList {
-	return v1.ResourceList{
+func (p *Provider) capacity() corev1.ResourceList {
+	return corev1.ResourceList{
 		"cpu":    resource.MustParse(p.config.CPU),
 		"memory": resource.MustParse(p.config.Memory),
 		"pods":   resource.MustParse(p.config.Pods),
@@ -466,12 +391,12 @@ func (p *KNOCProvider) capacity() v1.ResourceList {
 
 // NodeConditions returns a list of conditions (Ready, OutOfDisk, etc), for updates to the node status
 // within Kubernetes.
-func (p *KNOCProvider) nodeConditions() []v1.NodeCondition {
+func (p *Provider) nodeConditions() []corev1.NodeCondition {
 	// TODO: Make this configurable
-	return []v1.NodeCondition{
+	return []corev1.NodeCondition{
 		{
 			Type:               "Ready",
-			Status:             v1.ConditionTrue,
+			Status:             corev1.ConditionTrue,
 			LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
 			Reason:             "KubeletPending",
@@ -479,7 +404,7 @@ func (p *KNOCProvider) nodeConditions() []v1.NodeCondition {
 		},
 		{
 			Type:               "OutOfDisk",
-			Status:             v1.ConditionFalse,
+			Status:             corev1.ConditionFalse,
 			LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
 			Reason:             "KubeletHasSufficientDisk",
@@ -487,7 +412,7 @@ func (p *KNOCProvider) nodeConditions() []v1.NodeCondition {
 		},
 		{
 			Type:               "MemoryPressure",
-			Status:             v1.ConditionFalse,
+			Status:             corev1.ConditionFalse,
 			LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
 			Reason:             "KubeletHasSufficientMemory",
@@ -495,7 +420,7 @@ func (p *KNOCProvider) nodeConditions() []v1.NodeCondition {
 		},
 		{
 			Type:               "DiskPressure",
-			Status:             v1.ConditionFalse,
+			Status:             corev1.ConditionFalse,
 			LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
 			Reason:             "KubeletHasNoDiskPressure",
@@ -503,7 +428,7 @@ func (p *KNOCProvider) nodeConditions() []v1.NodeCondition {
 		},
 		{
 			Type:               "NetworkUnavailable",
-			Status:             v1.ConditionFalse,
+			Status:             corev1.ConditionFalse,
 			LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
 			Reason:             "RouteCreated",
@@ -515,8 +440,8 @@ func (p *KNOCProvider) nodeConditions() []v1.NodeCondition {
 
 // NodeAddresses returns a list of addresses for the node status
 // within Kubernetes.
-func (p *KNOCProvider) nodeAddresses() []v1.NodeAddress {
-	return []v1.NodeAddress{
+func (p *Provider) nodeAddresses() []corev1.NodeAddress {
+	return []corev1.NodeAddress{
 		{
 			Type:    "InternalIP",
 			Address: p.internalIP,
@@ -526,18 +451,19 @@ func (p *KNOCProvider) nodeAddresses() []v1.NodeAddress {
 
 // NodeDaemonEndpoints returns NodeDaemonEndpoints for the node status
 // within Kubernetes.
-func (p *KNOCProvider) nodeDaemonEndpoints() v1.NodeDaemonEndpoints {
-	return v1.NodeDaemonEndpoints{
-		KubeletEndpoint: v1.DaemonEndpoint{
+func (p *Provider) nodeDaemonEndpoints() corev1.NodeDaemonEndpoints {
+	return corev1.NodeDaemonEndpoints{
+		KubeletEndpoint: corev1.DaemonEndpoint{
 			Port: p.daemonEndpointPort,
 		},
 	}
 }
 
+/*
 // GetStatsSummary returns dummy stats for all pods known by this provider.
-func (p *KNOCProvider) GetStatsSummary(ctx context.Context) (*stats.Summary, error) {
+func (p *Provider) GetStatsSummary(ctx context.Context) (*stats.Summary, error) {
 	var span trace.Span
-	ctx, span = trace.StartSpan(ctx, "GetStatsSummary") //nolint: ineffassign,staticcheck
+	ctx, span = trace.StartSpan(ctx, "GetStatsSummary") // nolint: ineffassign,staticcheck
 	defer span.End()
 
 	// Grab the current timestamp so we can report it as the time the stats were generated.
@@ -612,14 +538,16 @@ func (p *KNOCProvider) GetStatsSummary(ctx context.Context) (*stats.Summary, err
 	return res, nil
 }
 
+*/
+
 // NotifyPods is called to set a pod notifier callback function. This should be called before any operations are done
 // within the provider.
-func (p *KNOCProvider) NotifyPods(ctx context.Context, f func(*v1.Pod)) {
+func (p *Provider) NotifyPods(ctx context.Context, f func(*corev1.Pod)) {
 	p.notifier = f
 	go p.statusLoop(ctx)
 }
 
-func (p *KNOCProvider) statusLoop(ctx context.Context) {
+func (p *Provider) statusLoop(ctx context.Context) {
 	t := time.NewTimer(5 * time.Second)
 	if !t.Stop() {
 		<-t.C
@@ -637,47 +565,48 @@ func (p *KNOCProvider) statusLoop(ctx context.Context) {
 	}
 }
 
-func (p *KNOCProvider) initContainersActive(pod *v1.Pod) bool {
-	init_containers_active := len(pod.Spec.InitContainers)
+func (p *Provider) activeInitContainers(pod *corev1.Pod) bool {
+	activeInitContainers := len(pod.Spec.InitContainers)
 	for idx, _ := range pod.Spec.InitContainers {
 		if pod.Status.InitContainerStatuses[idx].State.Terminated != nil {
-			init_containers_active--
+			activeInitContainers--
 		}
 	}
-	return init_containers_active != 0
+	return activeInitContainers != 0
 }
 
-func (p *KNOCProvider) startMainContainers(ctx context.Context, pod *v1.Pod) {
-	distribution := "docker://"
+func (p *Provider) startMainContainers(ctx context.Context, pod *corev1.Pod) {
 	now := metav1.NewTime(time.Now())
 
-	for idx, container := range pod.Spec.Containers {
-		err := RemoteExecution(p, ctx, common.CREATE, distribution+container.Image, pod, container)
+	for i := range pod.Spec.Containers {
+		container := &pod.Spec.Containers[i]
+
+		err := RemoteExecution(p, ctx, api.SUBMIT, pod, container)
 
 		if err != nil {
-			pod.Status.ContainerStatuses[idx] = v1.ContainerStatus{
+			pod.Status.ContainerStatuses[i] = corev1.ContainerStatus{
 				Name:         container.Name,
 				Image:        container.Image,
 				Ready:        false,
 				RestartCount: 1,
-				State: v1.ContainerState{
-					Terminated: &v1.ContainerStateTerminated{
+				State: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
 						Message:   "Could not reach remote cluster",
 						StartedAt: now,
 						ExitCode:  130,
 					},
 				},
 			}
-			pod.Status.Phase = v1.PodFailed
+			pod.Status.Phase = corev1.PodFailed
 			continue
 		}
-		pod.Status.ContainerStatuses[idx] = v1.ContainerStatus{
+		pod.Status.ContainerStatuses[i] = corev1.ContainerStatus{
 			Name:         container.Name,
 			Image:        container.Image,
 			Ready:        true,
 			RestartCount: 1,
-			State: v1.ContainerState{
-				Running: &v1.ContainerStateRunning{
+			State: corev1.ContainerState{
+				Running: &corev1.ContainerStateRunning{
 					StartedAt: now,
 				},
 			},

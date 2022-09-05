@@ -19,7 +19,7 @@ knoc: {
   }
 }
 
-imagePullSecrets: []
+imagePullSecrets: [ ]
 nameOverride: ""
 fullnameOverride: ""
 
@@ -27,7 +27,7 @@ singleNamespace: false
 
 serviceAccount:
   create: true
-  annotations: {}
+  annotations: { }
   name: "knoc"
 
 # podAnnotations: {}

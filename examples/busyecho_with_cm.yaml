@@ -4,16 +4,16 @@ metadata:
   name: busyecho3
 spec:
   containers:
-  - image: argoproj/argosay:v2
-    command: 
-      - "sleep"
-    args:
-      - "30"
-    imagePullPolicy: Always
-    name: busyecho
-    volumeMounts:
-      - name: config-volume
-        mountPath: /etc/config
+    - image: argoproj/argosay:v2
+      command:
+        - "sleep"
+      args:
+        - "30"
+      imagePullPolicy: Always
+      name: busyecho
+      volumeMounts:
+        - name: config-volume
+          mountPath: /etc/config
   volumes:
     - name: config-volume
       configMap:

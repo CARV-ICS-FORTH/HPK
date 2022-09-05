@@ -4,62 +4,62 @@ metadata:
   name: vkubelet-knoc-0
 spec:
   containers:
-  - name: vkubelet-knoc-0
-    image: carvicsforth/knoc
-    # "IfNotPresent" is used to prevent Minikube from trying to pull from the registry (and failing) in the first place.
-    imagePullPolicy: IfNotPresent
-    args:
-    - /virtual-kubelet
-    - --nodename
-    - vkubelet-knoc-0
-    - --provider
-    - knoc
-    - --provider-config
-    - /vkubelet-knoc-0-cfg.json
-    - --startup-timeout
-    - 10s
-    - --klog.v
-    - "2"
-    - --klog.logtostderr
-    - --log-level
-    - info
-    volumeMounts:
-      - name: kubeconfig-setup
-        mountPath: /home/carv/scripts/
-    env:
-    - name: KUBELET_PORT
-      value: "10250"
-    - name: VKUBELET_POD_IP
-      valueFrom:
-        fieldRef:
-          fieldPath: status.podIP
-    - name: REMOTE_USER
-      valueFrom:
-        secretKeyRef:
-          name: remote-secret
-          key: remote_user
-    - name: REMOTE_KEY
-      valueFrom:
-        secretKeyRef:
-          name: remote-secret
-          key: ssh-privatekey
-    - name: REMOTE_HOST
-      valueFrom:
-        secretKeyRef:
-          name: remote-secret
-          key: host
-    - name: REMOTE_PORT
-      valueFrom:
-        secretKeyRef:
-          name: remote-secret
-          key: port
-    ports:
-    - name: metrics
-      containerPort: 10255
-    readinessProbe:
-      httpGet:
-        path: /stats/summary
-        port: metrics
+    - name: vkubelet-knoc-0
+      image: carvicsforth/knoc
+      # "IfNotPresent" is used to prevent Minikube from trying to pull from the registry (and failing) in the first place.
+      imagePullPolicy: IfNotPresent
+      args:
+        - /virtual-kubelet
+        - --nodename
+        - vkubelet-knoc-0
+        - --provider
+        - knoc
+        - --provider-config
+        - /vkubelet-knoc-0-cfg.json
+        - --startup-timeout
+        - 10s
+        - --klog.v
+        - "2"
+        - --klog.logtostderr
+        - --log-level
+        - info
+      volumeMounts:
+        - name: kubeconfig-setup
+          mountPath: /home/carv/scripts/
+      env:
+        - name: KUBELET_PORT
+          value: "10250"
+        - name: VKUBELET_POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: REMOTE_USER
+          valueFrom:
+            secretKeyRef:
+              name: remote-secret
+              key: remote_user
+        - name: REMOTE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: remote-secret
+              key: ssh-privatekey
+        - name: REMOTE_HOST
+          valueFrom:
+            secretKeyRef:
+              name: remote-secret
+              key: host
+        - name: REMOTE_PORT
+          valueFrom:
+            secretKeyRef:
+              name: remote-secret
+              key: port
+      ports:
+        - name: metrics
+          containerPort: 10255
+      readinessProbe:
+        httpGet:
+          path: /stats/summary
+          port: metrics
   serviceAccountName: knoc
   volumes:
     - name: kubeconfig-setup
