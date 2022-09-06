@@ -81,3 +81,19 @@ type DoorContainer struct {
 		WorkingDir string   `json:"workingDir,omitempty" `
 	*/
 }
+
+// Defaults for root command options
+const (
+	DefaultNodeName             = "virtual-kubelet"
+	DefaultInformerResyncPeriod = 1 * time.Minute
+	DefaultMetricsAddr          = ":10255"
+	DefaultListenPort           = 10250
+	DefaultPodSyncWorkers       = 10
+	DefaultKubeNamespace        = corev1.NamespaceAll
+)
+
+var (
+	BuildVersion = "N/A"
+	BuildTime    = "N/A"
+	K8sVersion   = "v1.25.0"
+)

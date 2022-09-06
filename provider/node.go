@@ -18,13 +18,14 @@ import (
 	"context"
 	"runtime"
 
+	"github.com/carv-ics-forth/knoc/api"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // CreateVirtualNode builds a kubernetes node object from a provider
 // This is a temporary solution until node stuff actually split off from the provider interface itself.
-func (p *Provider) CreateVirtualNode(ctx context.Context, name string, version string) *corev1.Node {
+func (p *Provider) CreateVirtualNode(ctx context.Context, name string) *corev1.Node {
 	taints := make([]corev1.Taint, 0)
 
 	/*
@@ -52,7 +53,7 @@ func (p *Provider) CreateVirtualNode(ctx context.Context, name string, version s
 			NodeInfo: corev1.NodeSystemInfo{
 				OperatingSystem: runtime.GOOS,
 				Architecture:    runtime.GOARCH,
-				KubeletVersion:  version,
+				KubeletVersion:  api.BuildVersion,
 			},
 			Capacity:        p.Capacity(ctx),
 			Allocatable:     p.Capacity(ctx),

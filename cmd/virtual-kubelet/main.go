@@ -18,9 +18,9 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 
+	"github.com/carv-ics-forth/knoc/api"
 	"github.com/carv-ics-forth/knoc/cmd/virtual-kubelet/commands/providers"
 	"github.com/carv-ics-forth/knoc/cmd/virtual-kubelet/commands/root"
 	"github.com/carv-ics-forth/knoc/cmd/virtual-kubelet/commands/version"
@@ -28,12 +28,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/virtual-kubelet/virtual-kubelet/log"
-)
-
-var (
-	buildVersion = "N/A"
-	buildTime    = "N/A"
-	k8sVersion   = "v1.25.0"
 )
 
 func main() {
@@ -47,18 +41,13 @@ func main() {
 	}()
 
 	var opts root.Opts
-	optsErr := root.SetDefaultOpts(&opts)
-	opts.Version = strings.Join([]string{k8sVersion, "knoc", buildVersion}, "-")
 
 	rootCmd := root.NewCommand(ctx, filepath.Base(os.Args[0]), opts)
-	rootCmd.AddCommand(version.NewCommand(buildVersion, buildTime), providers.NewCommand())
+	rootCmd.AddCommand(version.NewCommand(api.BuildVersion, api.BuildTime), providers.NewCommand())
 	preRun := rootCmd.PreRunE
 
 	var logLevel string
 	rootCmd.PreRunE = func(cmd *cobra.Command, args []string) error {
-		if optsErr != nil {
-			return optsErr
-		}
 		if preRun != nil {
 			return preRun(cmd, args)
 		}

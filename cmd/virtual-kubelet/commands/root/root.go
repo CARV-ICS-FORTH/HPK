@@ -34,9 +34,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/record"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
@@ -50,6 +49,10 @@ func NewCommand(ctx context.Context, name string, c Opts) *cobra.Command {
 backend implementation allowing users to create kubernetes nodes without running the kubelet.
 This allows users to schedule kubernetes workloads on nodes that aren't running Kubernetes.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if c.PodSyncWorkers == 0 {
+				return errdefs.InvalidInput("pod sync workers must be greater than 0")
+			}
+
 			return runRootCommand(ctx, c)
 		},
 	}
@@ -58,25 +61,20 @@ This allows users to schedule kubernetes workloads on nodes that aren't running 
 	return cmd
 }
 
-func runRootCommand(parentCtx context.Context, c Opts) error {
-
+func runRootCommand(ctx context.Context, c Opts) error {
 	log := zap.New(zap.UseDevMode(true)).WithValues(
-		"operatingSystem", c.OperatingSystem,
 		"node", c.NodeName,
 		"watchedNamespace", c.KubeNamespace,
 	)
 
-	ctx, cancel := context.WithCancel(parentCtx)
-	defer cancel()
-
-	if c.PodSyncWorkers == 0 {
-		return errdefs.InvalidInput("pod sync workers must be greater than 0")
-	}
-
-	client, err := newClient(c.KubeConfigPath)
+	client, err := kubernetes.NewForConfig(ctrl.GetConfigOrDie())
 	if err != nil {
 		return err
 	}
+
+	/*
+		Create Informers for interaction with Kubernetes API
+	*/
 
 	// Create a shared informer factory for Kubernetes pods in the current namespace (if specified) and scheduled to the current node.
 	podInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(
@@ -86,36 +84,44 @@ func runRootCommand(parentCtx context.Context, c Opts) error {
 		kubeinformers.WithTweakListOptions(func(options *metav1.ListOptions) {
 			options.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", c.NodeName).String()
 		}))
-	podInformer := podInformerFactory.Core().V1().Pods()
 
 	// Create another shared informer factory for Kubernetes secrets and configmaps (not subject to any selectors).
+	podInformer := podInformerFactory.Core().V1().Pods()
+
 	scmInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(client, c.InformerResyncPeriod)
-	// Create a secret informer and a config map informer so we can pass their listers to the resource manager.
-	secretInformer := scmInformerFactory.Core().V1().Secrets()
-	configMapInformer := scmInformerFactory.Core().V1().ConfigMaps()
-	serviceInformer := scmInformerFactory.Core().V1().Services()
 
 	go podInformerFactory.Start(ctx.Done())
 	go scmInformerFactory.Start(ctx.Done())
 
-	apiConfig, err := getAPIConfig(c)
-	if err != nil {
-		return err
-	}
-
+	/*
+		Register the Provisioner of Virtual Nodes
+	*/
 	p, err := provider.NewProvider(provider.InitConfig{
-		ConfigPath:      c.ProviderConfigPath,
-		NodeName:        c.NodeName,
-		OperatingSystem: c.OperatingSystem,
-		InternalIP:      os.Getenv("VKUBELET_POD_IP"),
-		DaemonPort:      c.ListenPort,
+		ConfigPath: c.ProviderConfigPath,
+		NodeName:   c.NodeName,
+		InternalIP: os.Getenv("VKUBELET_POD_IP"),
+		DaemonPort: c.ListenPort,
 	})
 
 	if err != nil {
 		return err
 	}
 
-	pNode := p.CreateVirtualNode(ctx, c.NodeName, c.Version)
+	apiConfig, err := getAPIConfig(c)
+	if err != nil {
+		return err
+	}
+
+	cancelHTTP, err := setupHTTPServer(ctx, p, apiConfig)
+	if err != nil {
+		return err
+	}
+	defer cancelHTTP()
+
+	/*
+		Create a New Virtual Node and prepare the Controller for it
+	*/
+	pNode := p.CreateVirtualNode(ctx, c.NodeName)
 
 	nodeControllerOpts := []node.NodeControllerOpt{
 		node.WithNodeStatusUpdateErrorHandler(func(ctx context.Context, err error) error {
@@ -127,8 +133,7 @@ func runRootCommand(parentCtx context.Context, c Opts) error {
 			newNode := pNode.DeepCopy()
 			newNode.ResourceVersion = ""
 
-			_, err = client.CoreV1().Nodes().Create(ctx, newNode, metav1.CreateOptions{})
-			if err != nil {
+			if _, err := client.CoreV1().Nodes().Create(ctx, newNode, metav1.CreateOptions{}); err != nil {
 				return err
 			}
 
@@ -142,43 +147,40 @@ func runRootCommand(parentCtx context.Context, c Opts) error {
 		nodeControllerOpts = append(nodeControllerOpts, node.WithNodeEnableLeaseV1(leaseClient, 0))
 	}
 
-	nodeRunner, err := node.NewNodeController(
+	nodeController, err := node.NewNodeController(
 		node.NaiveNodeProvider{},
 		pNode,
 		client.CoreV1().Nodes(),
 		nodeControllerOpts...,
 	)
 	if err != nil {
-		log.Error(err, "cannot start node controller")
-		os.Exit(-1)
+		return errors.Wrap(err, "cannot start node controller")
 	}
 
 	eb := record.NewBroadcaster()
 	eb.StartLogging(log.Info)
 	eb.StartRecordingToSink(&corev1client.EventSinkImpl{Interface: client.CoreV1().Events(c.KubeNamespace)})
 
+	/*
+		Run the Controller for Virtual Nodes.
+	*/
+
 	pc, err := node.NewPodController(node.PodControllerConfig{
 		PodClient:         client.CoreV1(),
 		PodInformer:       podInformer,
 		EventRecorder:     eb.NewRecorder(scheme.Scheme, corev1.EventSource{Component: path.Join(pNode.Name, "pod-controller")}),
 		Provider:          p,
-		SecretInformer:    secretInformer,
-		ConfigMapInformer: configMapInformer,
-		ServiceInformer:   serviceInformer,
+		SecretInformer:    scmInformerFactory.Core().V1().Secrets(),
+		ConfigMapInformer: scmInformerFactory.Core().V1().ConfigMaps(),
+		ServiceInformer:   scmInformerFactory.Core().V1().Services(),
 	})
 	if err != nil {
 		return errors.Wrap(err, "error setting up pod controller")
 	}
 
-	cancelHTTP, err := setupHTTPServer(ctx, p, apiConfig)
-	if err != nil {
-		return err
-	}
-	defer cancelHTTP()
-
 	go func() {
 		if err := pc.Run(ctx, c.PodSyncWorkers); err != nil && errors.Cause(err) != context.Canceled {
-			log.Error(err, "pod controller failed")
+			log.Error(err, "pod controller failed", "cause", errors.Cause(err))
 			os.Exit(-1)
 		}
 	}()
@@ -193,17 +195,7 @@ func runRootCommand(parentCtx context.Context, c Opts) error {
 		}
 	}
 
-	go func() {
-		if err := nodeRunner.Run(ctx); err != nil {
-			log.Error(err, "node runner failed")
-			os.Exit(-1)
-		}
-	}()
-
-	log.Info("Initialized")
-
-	<-ctx.Done()
-	return nil
+	return nodeController.Run(ctx)
 }
 
 func waitFor(ctx context.Context, time time.Duration, ready <-chan struct{}) error {
@@ -219,37 +211,4 @@ func waitFor(ctx context.Context, time time.Duration, ready <-chan struct{}) err
 	case <-ctx.Done():
 		return errors.Wrap(ctx.Err(), "Error while starting up VK")
 	}
-}
-
-func newClient(configPath string) (*kubernetes.Clientset, error) {
-
-	/*
-		mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-			Scheme: runtime.NewScheme(),
-		})
-
-	*/
-
-	var config *rest.Config
-
-	// Check if the kubeConfig file exists.
-	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
-		// Get the kubeconfig from the filepath.
-		config, err = clientcmd.BuildConfigFromFlags("", configPath)
-		if err != nil {
-			return nil, errors.Wrap(err, "error building client config")
-		}
-	} else {
-		// Set to in-cluster config.
-		config, err = rest.InClusterConfig()
-		if err != nil {
-			return nil, errors.Wrap(err, "error building in cluster config")
-		}
-	}
-
-	if masterURI := os.Getenv("MASTER_URI"); masterURI != "" {
-		config.Host = masterURI
-	}
-
-	return kubernetes.NewForConfig(config)
 }

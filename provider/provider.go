@@ -19,6 +19,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/carv-ics-forth/knoc/api"
@@ -51,11 +52,10 @@ type Provider struct {
 
 // InitConfig is the config passed to initialize a registered provider.
 type InitConfig struct {
-	ConfigPath      string
-	NodeName        string
-	OperatingSystem string
-	InternalIP      string
-	DaemonPort      int32
+	ConfigPath string
+	NodeName   string
+	InternalIP string
+	DaemonPort int32
 }
 
 // NewProvider creates a new Provider, which implements the PodNotifier interface
@@ -67,7 +67,7 @@ func NewProvider(config InitConfig) (*Provider, error) {
 		notifier:   nil,
 		logger:     zap.New(zap.UseDevMode(true)),
 		resources: corev1.ResourceList{
-			"cpu":    resource.MustParse("4"),
+			"cpu":    resource.MustParse("30"),
 			"memory": resource.MustParse("10Gi"),
 			"pods":   resource.MustParse("100"),
 		},
@@ -237,7 +237,7 @@ func (p *Provider) ConfigureNode(_ context.Context, n *corev1.Node) {
 		},
 	}
 
-	n.Status.NodeInfo.OperatingSystem = p.InitConfig.OperatingSystem
+	n.Status.NodeInfo.OperatingSystem = runtime.GOOS
 	n.Status.NodeInfo.Architecture = "amd64"
 	n.ObjectMeta.Labels["alpha.service-controller.kubernetes.io/exclude-balancer"] = "true"
 	n.ObjectMeta.Labels["node.kubernetes.io/exclude-from-external-load-balancers"] = "true"
@@ -252,7 +252,7 @@ func (p *Provider) nodeConditions() []corev1.NodeCondition {
 	// TODO: Make this configurable
 	return []corev1.NodeCondition{
 		{
-			Type:               "Ready",
+			Type:               corev1.NodeReady,
 			Status:             corev1.ConditionTrue,
 			LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
@@ -260,15 +260,7 @@ func (p *Provider) nodeConditions() []corev1.NodeCondition {
 			Message:            "kubelet is pending.",
 		},
 		{
-			Type:               "OutOfDisk",
-			Status:             corev1.ConditionFalse,
-			LastHeartbeatTime:  metav1.Now(),
-			LastTransitionTime: metav1.Now(),
-			Reason:             "KubeletHasSufficientDisk",
-			Message:            "kubelet has sufficient disk space available",
-		},
-		{
-			Type:               "MemoryPressure",
+			Type:               corev1.NodeMemoryPressure,
 			Status:             corev1.ConditionFalse,
 			LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
@@ -276,7 +268,7 @@ func (p *Provider) nodeConditions() []corev1.NodeCondition {
 			Message:            "kubelet has sufficient memory available",
 		},
 		{
-			Type:               "DiskPressure",
+			Type:               corev1.NodeDiskPressure,
 			Status:             corev1.ConditionFalse,
 			LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
@@ -284,7 +276,15 @@ func (p *Provider) nodeConditions() []corev1.NodeCondition {
 			Message:            "kubelet has no disk pressure",
 		},
 		{
-			Type:               "NetworkUnavailable",
+			Type:               corev1.NodePIDPressure,
+			Status:             corev1.ConditionFalse,
+			LastHeartbeatTime:  metav1.Now(),
+			LastTransitionTime: metav1.Now(),
+			Reason:             "KubeletHasNoPIDPressure",
+			Message:            "kubelet has no PID pressure",
+		},
+		{
+			Type:               corev1.NodeNetworkUnavailable,
 			Status:             corev1.ConditionFalse,
 			LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
@@ -292,7 +292,6 @@ func (p *Provider) nodeConditions() []corev1.NodeCondition {
 			Message:            "RouteController created a route",
 		},
 	}
-
 }
 
 func (p *Provider) GetStatsSummary(context.Context) (*statsv1alpha1.Summary, error) {
@@ -310,7 +309,7 @@ func (p *Provider) GetStatsSummary(context.Context) (*statsv1alpha1.Summary, err
 
 func (p *Provider) Capacity(ctx context.Context) corev1.ResourceList {
 	p.logger.Info("-> Capacity")
-	defer p.logger.Info("<- Capacity")
+	defer p.logger.Info("<- Capacity ", "resources", p.resources)
 
 	return p.resources
 }
