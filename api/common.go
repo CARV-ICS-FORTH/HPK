@@ -35,10 +35,12 @@ const (
 	DefaultPodCapacity    = "20"
 
 	// Values used in tracing as attribute keys.
-	NamespaceKey            = "namespace"
-	NameKey                 = "name"
-	ContainerNameKey        = "containerName"
-	PodVolRoot              = ".knoc/"
+	NamespaceKey     = "namespace"
+	NameKey          = "name"
+	ContainerNameKey = "containerName"
+
+	RuntimeDir = ".knoc/"
+
 	PodSecretVolPerms       = 0755
 	PodSecretVolDir         = "/secrets"
 	PodSecretFilePerms      = 0644
