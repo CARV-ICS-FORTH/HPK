@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.package main
 
-package provider
+package to_be_removed
 
 import (
 	"context"
@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 
 	"github.com/carv-ics-forth/knoc/api"
+	"github.com/carv-ics-forth/knoc/provider"
 	"github.com/pkg/errors"
 	"github.com/sfreiberg/simplessh"
 	"github.com/sirupsen/logrus"
@@ -68,7 +69,7 @@ func prepareDoor() error {
 	return nil
 }
 
-func RemoteExecution(p *Provider, ctx context.Context, mode api.Operation, pod *corev1.Pod) error {
+func RemoteExecution(p *provider.Provider, ctx context.Context, mode api.Operation, pod *corev1.Pod) error {
 	encoded, err := json.Marshal(pod)
 	if err != nil {
 		return errors.Wrapf(err, "cannot marshal pod '%s'", pod.GetName())
@@ -105,7 +106,7 @@ func RemoteExecution(p *Provider, ctx context.Context, mode api.Operation, pod *
 	return nil
 }
 
-func PrepareExecutionEnvironment(p *Provider, ctx context.Context, pod *corev1.Pod) error {
+func PrepareExecutionEnvironment(p *provider.Provider, ctx context.Context, pod *corev1.Pod) error {
 	log.G(ctx).Debugf("receive prepareContainerData %v", pod.GetName())
 
 	/*

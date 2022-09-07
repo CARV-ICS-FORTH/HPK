@@ -23,6 +23,7 @@ import (
 
 	"github.com/carv-ics-forth/knoc/api"
 	"github.com/carv-ics-forth/knoc/pkg/manager"
+	"github.com/carv-ics-forth/knoc/provider/to_be_removed"
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	vkapi "github.com/virtual-kubelet/virtual-kubelet/node/api"
@@ -140,7 +141,7 @@ func (p *Provider) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 		return errors.Errorf("key '%s' not found", key)
 	}
 
-	if err := RemoteExecution(p, ctx, api.DELETE, pod); err != nil {
+	if err := to_be_removed.RemoteExecution(p, ctx, api.DELETE, pod); err != nil {
 		return errors.Wrapf(err, "Failed to Delete pod '%s'", pod.GetName())
 	}
 
