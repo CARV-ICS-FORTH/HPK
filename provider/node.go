@@ -25,15 +25,12 @@ import (
 
 // CreateVirtualNode builds a kubernetes node object from a provider
 // This is a temporary solution until node stuff actually split off from the provider interface itself.
-func (p *Provider) CreateVirtualNode(ctx context.Context, name string) *corev1.Node {
+func (p *Provider) CreateVirtualNode(ctx context.Context, name string, taint *corev1.Taint) *corev1.Node {
 	taints := make([]corev1.Taint, 0)
 
-	/*
-		if taint != nil {
-			taints = append(taints, *taint)
-		}
-
-	*/
+	if taint != nil {
+		taints = append(taints, *taint)
+	}
 
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
@@ -65,47 +62,3 @@ func (p *Provider) CreateVirtualNode(ctx context.Context, name string) *corev1.N
 
 	return node
 }
-
-/*
-// getTaint creates a taint using the provided key/value.
-// Taint effect is read from the environment
-// The taint key/value may be overwritten by the environment.
-func getTaint(c root.Opts) (*corev1.Taint, error) {
-	// This can be removed ... or not ...
-	// value := c.Provider
-	value := "knoc"
-
-	key := c.TaintKey
-	if key == "" {
-		key = root.DefaultTaintKey
-	}
-
-	if c.TaintEffect == "" {
-		c.TaintEffect = root.DefaultTaintEffect
-	}
-
-	key = root.getEnv("VKUBELET_TAINT_KEY", key)
-	value = root.getEnv("VKUBELET_TAINT_VALUE", value)
-	effectEnv := root.getEnv("VKUBELET_TAINT_EFFECT", string(c.TaintEffect))
-
-	var effect corev1.TaintEffect
-	switch effectEnv {
-	case "NoSchedule":
-		effect = corev1.TaintEffectNoSchedule
-	case "NoExecute":
-		effect = corev1.TaintEffectNoExecute
-	case "PreferNoSchedule":
-		effect = corev1.TaintEffectPreferNoSchedule
-	default:
-		return nil, errdefs.InvalidInputf("taint effect %q is not supported", effectEnv)
-	}
-
-	return &corev1.Taint{
-		Key:    key,
-		Value:  value,
-		Effect: effect,
-	}, nil
-}
-
-
-*/

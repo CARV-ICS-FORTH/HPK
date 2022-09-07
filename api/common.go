@@ -88,8 +88,11 @@ const (
 	DefaultInformerResyncPeriod = 1 * time.Minute
 	DefaultMetricsAddr          = ":10255"
 	DefaultListenPort           = 10250
-	DefaultPodSyncWorkers       = 10
+	DefaultPodSyncWorkers       = 1
 	DefaultKubeNamespace        = corev1.NamespaceAll
+
+	DefaultTaintEffect = string(corev1.TaintEffectNoSchedule)
+	DefaultTaintKey    = "virtual-kubelet.io/provider"
 )
 
 var (

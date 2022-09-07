@@ -20,11 +20,11 @@ import (
 	"path"
 	"time"
 
+	"github.com/carv-ics-forth/knoc/pkg/manager"
 	"github.com/carv-ics-forth/knoc/provider"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"github.com/virtual-kubelet/virtual-kubelet/errdefs"
 	"github.com/virtual-kubelet/virtual-kubelet/node"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -50,7 +50,7 @@ backend implementation allowing users to create kubernetes nodes without running
 This allows users to schedule kubernetes workloads on nodes that aren't running Kubernetes.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if c.PodSyncWorkers == 0 {
-				return errdefs.InvalidInput("pod sync workers must be greater than 0")
+				return errors.Errorf("pod sync workers must be greater than 0")
 			}
 
 			return runRootCommand(ctx, c)
@@ -89,18 +89,33 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	podInformer := podInformerFactory.Core().V1().Pods()
 
 	scmInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(client, c.InformerResyncPeriod)
+	secretInformer := scmInformerFactory.Core().V1().Secrets()
+	configMapInformer := scmInformerFactory.Core().V1().ConfigMaps()
+	serviceInformer := scmInformerFactory.Core().V1().Services()
 
-	go podInformerFactory.Start(ctx.Done())
-	go scmInformerFactory.Start(ctx.Done())
+	rm, err := manager.NewResourceManager(podInformer.Lister(),
+		secretInformer.Lister(),
+		configMapInformer.Lister(),
+		serviceInformer.Lister(),
+	)
+	if err != nil {
+		return errors.Wrap(err, "could not create resource manager")
+	}
+
+	// Start the informers now, so the provider will get a functional resource
+	// manager.
+	podInformerFactory.Start(ctx.Done())
+	scmInformerFactory.Start(ctx.Done())
 
 	/*
 		Register the Provisioner of Virtual Nodes
 	*/
 	p, err := provider.NewProvider(provider.InitConfig{
-		ConfigPath: c.ProviderConfigPath,
-		NodeName:   c.NodeName,
-		InternalIP: os.Getenv("VKUBELET_POD_IP"),
-		DaemonPort: c.ListenPort,
+		ConfigPath:      c.ProviderConfigPath,
+		NodeName:        c.NodeName,
+		InternalIP:      os.Getenv("VKUBELET_POD_IP"),
+		DaemonPort:      c.ListenPort,
+		ResourceManager: rm,
 	})
 
 	if err != nil {
@@ -121,7 +136,16 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	/*
 		Create a New Virtual Node and prepare the Controller for it
 	*/
-	pNode := p.CreateVirtualNode(ctx, c.NodeName)
+	var taint *corev1.Taint
+	if !c.DisableTaint {
+		var err error
+		taint, err = getTaint(c)
+		if err != nil {
+			return err
+		}
+	}
+
+	pNode := p.CreateVirtualNode(ctx, c.NodeName, taint)
 
 	nodeControllerOpts := []node.NodeControllerOpt{
 		node.WithNodeStatusUpdateErrorHandler(func(ctx context.Context, err error) error {
@@ -158,7 +182,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	}
 
 	eb := record.NewBroadcaster()
-	eb.StartLogging(log.Info)
+	eb.StartLogging(logrus.Infof)
 	eb.StartRecordingToSink(&corev1client.EventSinkImpl{Interface: client.CoreV1().Events(c.KubeNamespace)})
 
 	/*
@@ -170,9 +194,9 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		PodInformer:       podInformer,
 		EventRecorder:     eb.NewRecorder(scheme.Scheme, corev1.EventSource{Component: path.Join(pNode.Name, "pod-controller")}),
 		Provider:          p,
-		SecretInformer:    scmInformerFactory.Core().V1().Secrets(),
-		ConfigMapInformer: scmInformerFactory.Core().V1().ConfigMaps(),
-		ServiceInformer:   scmInformerFactory.Core().V1().Services(),
+		SecretInformer:    secretInformer,
+		ConfigMapInformer: configMapInformer,
+		ServiceInformer:   serviceInformer,
 	})
 	if err != nil {
 		return errors.Wrap(err, "error setting up pod controller")
@@ -180,7 +204,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 
 	go func() {
 		if err := pc.Run(ctx, c.PodSyncWorkers); err != nil && errors.Cause(err) != context.Canceled {
-			log.Error(err, "pod controller failed", "cause", errors.Cause(err))
+			log.Error(err, "pod controller failed")
 			os.Exit(-1)
 		}
 	}()

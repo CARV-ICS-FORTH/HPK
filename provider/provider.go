@@ -20,9 +20,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"time"
 
 	"github.com/carv-ics-forth/knoc/api"
+	"github.com/carv-ics-forth/knoc/pkg/manager"
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	vkapi "github.com/virtual-kubelet/virtual-kubelet/node/api"
@@ -40,10 +40,9 @@ import (
 type Provider struct {
 	InitConfig
 
-	pods      map[client.ObjectKey]*corev1.Pod
-	startTime time.Time
-	// resourceManager    *manager.ResourceManager
-	notifier func(*corev1.Pod)
+	pods map[client.ObjectKey]*corev1.Pod
+	// startTime time.Time
+	// notifier  func(*corev1.Pod)
 
 	logger logr.Logger
 
@@ -56,6 +55,8 @@ type InitConfig struct {
 	NodeName   string
 	InternalIP string
 	DaemonPort int32
+
+	ResourceManager *manager.ResourceManager
 }
 
 // NewProvider creates a new Provider, which implements the PodNotifier interface
@@ -63,9 +64,9 @@ func NewProvider(config InitConfig) (*Provider, error) {
 	return &Provider{
 		InitConfig: config,
 		pods:       make(map[client.ObjectKey]*corev1.Pod),
-		startTime:  time.Now(),
-		notifier:   nil,
-		logger:     zap.New(zap.UseDevMode(true)),
+		// startTime:  time.Now(),
+		// notifier:   nil,
+		logger: zap.New(zap.UseDevMode(true)),
 		resources: corev1.ResourceList{
 			"cpu":    resource.MustParse("30"),
 			"memory": resource.MustParse("10Gi"),
@@ -82,34 +83,55 @@ func NewProvider(config InitConfig) (*Provider, error) {
 
 // CreatePod accepts a Pod definition and stores it in memory.
 func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
-	p.logger.Info("-> CreatePod")
-	defer p.logger.Info("<- CreatePod")
+	p.logger.Info("-> CreatePod",
+		"obj", client.ObjectKeyFromObject(pod),
+	)
+
+	defer p.logger.Info("<- CreatePod",
+		"obj", client.ObjectKeyFromObject(pod),
+	)
 
 	// Submit job for remote execution
-	if err := RemoteExecution(p, ctx, api.SUBMIT, pod); err != nil {
-		return errors.Wrapf(err, "Failed to Delete pod '%s'", pod.GetName())
-	}
+	/*
+		if err := RemoteExecution(p, ctx, api.SUBMIT, pod); err != nil {
+		 	return errors.Wrapf(err, "Failed to Delete pod '%s'", pod.GetName())
+		}
+	*/
+	key := client.ObjectKeyFromObject(pod)
+	p.pods[key] = pod
+	// p.notifier(pod)
 
-	return p.UpdatePod(ctx, pod)
+	return nil
+
 }
 
 // UpdatePod accepts a Pod definition and updates its reference.
 func (p *Provider) UpdatePod(_ context.Context, pod *corev1.Pod) error {
-	p.logger.Info("-> UpdatePod")
-	defer p.logger.Info("<- UpdatePod")
+	p.logger.Info("-> UpdatePod",
+		"obj", client.ObjectKeyFromObject(pod),
+	)
+
+	defer p.logger.Info("<- UpdatePod",
+		"obj", client.ObjectKeyFromObject(pod),
+	)
 
 	key := client.ObjectKeyFromObject(pod)
 
 	p.pods[key] = pod
-	p.notifier(pod)
+	// p.notifier(pod)
 
 	return nil
 }
 
 // DeletePod deletes the specified pod out of memory.
 func (p *Provider) DeletePod(ctx context.Context, pod *corev1.Pod) error {
-	p.logger.Info("-> DeletePod")
-	defer p.logger.Info("<- DeletePod")
+	p.logger.Info("-> DeletePod",
+		"obj", client.ObjectKeyFromObject(pod),
+	)
+
+	defer p.logger.Info("<- DeletePod",
+		"obj", client.ObjectKeyFromObject(pod),
+	)
 
 	key := client.ObjectKeyFromObject(pod)
 
@@ -122,38 +144,55 @@ func (p *Provider) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 		return errors.Wrapf(err, "Failed to Delete pod '%s'", pod.GetName())
 	}
 
-	p.notifier(pod)
+	// p.notifier(pod)
 	delete(p.pods, key)
 
 	return nil
 }
 
 // GetPod returns a pod by name that is stored in memory.
-func (p *Provider) GetPod(_ context.Context, namespace, name string) (*corev1.Pod, error) {
-	p.logger.Info("-> GetPod")
-	defer p.logger.Info("<- GetPod")
+func (p *Provider) GetPod(ctx context.Context, namespace, name string) (*corev1.Pod, error) {
+	p.logger.Info("-> GetPod",
+		"namespace", namespace,
+		"name", name,
+	)
+	defer p.logger.Info("<- GetPod",
+		"namespace", namespace,
+		"name", name,
+	)
 
-	key := client.ObjectKey{
-		Namespace: namespace,
-		Name:      name,
+	pods, err := p.GetPods(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, pod := range pods {
+		if pod.Name == name && pod.Namespace == namespace {
+			return pod, nil
+		}
 	}
 
-	if pod, ok := p.pods[key]; ok {
-		return pod, nil
-	}
-
-	return nil, errors.Errorf("pod '%s' is not known to the provider", key)
+	return nil, nil
 }
 
 // GetPodStatus returns the status of a pod by name that is "running".
 // returns nil if a pod by that name is not found.
 func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*corev1.PodStatus, error) {
-	p.logger.Info("-> GetPodStatus")
-	defer p.logger.Info("<- GetPodStatus")
+	p.logger.Info("-> GetPodStatus",
+		"namespace", namespace,
+		"name", name,
+	)
+	defer p.logger.Info("<- GetPodStatus",
+		"namespace", namespace,
+		"name", name,
+	)
 
 	pod, err := p.GetPod(ctx, namespace, name)
 	if err != nil {
 		return nil, errors.Wrapf(err, "cannot get pod")
+	}
+
+	if pod == nil {
+		return nil, nil
 	}
 
 	return &pod.Status, nil
@@ -164,15 +203,39 @@ func (p *Provider) GetPods(_ context.Context) ([]*corev1.Pod, error) {
 	p.logger.Info("-> GetPods")
 	defer p.logger.Info("<- GetPods")
 
-	var pods []*corev1.Pod
+	/*
+		TODO: inspect the underlying system for Pods in the Runtime Directory (.knoc)
+		Pod status: inspect .knoc (network, volumes, lifetime)
+		Container status: query SLURM
+		Hint: use batch operations
+	*/
 
-	// TODO: we need "running" pods, or everything ?
+	/*
 
-	for _, pod := range p.pods {
-		pods = append(pods, pod)
-	}
+		pods := make([]*corev1.Pod, 0)
+		for _, cg := range p.GetCgs() {
+			c := cg
+			pod, err := containerGroupToPod(&c)
+			if err != nil {
+				msg := fmt.Sprint("error converting container group to pod", cg.ContainerGroupId, err)
+				log.G(context.TODO()).WithField("Method", "GetPods").Info(msg)
+				continue
+			}
+			pods = append(pods, pod)
+		}
+		return pods, nil
 
-	return pods, nil
+		var pods []*corev1.Pod
+
+		// TODO: we need "running" pods, or everything ?
+
+		for _, pod := range p.pods {
+			pods = append(pods, pod)
+		}
+
+	*/
+
+	return nil, nil
 }
 
 /************************************************************

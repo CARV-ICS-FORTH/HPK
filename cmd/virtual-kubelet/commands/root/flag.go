@@ -19,6 +19,8 @@ import (
 
 	"github.com/carv-ics-forth/knoc/api"
 	"github.com/spf13/pflag"
+	"github.com/virtual-kubelet/virtual-kubelet/errdefs"
+	corev1 "k8s.io/api/core/v1"
 )
 
 // Opts stores all the options for configuring the root virtual-kubelet command.
@@ -48,6 +50,11 @@ type Opts struct {
 
 	// Startup Timeout is how long to wait for the kubelet to start
 	StartupTimeout time.Duration
+
+	DisableTaint bool
+	TaintKey     string
+	TaintValue   string
+	TaintEffect  string
 }
 
 func installFlags(flags *pflag.FlagSet, c *Opts) {
@@ -63,4 +70,37 @@ func installFlags(flags *pflag.FlagSet, c *Opts) {
 
 	flags.DurationVar(&c.InformerResyncPeriod, "full-resync-period", api.DefaultInformerResyncPeriod, "how often to perform a full resync of pods between kubernetes and the provider")
 	flags.DurationVar(&c.StartupTimeout, "startup-timeout", 0, "How long to wait for the virtual-kubelet to start")
+
+	flags.BoolVar(&c.DisableTaint, "disable-taint", false, "disable the virtual-kubelet node taint")
+
+	flags.StringVar(&c.TaintKey, "taint-key", api.DefaultTaintKey, "Set node taint key")
+	flags.StringVar(&c.TaintValue, "taint-value", "", "Set node taint value")
+	flags.StringVar(&c.TaintEffect, "taint-effect", api.DefaultTaintEffect, "Set node taint effect")
+}
+
+// getTaint creates a taint using the provided key/value.
+// Taint effect is read from the environment
+// The taint key/value may be overwritten by the environment.
+func getTaint(o Opts) (*corev1.Taint, error) {
+	if o.TaintValue == "" {
+		o.TaintValue = "knoc"
+	}
+
+	var effect corev1.TaintEffect
+	switch o.TaintEffect {
+	case "NoSchedule":
+		effect = corev1.TaintEffectNoSchedule
+	case "NoExecute":
+		effect = corev1.TaintEffectNoExecute
+	case "PreferNoSchedule":
+		effect = corev1.TaintEffectPreferNoSchedule
+	default:
+		return nil, errdefs.InvalidInputf("taint effect %q is not supported", o.TaintEffect)
+	}
+
+	return &corev1.Taint{
+		Key:    o.TaintKey,
+		Value:  o.TaintValue,
+		Effect: effect,
+	}, nil
 }
