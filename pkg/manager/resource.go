@@ -25,19 +25,21 @@ import (
 // ResourceManager acts as a passthrough to a cache (lister) for pods assigned to the current node.
 // It is also a passthrough to a cache (lister) for Kubernetes secrets and config maps.
 type ResourceManager struct {
-	podLister       corev1listers.PodLister
-	secretLister    corev1listers.SecretLister
-	configMapLister corev1listers.ConfigMapLister
-	serviceLister   corev1listers.ServiceLister
+	podLister            corev1listers.PodLister
+	secretLister         corev1listers.SecretLister
+	configMapLister      corev1listers.ConfigMapLister
+	serviceLister        corev1listers.ServiceLister
+	serviceAccountLister corev1listers.ServiceAccountLister
 }
 
 // NewResourceManager returns a ResourceManager with the internal maps initialized.
-func NewResourceManager(podLister corev1listers.PodLister, secretLister corev1listers.SecretLister, configMapLister corev1listers.ConfigMapLister, serviceLister corev1listers.ServiceLister) (*ResourceManager, error) {
+func NewResourceManager(podLister corev1listers.PodLister, secretLister corev1listers.SecretLister, configMapLister corev1listers.ConfigMapLister, serviceLister corev1listers.ServiceLister, serviceAccountLister corev1listers.ServiceAccountLister) (*ResourceManager, error) {
 	rm := ResourceManager{
-		podLister:       podLister,
-		secretLister:    secretLister,
-		configMapLister: configMapLister,
-		serviceLister:   serviceLister,
+		podLister:            podLister,
+		secretLister:         secretLister,
+		configMapLister:      configMapLister,
+		serviceLister:        serviceLister,
+		serviceAccountLister: serviceAccountLister,
 	}
 	return &rm, nil
 }
@@ -60,6 +62,11 @@ func (rm *ResourceManager) GetConfigMap(name, namespace string) (*v1.ConfigMap, 
 // GetSecret retrieves the specified secret from Kubernetes.
 func (rm *ResourceManager) GetSecret(name, namespace string) (*v1.Secret, error) {
 	return rm.secretLister.Secrets(namespace).Get(name)
+}
+
+// GetServiceAccount retrieves the specified serviceAccount from Kubernetes.
+func (rm *ResourceManager) GetServiceAccount(name, namespace string) (*v1.ServiceAccount, error) {
+	return rm.serviceAccountLister.ServiceAccounts(namespace).Get(name)
 }
 
 // ListServices retrieves the list of services from Kubernetes.

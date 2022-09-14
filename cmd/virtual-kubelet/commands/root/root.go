@@ -16,6 +16,7 @@ package root
 
 import (
 	"context"
+	"github.com/carv-ics-forth/knoc/hpc"
 	"os"
 	"path"
 	"time"
@@ -92,11 +93,13 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	secretInformer := scmInformerFactory.Core().V1().Secrets()
 	configMapInformer := scmInformerFactory.Core().V1().ConfigMaps()
 	serviceInformer := scmInformerFactory.Core().V1().Services()
+	serviceAccountInformer := scmInformerFactory.Core().V1().ServiceAccounts()
 
 	rm, err := manager.NewResourceManager(podInformer.Lister(),
 		secretInformer.Lister(),
 		configMapInformer.Lister(),
 		serviceInformer.Lister(),
+		serviceAccountInformer.Lister(),
 	)
 	if err != nil {
 		return errors.Wrap(err, "could not create resource manager")
@@ -116,6 +119,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		InternalIP:      os.Getenv("VKUBELET_POD_IP"),
 		DaemonPort:      c.ListenPort,
 		ResourceManager: rm,
+		HPC:             hpc.NewHPCEnvironment(),
 	})
 
 	if err != nil {

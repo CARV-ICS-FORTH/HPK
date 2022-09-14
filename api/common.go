@@ -17,8 +17,26 @@ package api
 import (
 	"time"
 
-	"github.com/carv-ics-forth/knoc/pkg/manager"
 	corev1 "k8s.io/api/core/v1"
+)
+
+// Defaults for root command options
+const (
+	DefaultNodeName             = "virtual-kubelet"
+	DefaultInformerResyncPeriod = 1 * time.Minute
+	DefaultMetricsAddr          = ":10255"
+	DefaultListenPort           = 10250
+	DefaultPodSyncWorkers       = 1
+	DefaultKubeNamespace        = corev1.NamespaceAll
+
+	DefaultTaintEffect = string(corev1.TaintEffectNoSchedule)
+	DefaultTaintKey    = "virtual-kubelet.io/provider"
+)
+
+var (
+	BuildVersion = "N/A"
+	BuildTime    = "N/A"
+	K8sVersion   = "v1.25.0"
 )
 
 type Operation string
@@ -39,20 +57,25 @@ const (
 	NameKey          = "name"
 	ContainerNameKey = "containerName"
 
-	RuntimeDir = ".knoc/"
-
-	PodSecretVolPerms       = 0755
-	PodSecretVolDir         = "/secrets"
-	PodSecretFilePerms      = 0644
-	PodConfigMapVolPerms    = 0755
-	PodConfigMapVolDir      = "/configmaps"
-	PodConfigMapFilePerms   = 0644
-	PodDownwardApiVolPerms  = 0755
-	PodDownwardApiVolDir    = "/downwardapis"
-	PodDownwardApiFilePerms = 0644
+	RuntimeDir               = ".knoc"
+	TemporaryDir             = ".tmp"
+	SecretPodData            = 0760
+	PodSecretVolPerms        = 0755
+	PodSecretVolDir          = "/secrets"
+	PodSecretFilePerms       = 0644
+	PodConfigMapVolPerms     = 0755
+	PodConfigMapVolDir       = "/configmaps"
+	PodConfigMapFilePerms    = 0644
+	PodDownwardApiVolPerms   = 0755
+	PodDownwardApiVolDir     = "/downwardapis"
+	PodDownwardApiFilePerms  = 0644
+	DefaultContainerRegistry = "docker://"
 )
 
-type KNOCProvider struct { // nolint:golint
+/*
+type KNOCProvider struct {
+	HPCEnvironment
+
 	NodeName           string
 	OperatingSystem    string
 	InternalIP         string
@@ -64,39 +87,10 @@ type KNOCProvider struct { // nolint:golint
 	Notifier           func(*corev1.Pod)
 }
 
-type KNOCConfig struct { // nolint:golint
+type KNOCConfig struct {
 	CPU    string `json:"cpu,omitempty"`
 	Memory string `json:"memory,omitempty"`
 	Pods   string `json:"pods,omitempty"`
 }
 
-type DoorContainer struct {
-	corev1.PodTemplate `json:",omitempty"`
-
-	/*
-		Name       string   `json:"name" `
-		Image      string   `json:"image,omitempty" `
-		Command    []string `json:"command,omitempty"`
-		Args       []string `json:"args,omitempty" `
-		WorkingDir string   `json:"workingDir,omitempty" `
-	*/
-}
-
-// Defaults for root command options
-const (
-	DefaultNodeName             = "virtual-kubelet"
-	DefaultInformerResyncPeriod = 1 * time.Minute
-	DefaultMetricsAddr          = ":10255"
-	DefaultListenPort           = 10250
-	DefaultPodSyncWorkers       = 1
-	DefaultKubeNamespace        = corev1.NamespaceAll
-
-	DefaultTaintEffect = string(corev1.TaintEffectNoSchedule)
-	DefaultTaintKey    = "virtual-kubelet.io/provider"
-)
-
-var (
-	BuildVersion = "N/A"
-	BuildTime    = "N/A"
-	K8sVersion   = "v1.25.0"
-)
+*/

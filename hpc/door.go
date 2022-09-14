@@ -12,248 +12,222 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.package main
 
-package door
+package hpc
 
-import (
-	b64 "encoding/base64"
-	"encoding/json"
-	"fmt"
-	"log"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"regexp"
-	"strconv"
-	"strings"
+/*
+func (e *LocalExecutor) ExecuteOperation(ctx context.Context, mode api.Operation, pak *api.KPod) error {
+	switch mode {
+	case api.SUBMIT:
+		var prevJobID *int
+		prevJobID = new(int)
+		*prevJobID = -1
+		lastInitContainerJobID := -1
 
-	"github.com/carv-ics-forth/knoc/api"
-	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
-)
+		for index := range pak.Pod.Spec.InitContainers {
+			if err := e.createContainer(ctx, &pak.Pod.Spec.InitContainers[index], prevJobID, pak); err != nil {
+				return errors.Wrapf(err, "Could not create container from door")
+			}
 
-const (
-	SBATCH  = "/usr/bin/sbatch"
-	SCANCEL = "/usr/bin/scancel"
-)
-
-var buildVersion = "dev"
-
-func prepareEnv(c *api.DoorContainer) []string {
-	env := make([]string, 1)
-	env = append(env, "--env")
-	envData := ""
-
-	for _, envVar := range c.Env {
-		tmp := envVar.Name + "=" + envVar.Value + ","
-		envData += tmp
-	}
-
-	if last := len(envData) - 1; last >= 0 && envData[last] == ',' {
-		envData = envData[:last]
-	}
-
-	return append(env, envData)
-}
-
-func prepareMounts(c *api.DoorContainer) []string {
-	mount := make([]string, 1)
-	mount = append(mount, "--bind")
-	mountData := ""
-	podName := strings.Split(c.Name, "-")
-
-	for _, mountVar := range c.Template.Spec.VolumeMounts {
-		path := ".knoc/" + strings.Join(podName[:6], "-") + "/" + mountVar.Name + ":" + mountVar.MountPath + ","
-		mountData += path
-	}
-
-	if last := len(mountData) - 1; last >= 0 && mountData[last] == ',' {
-		mountData = mountData[:last]
-	}
-
-	return append(mount, mountData)
-}
-
-func produceSlurmScript(c *api.DoorContainer, command []string) (string, error) {
-	newpath := filepath.Join(".", ".tmp")
-	err := os.MkdirAll(newpath, os.ModePerm)
-
-	f, err := os.Create(".tmp/" + c.Name + ".sh")
-	if err != nil {
-		return "", errors.Wrap(err, "Cant create slurm_script")
-	}
-
-	var sbatchFlagsFromArgo []string
-
-	var sbatchFlagsAsString = ""
-	if slurmFlags, ok := c.GetAnnotations()["slurm-job.knoc.io/flags"]; ok {
-		sbatchFlagsFromArgo = strings.Split(slurmFlags, " ")
-
-		logrus.Debugln(sbatchFlagsFromArgo)
-	}
-
-	if mpiFlags, ok := c.GetAnnotations()["slurm-job.knoc.io/mpi-flags"]; ok {
-		if mpiFlags != "true" {
-			mpi := append([]string{"mpiexec", "-np", "$SLURM_NTASKS"}, strings.Split(mpiFlags, " ")...)
-			command = append(mpi, command...)
+			// We're keeping the last init container jobID to give it to the main Containers as a dependency,
+			// since we don't want sequential execution on main Containers
+			lastInitContainerJobID = *prevJobID
 		}
 
-		logrus.Debugln(mpiFlags)
+		for index := range pak.Pod.Spec.Containers {
+			*prevJobID = lastInitContainerJobID
+			if err := e.createContainer(ctx, &pak.Pod.Spec.Containers[index], prevJobID, pak); err != nil {
+				return errors.Wrapf(err, "Could not create container from door")
+			}
+		}
+	case api.DELETE:
+		/* ... * /
+	}
+
+	return nil
+}
+
+*/
+
+/*
+	func (e *LocalExecutor) createContainer(ctx context.Context, container *corev1.Container, prevJobID *int, pak *api.KPod) error {
+		logrus.Info("Create container")
+		/* Prepare the data environment * /
+		if err := e.PrepareContainerData(pak, container); err != nil {
+			return errors.Wrap(err, "cannot prepare data environment")
+		}
+
+		/*
+			local singularity image files currently unavailable
+		* /
+		/*
+			if strings.HasPrefix(c.Image, "/") {
+
+				if imageURI, ok := c.GetObjectMeta().GetAnnotations()["slurm-job.knoc.io/image-root"]; ok {
+					logrus.Debugln(imageURI)
+					image = imageURI + c.Image
+				} else {
+					return errors.Errorf("image-uri annotation not specified for path in remote filesystem")
+				}
+			}
+		* /
+		singularityCommand := append([]string{SINGULARITY, "exec"}, pak.Envs...)
+		singularityCommand = append(singularityCommand, pak.Mounts...)
+		singularityCommand = append(singularityCommand, container.Image)
+		singularityCommand = append(singularityCommand, pak.Commands...)
+		singularityCommand = append(singularityCommand, pak.CommandArguments...)
+
+		path, err := produceSlurmScript(pak, container, *prevJobID, singularityCommand)
+		if err != nil {
+			return errors.Wrap(err, "cannot generate slurm script")
+		}
+
+		out, err := slurmBatchSubmit(e, path)
+		if err != nil {
+			return errors.Wrapf(err, "Can't submit sbatch script")
+		}
+
+		// if sbatch script is successfully submitted check for job id
+		jid, err := handleJobID(pak, container, out)
+		if err != nil {
+			return errors.Wrapf(err, "handleJobID")
+		}
+
+		*prevJobID = jid
+
+		return WatchPodDirectory(ctx, pak.PodRuntimeRootDir())
+	}
+*/
+
+/*
+func produceSlurmScript(pak *api.KPod, container *corev1.Container, prevJobID int, command []string) (string, error) {
+	sbatchRelativePath := filepath.Join(api.TemporaryDir, pak.Pod.GetName(), container.Name+".sh")
+
+	var sbatchFlagsFromArgo []string
+	var sbatchFlagsAsString = ""
+
+	if err := os.MkdirAll(filepath.Join(api.TemporaryDir, pak.Pod.GetName()), api.SecretPodData); err != nil {
+		return "", errors.Wrapf(err, "Could not create '%s' directory", filepath.Join(api.TemporaryDir, pak.Pod.GetName()))
+	}
+
+	if slurmFlags, ok := pak.Pod.GetAnnotations()["slurm-job.knoc.io/flags"]; ok {
+		sbatchFlagsFromArgo = strings.Split(slurmFlags, " ")
 	}
 
 	for _, slurmFlag := range sbatchFlagsFromArgo {
 		sbatchFlagsAsString += "\n#SBATCH " + slurmFlag
 	}
+	// SLURM_JOB_DEPENDENCY ensures sequential execution of init containers and main containers
+	if prevJobID != -1 {
+		sbatchFlagsAsString += "\n#SBATCH --dependency afterok:" + string(rune(prevJobID))
+	}
 
-	sbatchMacros := "#!/bin/bash" +
-		"\n#SBATCH --job-name=" + c.Name +
-		sbatchFlagsAsString +
+	if mpiFlags, ok := pak.Pod.GetAnnotations()["slurm-job.knoc.io/mpi-flags"]; ok {
+		if mpiFlags != "true" {
+			mpi := append([]string{MPIEXEC, "-np", "$SLURM_NTASKS"}, strings.Split(mpiFlags, " ")...)
+			command = append(mpi, command...)
+		}
+	}
+
+	if err := writeSlurmScriptToFile(pak, sbatchFlagsAsString, container, command); err != nil {
+		return "", errors.Wrap(err, "Can't produce sbatch script in file")
+	}
+
+	return sbatchRelativePath, nil
+}
+
+func slurmBatchSubmit(e *LocalExecutor, path string) (string, error) {
+	var output []byte
+
+	var err error
+
+	output, err = exec.Command(e.sbatchExecutablePath, path).Output() //nolint:gosec
+	if err != nil {
+		return "", errors.Wrap(err, "Could not run sbatch. ")
+	}
+
+	return string(output), nil
+}
+
+func writeSlurmScriptToFile(pak *api.KPod, sbatchFlagsAsString string, c *corev1.Container, commandArray []string) error {
+
+	ssfPath := pak.ScriptFilePath(c)
+
+	scriptFile, err := os.Create(ssfPath)
+	if err != nil {
+		return errors.Wrapf(err, "Cant create slurm_script '%s'", ssfPath)
+	}
+
+	finalScriptData := sbatchMacros(pak.JobName(c), sbatchFlagsAsString) + "\n" +
+		strings.Join(commandArray, " ") + " >> " + pak.StdOutputFilePath(c) +
+		" 2>> " + pak.StdErrorFilePath(c) +
+		"\n echo $? > " + pak.ExitCodeFilePath(c)
+
+	if _, err = scriptFile.WriteString(finalScriptData); err != nil {
+		return errors.Wrapf(err, "Can't write sbatch script in file '%s'", ssfPath)
+	}
+
+	if err := scriptFile.Close(); err != nil {
+		return errors.Wrap(err, "Close")
+	}
+
+	return nil
+}
+
+func sbatchMacros(instanceName string, sbatchFlags string) string {
+	return "#!/bin/bash" +
+		"\n#SBATCH --job-name=" + instanceName +
+		sbatchFlags +
 		"\n. ~/.bash_profile" +
 		"\npwd; hostname; date\n"
-
-	// TODO: fix the malakia
-	f.WriteString(sbatchMacros + "\n" + strings.Join(command[:], " ") + " >> " + ".knoc/" + c.Name + ".out 2>> " + ".knoc/" + c.Name + ".err \n echo $? > " + ".knoc/" + c.Name + ".status")
-
-	if err := f.Close(); err != nil {
-		return "", errors.Wrap(err, "Close")
-	}
-
-	return ".tmp/" + c.Name + ".sh", nil
 }
 
-func slurmBatchSubmit(path string) string {
-	var output []byte
-	var err error
-	output, err = exec.Command(SBATCH, path).Output()
-	if err != nil {
-		log.Fatalln("Could not run sbatch. " + err.Error())
-	}
-	return string(output)
-
-}
-
-func handleJobID(c *api.DoorContainer, output string) error {
+func handleJobID(pak *api.KPod, container *corev1.Container, output string) (int, error) {
 	r := regexp.MustCompile(`Submitted batch job (?P<jid>\d+)`)
 	jid := r.FindStringSubmatch(output)
-	f, err := os.Create(".knoc/" + c.Name + ".jid")
+
+	f, err := os.Create(pak.JobIDFilePath(container))
+	f, err := os.Create(pak.JobIDFilePath(container))
 	if err != nil {
-		return errors.Wrap(err, "Cant create jid_file")
-	}
-	f.WriteString(jid[1])
-
-	return f.Close()
-}
-
-func CreateContainer(c *api.DoorContainer) error {
-	logrus.Debugln("create_container")
-
-	command := []string{"singularity", "exec"}
-
-	envs := prepareEnv(c)
-	mounts := prepareMounts(c)
-
-	image := "docker://" + c.Image
-
-	if strings.HasPrefix(c.Image, "/") {
-
-		if imageURI, ok := c.GetObjectMeta().GetAnnotations()["slurm-job.knoc.io/image-root"]; ok {
-			logrus.Debugln(imageURI)
-			image = imageURI + c.Image
-		} else {
-			return errors.Errorf("image-uri annotation not specified for path in remote filesystem")
-		}
+		return -1, errors.Wrap(err, "Cant create jid_file")
 	}
 
-	singularityCommand := append(command, envs...)
-	singularityCommand = append(singularityCommand, mounts...)
-	singularityCommand = append(singularityCommand, image)
-	singularityCommand = append(singularityCommand, c.Command...)
-	singularityCommand = append(singularityCommand, c.Args...)
-
-	path, err := produceSlurmScript(c, singularityCommand)
+	if _, err := f.WriteString(jid[1]); err != nil {
+		return -1, errors.Wrap(err, "Cant write jid_file")
+	}
+	intJobId, err := strconv.Atoi(jid[1])
 	if err != nil {
-		return errors.Wrap(err, "cannot generate slurm script")
+		return 0, errors.Wrap(err, "Cant convert jid as integer. Parsed irregular output!")
 	}
-
-	out := slurmBatchSubmit(path)
-
-	if err := handleJobID(c, out); err != nil {
-		return errors.Wrapf(err, "handleJobID")
-	}
-
-	logrus.Debugln(singularityCommand)
-	logrus.Infoln(out)
-
-	return nil
+	return intJobId, f.Close()
 }
-
-func DeleteContainer(c *api.DoorContainer) error {
-	data, err := os.ReadFile(".knoc/" + c.Name + ".jobID")
-	if err != nil {
-		return errors.Wrapf(err, "Can't find job id of container '%s'", c.Name)
-	}
-
-	jobID, err := strconv.Atoi(string(data))
-	if err != nil {
-		return errors.Wrapf(err, "Can't find job id of container '%s'", c.Name)
-	}
-
-	_, err = exec.Command(SCANCEL, fmt.Sprint(jobID)).Output()
-	if err != nil {
-		return errors.Wrapf(err, "Could not delete job '%s'", c.Name)
-	}
-
-	exec.Command("rm", "-f ", ".knoc/"+c.Name+".out")
-	exec.Command("rm", "-f ", ".knoc/"+c.Name+".err")
-	exec.Command("rm", "-f ", ".knoc/"+c.Name+".status")
-	exec.Command("rm", "-f ", ".knoc/"+c.Name+".jobID")
-	exec.Command("rm", "-rf", " .knoc/"+c.Name)
-
-	logrus.Info("Delete job", jobID)
-
-	return nil
-}
-
-func ImportContainerb64Json(containerSpec string) (*api.DoorContainer, error) {
-	dc := api.DoorContainer{}
-
-	sDec, err := b64.StdEncoding.DecodeString(containerSpec)
-	if err != nil {
-		return nil, errors.Wrap(err, "Wrong containerSpec!")
-	}
-
-	if err = json.Unmarshal(sDec, &dc); err != nil {
-		return nil, errors.Wrap(err, "Wrong type of doorContainer!")
-	}
-
-	return &dc, nil
-}
-
-/*
-func normalizeImageName(instanceName string) string {
-	instancesStr := strings.Split(instanceName, "/")
-	finalName := ""
-	firstIter := true
-
-	for _, strings := range instancesStr {
-		if firstIter {
-			finalName = strings
-			firstIter = false
-			continue
-		}
-		finalName = finalName + "-" + strings
-	}
-
-	return strings.Split(finalName, ":")[0]
-}
-
-func BuildRemoteExecutionInstanceName(pod *corev1.Pod, container *corev1.Container) string {
-	return pod.Namespace + "-" + string(pod.UID) + "-" + normalizeImageName(container.Image)
-}
-func BuildRemoteExecutionPodName(pod *corev1.Pod) string {
-	return pod.Namespace + "-" + string(pod.UID)
-}
-
 */
+// TODO: restructure
+//func DeleteContainer(c *corev1.Container) error {
+//	data, err := os.ReadFile(".knoc/" + c.Name + ".jobID")
+//	if err != nil {
+//		return errors.Wrapf(err, "Can't find job id of container '%s'", c.Name)
+//	}
+//
+//	jobID, err := strconv.Atoi(string(data))
+//	if err != nil {
+//		return errors.Wrapf(err, "Can't find job id of container '%s'", c.Name)
+//	}
+//
+//	_, err = exec.Command(SCANCEL, fmt.Sprint(jobID)).Output()
+//	if err != nil {
+//		return errors.Wrapf(err, "Could not delete job '%s'", c.Name)
+//	}
+//
+//	exec.Command("rm", "-f ", ".knoc/"+c.Name+".out")
+//	exec.Command("rm", "-f ", ".knoc/"+c.Name+".err")
+//	exec.Command("rm", "-f ", ".knoc/"+c.Name+".status")
+//	exec.Command("rm", "-f ", ".knoc/"+c.Name+".jobID")
+//	exec.Command("rm", "-rf", " .knoc/"+c.Name)
+//
+//	logrus.Info("Delete job", jobID)
+//
+//	return nil
+//}
 
 /*
 
@@ -720,8 +694,5 @@ func (p *Provider) GetStatsSummary(ctx context.Context) (*stats.Summary, error) 
 	// Return the dummy stats.
 	return res, nil
 }
-
-*/
-
 
 */

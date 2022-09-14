@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.package main
 
-package to_be_removed
+package provider
 
 import (
 	"context"
@@ -25,7 +25,7 @@ import (
 
 // CreateVirtualNode builds a kubernetes node object from a provider
 // This is a temporary solution until node stuff actually split off from the provider interface itself.
-func (p *provider.Provider) CreateVirtualNode(ctx context.Context, name string, taint *corev1.Taint) *corev1.Node {
+func (p *Provider) CreateVirtualNode(ctx context.Context, name string, taint *corev1.Taint) *corev1.Node {
 	taints := make([]corev1.Taint, 0)
 
 	if taint != nil {
