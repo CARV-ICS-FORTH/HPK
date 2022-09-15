@@ -1,7 +1,9 @@
 package hpc
 
 import (
+	"github.com/carv-ics-forth/knoc/api"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"os"
 	"os/exec"
 )
@@ -18,6 +20,7 @@ type HPCEnvironment struct {
 	scancelExecutablePath     string
 	singularityExecutablePath string
 	mpiexecExecutablePath     string
+	FSEventDispatcher         *FSEventDispatcher
 }
 
 // CheckExistenceOrDie searches for an executable named binary in the directories named by the PATH environment variable
@@ -40,6 +43,11 @@ func NewHPCEnvironment() *HPCEnvironment {
 		scancelExecutablePath:     CheckExistenceOrDie(SCANCEL),
 		singularityExecutablePath: CheckExistenceOrDie(SINGULARITY),
 		mpiexecExecutablePath:     CheckExistenceOrDie(MPIEXEC),
+
+		FSEventDispatcher: NewFSEventDispatcher(Options{
+			MaxWorkers:   api.DefaultMaxWorkers,
+			MaxQueueSize: api.DefaultMaxQueueSize,
+		}),
 	}
 }
 
@@ -61,9 +69,14 @@ func (hpc *HPCEnvironment) Scancel(args string) (string, error) {
 }
 
 func (hpc *HPCEnvironment) SBatchFromFile(path string) (string, error) {
-	output, err := exec.Command(hpc.sbatchExecutablePath, path).Output() //nolint:gosec
+
+	logrus.Warn("PATH:", hpc.sbatchExecutablePath, " cmd:", path)
+
+	output, err := exec.Command(hpc.sbatchExecutablePath, path).Output()
+	logrus.Warn("poutsakia ", string(output))
+
 	if err != nil {
-		return "", errors.Wrap(err, "Could not run sbatch. ")
+		return "", errors.Wrapf(err, "Could not run sbatch. out : '%s'", string(output))
 	}
 
 	return string(output), nil

@@ -37,7 +37,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
@@ -47,7 +46,7 @@ import (
 type Provider struct {
 	InitConfig
 
-	pods map[client.ObjectKey]*corev1.Pod
+	pods map[api.ObjectKey]*corev1.Pod
 	// startTime time.Time
 	// notifier  func(*corev1.Pod)
 
@@ -58,21 +57,20 @@ type Provider struct {
 
 // InitConfig is the config passed to initialize a registered provider.
 type InitConfig struct {
-	ConfigPath string
-	NodeName   string
-	InternalIP string
-	DaemonPort int32
-
-	HPC             *hpc.HPCEnvironment
-	ResourceManager *manager.ResourceManager
+	ConfigPath        string
+	NodeName          string
+	InternalIP        string
+	DaemonPort        int32
+	FSEventDispatcher *hpc.FSEventDispatcher
+	HPC               *hpc.HPCEnvironment
+	ResourceManager   *manager.ResourceManager
 }
 
 // NewProvider creates a new Provider, which implements the PodNotifier interface
 func NewProvider(config InitConfig) (*Provider, error) {
-
 	return &Provider{
 		InitConfig: config,
-		pods:       make(map[client.ObjectKey]*corev1.Pod),
+		pods:       make(map[api.ObjectKey]*corev1.Pod),
 		// startTime:  time.Now(),
 		// notifier:   nil,
 		Logger: zap.New(zap.UseDevMode(true)),
@@ -93,44 +91,39 @@ func NewProvider(config InitConfig) (*Provider, error) {
 // CreatePod accepts a Pod definition and stores it in memory.
 func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	p.Logger.Info("-> CreatePod",
-		"obj", client.ObjectKeyFromObject(pod),
+		"obj", api.ObjectKeyFromObject(pod),
 	)
 
 	defer p.Logger.Info("<- CreatePod",
-		"obj", client.ObjectKeyFromObject(pod),
+		"obj", api.ObjectKeyFromObject(pod),
 	)
 
-	if err := PrepareExecutionEnvironment(p, pod); err != nil {
-		return errors.Wrapf(err, "Couldn not prepare pod's environment ")
+	wrappedPod, err := NewKPod(p, pod, api.DefaultContainerRegistry)
+	if err != nil {
+		return errors.Wrapf(err, "failed to create kpod")
 	}
-
-	wrappedPod := NewKPod(p, pod, api.DefaultContainerRegistry)
 
 	if err := wrappedPod.ExecuteOperation(ctx, api.SUBMIT); err != nil {
 		return errors.Wrapf(err, "failed to submit job")
 	}
 
-	key := client.ObjectKeyFromObject(pod)
-	p.pods[key] = pod
-	// p.notifier(pod)
-
-	return nil
-
+	return wrappedPod.Save()
 }
 
 // UpdatePod accepts a Pod definition and updates its reference.
 func (p *Provider) UpdatePod(_ context.Context, pod *corev1.Pod) error {
 	p.Logger.Info("-> UpdatePod",
-		"obj", client.ObjectKeyFromObject(pod),
+		"obj", api.ObjectKeyFromObject(pod),
 	)
 
 	defer p.Logger.Info("<- UpdatePod",
-		"obj", client.ObjectKeyFromObject(pod),
+		"obj", api.ObjectKeyFromObject(pod),
 	)
 
-	key := client.ObjectKeyFromObject(pod)
+	key := api.ObjectKeyFromObject(pod)
 
 	p.pods[key] = pod
+	// TODO: stop and start the new pod
 	// p.notifier(pod)
 
 	return nil
@@ -139,14 +132,14 @@ func (p *Provider) UpdatePod(_ context.Context, pod *corev1.Pod) error {
 // DeletePod deletes the specified pod out of memory.
 func (p *Provider) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 	p.Logger.Info("-> DeletePod",
-		"obj", client.ObjectKeyFromObject(pod),
+		"obj", api.ObjectKeyFromObject(pod),
 	)
 
 	defer p.Logger.Info("<- DeletePod",
-		"obj", client.ObjectKeyFromObject(pod),
+		"obj", api.ObjectKeyFromObject(pod),
 	)
 
-	key := client.ObjectKeyFromObject(pod)
+	key := api.ObjectKeyFromObject(pod)
 
 	// check if the pod is managed
 	if _, exists := p.pods[key]; !exists {
@@ -174,17 +167,17 @@ func (p *Provider) GetPod(ctx context.Context, namespace, name string) (*corev1.
 		"name", name,
 	)
 
-	pods, err := p.GetPods(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, pod := range pods {
-		if pod.Name == name && pod.Namespace == namespace {
-			return pod, nil
-		}
+	key := api.ObjectKey{
+		Namespace: namespace,
+		Name:      name,
 	}
 
-	return nil, nil
+	kpod, err := LoadKPod(p, key, api.DefaultContainerRegistry)
+	if err != nil {
+		return nil, errors.Wrap(err, "Failed to load KPod")
+	}
+
+	return kpod.Pod, nil
 }
 
 // GetPodStatus returns the status of a pod by name that is "running".
@@ -262,7 +255,7 @@ func (p *Provider) GetContainerLogs(_ context.Context, namespace, podName, conta
 	p.Logger.Info("-> GetContainerLogs")
 	defer p.Logger.Info("<- GetContainerLogs")
 
-	key := client.ObjectKey{
+	key := api.ObjectKey{
 		Namespace: namespace,
 		Name:      podName,
 	}
@@ -411,38 +404,8 @@ func (p *Provider) NodeDaemonEndpoints(ctx context.Context) *corev1.NodeDaemonEn
 	return &corev1.NodeDaemonEndpoints{}
 }
 
-func PrepareExecutionEnvironment(p *Provider, pod *corev1.Pod) error {
-	/*
-		add kubeconfig on remote:$HOME
-	*/
-	//out, err := exec.Command("test -f .kube/config").Output()
-	//if _, ok := err.(*exec.ExitError); !ok {
-	//	log.GetLogger(ctx).Debug("Kubeconfig doesn't exist, so we will generate it...")
-	//
-	//	out, err = exec.Command("/bin/sh", "/home/user0/scripts/prepare_kubeconfig.sh").Output()
-	//	if err != nil {
-	//		return errors.Wrapf(err, "Could not run kubeconfig_setup script!")
-	//	}
-	//
-	//	log.GetLogger(ctx).Debug("Kubeconfig generated")
-	//
-	//	if _, err := exec.Command("mkdir -p .kube").Output(); err != nil {
-	//		return errors.Wrapf(err, "cannot create dir")
-	//	}
-	//
-	//	if _, err := exec.Command("echo \"" + string(out) + "\" > .kube/config").Output(); err != nil {
-	//		return errors.Wrapf(err, "Could not setup kubeconfig on the remote system ")
-	//	}
-	//
-	//	log.GetLogger(ctx).Debug("Kubeconfig installed")
-	//}
-
-	/*
-		.knoc is used for runtime files
-	*/
-	if err := os.MkdirAll(api.RuntimeDir, api.SecretPodData); err != nil {
-		return errors.Wrapf(err, "cannot create .knoc")
-	}
+func PrepareExecutionEnvironment(p *Provider, kpod *KPod) error {
+	pod := kpod.Pod
 
 	/*
 		Copy volumes from local Pod to remote Environment
@@ -450,7 +413,6 @@ func PrepareExecutionEnvironment(p *Provider, pod *corev1.Pod) error {
 	for _, vol := range pod.Spec.Volumes {
 		switch {
 		case vol.VolumeSource.ConfigMap != nil:
-			//panic("not yet implemented")
 
 			cmvs := vol.VolumeSource.ConfigMap
 
@@ -469,11 +431,10 @@ func PrepareExecutionEnvironment(p *Provider, pod *corev1.Pod) error {
 				}
 			}
 
-			// .knoc/podName/volName/*
-			podConfigMapDir := filepath.Join(api.RuntimeDir, pod.GetName(), cmvs.Name)
-
-			if err := os.MkdirAll(podConfigMapDir, 0766); err != nil {
-				return errors.Wrapf(err, "cannot create '%s'", podConfigMapDir)
+			// .knoc/namespace/podName/volName/*
+			podConfigMapDir, err := kpod.CreateSubDirectory(cmvs.Name)
+			if err != nil {
+				return errors.Wrapf(err, "cannot create dir '%s' for configMap", podConfigMapDir)
 			}
 
 			for k, v := range configMap.Data {
@@ -502,10 +463,9 @@ func PrepareExecutionEnvironment(p *Provider, pod *corev1.Pod) error {
 				}
 			}
 
-			// .knoc/podName/secretName/*
-			podSecretDir := filepath.Join(api.RuntimeDir, pod.GetName(), svs.SecretName)
-
-			if err := os.MkdirAll(podSecretDir, 0766); err != nil {
+			// .knoc/namespace/podName/secretName/*
+			podSecretDir, err := kpod.CreateSubDirectory(svs.SecretName)
+			if err != nil {
 				return errors.Wrapf(err, "cannot create dir '%s' for secrets", podSecretDir)
 			}
 
@@ -518,50 +478,54 @@ func PrepareExecutionEnvironment(p *Provider, pod *corev1.Pod) error {
 			}
 
 		case vol.VolumeSource.EmptyDir != nil:
-			// .knoc/podName/*
-			edPath := filepath.Join(api.RuntimeDir, vol.Name)
+			// .knoc/namespace/podName/*
 
 			// mounted for every container
-			if err := os.MkdirAll(edPath, 0766); err != nil {
-				return errors.Wrapf(err, "cannot create emptyDir '%s'", edPath)
+			emptyDir, err := kpod.CreateSubDirectory(vol.Name)
+			if err != nil {
+				return errors.Wrapf(err, "cannot create dir '%s' for emptyDir", emptyDir)
 			}
 			// without size limit for now
 
 		case vol.VolumeSource.DownwardAPI != nil:
-			podDownwardApiDir := filepath.Join(api.RuntimeDir, pod.GetName(), vol.Name)
+			// .knoc/namespace/podName/*
+			downApiDir, err := kpod.CreateSubDirectory(vol.Name)
+			if err != nil {
+				return errors.Wrapf(err, "cannot create dir '%s' for downwardApi", downApiDir)
+			}
 
-			for _, v := range vol.DownwardAPI.Items {
-				fullPath := filepath.Join(podDownwardApiDir, v.Path)
-				value, err := ExtractFieldPathAsString(pod, v.FieldRef.FieldPath)
+			for _, item := range vol.DownwardAPI.Items {
+				itemPath := filepath.Join(downApiDir, item.Path)
+				value, err := ExtractFieldPathAsString(pod, item.FieldRef.FieldPath)
 
 				if err != nil {
 					return err
 				}
 
-				if err := os.WriteFile(fullPath, []byte(value), fs.FileMode(*vol.Projected.DefaultMode)); err != nil {
-					return errors.Wrapf(err, "cannot write config map file '%s'", fullPath)
+				if err := os.WriteFile(itemPath, []byte(value), fs.FileMode(*vol.Projected.DefaultMode)); err != nil {
+					return errors.Wrapf(err, "cannot write config map file '%s'", itemPath)
 				}
 			}
 		case vol.VolumeSource.Projected != nil:
-			// .knoc/podName/*
-			projectedVolPath := filepath.Join(api.RuntimeDir, pod.GetName(), vol.Name)
-			if err := os.MkdirAll(projectedVolPath, 0766); err != nil {
-				return errors.Wrapf(err, "cannot create emptyDir '%s'", projectedVolPath)
+			// .knoc/namespace/podName/*
+			projectedVolPath, err := kpod.CreateSubDirectory(vol.Name)
+			if err != nil {
+				return errors.Wrapf(err, "cannot create dir '%s' for projected volume", projectedVolPath)
 			}
 
 			for _, projectedSrc := range vol.Projected.Sources {
 				switch {
 				case projectedSrc.DownwardAPI != nil:
-					for _, v := range projectedSrc.DownwardAPI.Items {
-						fullPath := filepath.Join(projectedVolPath, v.Path)
-						value, err := ExtractFieldPathAsString(pod, v.FieldRef.FieldPath)
+					for _, item := range projectedSrc.DownwardAPI.Items {
+						itemPath := filepath.Join(projectedVolPath, item.Path)
 
+						value, err := ExtractFieldPathAsString(pod, item.FieldRef.FieldPath)
 						if err != nil {
 							return err
 						}
 
-						if err := os.WriteFile(fullPath, []byte(value), fs.FileMode(*vol.Projected.DefaultMode)); err != nil {
-							return errors.Wrapf(err, "cannot write config map file '%s'", fullPath)
+						if err := os.WriteFile(itemPath, []byte(value), fs.FileMode(*vol.Projected.DefaultMode)); err != nil {
+							return errors.Wrapf(err, "cannot write config map file '%s'", itemPath)
 						}
 					}
 				case projectedSrc.ServiceAccountToken != nil:
@@ -581,10 +545,6 @@ func PrepareExecutionEnvironment(p *Provider, pod *corev1.Pod) error {
 						}
 					}
 
-					// .knoc/podName/volName/*
-					if err := os.MkdirAll(projectedVolPath, 0766); err != nil {
-						return errors.Wrapf(err, "cannot create '%s'", projectedVolPath)
-					}
 					secret, err := p.ResourceManager.GetSecret(serviceAccount.Secrets[0].Name, pod.GetNamespace())
 					if err != nil {
 						return err
@@ -613,16 +573,11 @@ func PrepareExecutionEnvironment(p *Provider, pod *corev1.Pod) error {
 						}
 					}
 
-					// .knoc/podName/volName/*
-					if err := os.MkdirAll(projectedVolPath, 0766); err != nil {
-						return errors.Wrapf(err, "cannot create '%s'", projectedVolPath)
-					}
-
-					for k, v := range configMap.Data {
+					for k, item := range configMap.Data {
 						// TODO: Ensure that these files are deleted in failure cases
-						fullPath := filepath.Join(projectedVolPath, k)
-						if err := os.WriteFile(fullPath, []byte(v), fs.FileMode(0766)); err != nil {
-							return errors.Wrapf(err, "cannot write config map file '%s'", fullPath)
+						itemPath := filepath.Join(projectedVolPath, k)
+						if err := os.WriteFile(itemPath, []byte(item), fs.FileMode(0766)); err != nil {
+							return errors.Wrapf(err, "cannot write config map file '%s'", itemPath)
 						}
 					}
 				case projectedSrc.Secret != nil:
@@ -641,22 +596,17 @@ func PrepareExecutionEnvironment(p *Provider, pod *corev1.Pod) error {
 						}
 					}
 
-					// .knoc/podName/volName/*
-					if err := os.MkdirAll(projectedVolPath, 0766); err != nil {
-						return errors.Wrapf(err, "cannot create '%s'", projectedVolPath)
-					}
-
-					for k, v := range secret.Data {
+					for k, item := range secret.Data {
 						// TODO: Ensure that these files are deleted in failure cases
-						fullPath := filepath.Join(projectedVolPath, k)
-						if err := os.WriteFile(fullPath, v, fs.FileMode(0766)); err != nil {
-							return errors.Wrapf(err, "cannot write config map file '%s'", fullPath)
+						itemPath := filepath.Join(projectedVolPath, k)
+						if err := os.WriteFile(itemPath, item, fs.FileMode(0766)); err != nil {
+							return errors.Wrapf(err, "cannot write config map file '%s'", itemPath)
 						}
 					}
 				}
 			}
 		case vol.VolumeSource.HostPath != nil:
-			hostPathVolPath := filepath.Join(api.RuntimeDir, pod.GetName(), vol.Name)
+			hostPathVolPath := filepath.Join(kpod.RuntimeDir(), vol.Name)
 
 			switch *vol.VolumeSource.HostPath.Type {
 			case corev1.HostPathUnset:

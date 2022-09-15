@@ -94,7 +94,7 @@ func (e *LocalExecutor) ExecuteOperation(ctx context.Context, mode api.Operation
 
 		*prevJobID = jid
 
-		return WatchPodDirectory(ctx, pak.PodRuntimeRootDir())
+		return WatchPodDirectory(ctx, pak.RuntimeDir())
 	}
 */
 

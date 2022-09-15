@@ -113,7 +113,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	/*
 		Register the Provisioner of Virtual Nodes
 	*/
-	p, err := provider.NewProvider(provider.InitConfig{
+	newProvider, err := provider.NewProvider(provider.InitConfig{
 		ConfigPath:      c.ProviderConfigPath,
 		NodeName:        c.NodeName,
 		InternalIP:      os.Getenv("VKUBELET_POD_IP"),
@@ -121,6 +121,8 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		ResourceManager: rm,
 		HPC:             hpc.NewHPCEnvironment(),
 	})
+
+	go newProvider.HPC.FSEventDispatcher.Run(ctx, newProvider)
 
 	if err != nil {
 		return err
@@ -131,7 +133,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		return err
 	}
 
-	cancelHTTP, err := setupHTTPServer(ctx, p, apiConfig)
+	cancelHTTP, err := setupHTTPServer(ctx, newProvider, apiConfig)
 	if err != nil {
 		return err
 	}
@@ -149,7 +151,9 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		}
 	}
 
-	pNode := p.CreateVirtualNode(ctx, c.NodeName, taint)
+	pNode := newProvider.CreateVirtualNode(ctx, c.NodeName, taint)
+
+	// activate fs notifier
 
 	nodeControllerOpts := []node.NodeControllerOpt{
 		node.WithNodeStatusUpdateErrorHandler(func(ctx context.Context, err error) error {
@@ -197,7 +201,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		PodClient:         client.CoreV1(),
 		PodInformer:       podInformer,
 		EventRecorder:     eb.NewRecorder(scheme.Scheme, corev1.EventSource{Component: path.Join(pNode.Name, "pod-controller")}),
-		Provider:          p,
+		Provider:          newProvider,
 		SecretInformer:    secretInformer,
 		ConfigMapInformer: configMapInformer,
 		ServiceInformer:   serviceInformer,

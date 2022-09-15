@@ -15,6 +15,8 @@
 package api
 
 import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -57,6 +59,10 @@ const (
 	NameKey          = "name"
 	ContainerNameKey = "containerName"
 
+	DefaultMaxWorkers   = 10
+	DefaultMaxQueueSize = 100
+
+	ExitCodeExtension        = ".exitCode"
 	RuntimeDir               = ".knoc"
 	TemporaryDir             = ".tmp"
 	SecretPodData            = 0760
@@ -94,3 +100,11 @@ type KNOCConfig struct {
 }
 
 */
+
+// ObjectKey identifies a Kubernetes Object.
+type ObjectKey = types.NamespacedName
+
+// ObjectKeyFromObject returns the ObjectKey given a runtime.Object.
+func ObjectKeyFromObject(obj metav1.Object) ObjectKey {
+	return ObjectKey{Namespace: obj.GetNamespace(), Name: obj.GetName()}
+}
