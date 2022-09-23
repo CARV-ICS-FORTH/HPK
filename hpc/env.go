@@ -1,11 +1,14 @@
 package hpc
 
 import (
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
+
 	"github.com/carv-ics-forth/knoc/api"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
-	"os"
-	"os/exec"
 )
 
 const (
@@ -35,6 +38,40 @@ func CheckExistenceOrDie(binary string) string {
 			return path
 		}
 	}
+}
+
+func GetPauseInstancePID(instanceName string) (int, error) {
+	out, err := exec.Command("singularity", "instance", "list").Output()
+	if err != nil {
+		return 0, errors.Wrapf(err, "Could not retrieve instance list for instance '%s'", instanceName)
+	}
+	// create an array from output that's been split by record (row)
+	records := strings.Split(string(out), "\n")
+	// get rid of the column names
+	records = records[1:]
+
+	// linear search for the pause Instance
+	// logrus.Debug()
+	logrus.Warn(records)
+	for i := range records {
+		if len(records[i]) == 0 {
+			continue
+		}
+		trimmed := strings.Join(strings.Fields(records[i]), " ")
+		fields := strings.Split(trimmed, " ")
+		logrus.Warn(fields)
+		pid, err := strconv.Atoi(fields[1])
+		// panic("kaka")
+		if err != nil {
+			return 0, errors.Wrapf(err, "Could not convert instance PID for instance '%s'", instanceName)
+		}
+
+		if fields[0] == instanceName {
+			return pid, nil
+		}
+	}
+
+	return 0, errors.Wrapf(err, "Could not find instance PID for instance '%s'", instanceName)
 }
 
 func NewHPCEnvironment() *HPCEnvironment {
@@ -69,12 +106,9 @@ func (hpc *HPCEnvironment) Scancel(args string) (string, error) {
 }
 
 func (hpc *HPCEnvironment) SBatchFromFile(path string) (string, error) {
-
 	logrus.Warn("PATH:", hpc.sbatchExecutablePath, " cmd:", path)
 
 	output, err := exec.Command(hpc.sbatchExecutablePath, path).Output()
-	logrus.Warn("poutsakia ", string(output))
-
 	if err != nil {
 		return "", errors.Wrapf(err, "Could not run sbatch. out : '%s'", string(output))
 	}

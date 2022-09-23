@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/carv-ics-forth/knoc/hpc"
+
 	"github.com/carv-ics-forth/knoc/api"
 	"github.com/fsnotify/fsnotify"
 	"github.com/pkg/errors"
@@ -27,7 +29,6 @@ func LoadKPod(provider *Provider, key api.ObjectKey, cRg string) (*KPod, error) 
 	pod.Name = key.Name
 
 	podSpecFilePath := filepath.Join(api.RuntimeDir, pod.GetNamespace(), pod.GetName(), pod.GetName()+".json")
-
 	specEnc, err := os.ReadFile(podSpecFilePath)
 	if err != nil {
 		return nil, errors.Wrapf(err, "cannot read pod json file '%s'", podSpecFilePath)
@@ -48,7 +49,7 @@ func NewKPod(provider *Provider, pod *corev1.Pod, cRg string) (*KPod, error) {
 		Mounts:            nil,
 		Commands:          nil,
 		CommandArguments:  nil,
-		containerRegistry: cRg,
+		ContainerRegistry: cRg,
 	}
 
 	// create temporary dir
@@ -69,12 +70,14 @@ type KPod struct {
 
 	Pod *corev1.Pod
 
+	PauseContainerPID int
+
 	Envs             []string
 	Mounts           []string
 	Commands         []string
 	CommandArguments []string
 
-	containerRegistry string
+	ContainerRegistry string
 }
 
 // JobName podName/containerName.
@@ -122,10 +125,6 @@ func (kpod *KPod) PodSpecFilePath() string {
 	return filepath.Join(kpod.RuntimeDir(), kpod.Pod.GetName()+".json")
 }
 
-func (kpod *KPod) ContainerRegistry() string {
-	return kpod.containerRegistry
-}
-
 func (kpod *KPod) GenerateMountPaths(mount corev1.VolumeMount) string {
 	return fmt.Sprintf("%s/%s/%s:%s", api.RuntimeDir, kpod.Pod.GetName(), mount.Name, mount.MountPath)
 }
@@ -133,10 +132,17 @@ func (kpod *KPod) GenerateMountPaths(mount corev1.VolumeMount) string {
 func (kpod *KPod) ExecuteOperation(ctx context.Context, mode api.Operation) error {
 	switch mode {
 	case api.SUBMIT:
+		// return nil
 		var prevJobID *int
 		prevJobID = new(int)
 		*prevJobID = -1
 		lastInitContainerJobID := -1
+
+		//// create a dummy container that will be a placeholder of network namespaces
+		// FIXME: not currently supported
+		//if err := kpod.CreatePauseContainer(); err != nil {
+		//	panic(errors.Wrapf(err, "Could not create pause Container"))
+		//}
 
 		for index := range kpod.Pod.Spec.InitContainers {
 			if err := kpod.createContainer(ctx, &kpod.Pod.Spec.InitContainers[index], prevJobID); err != nil {
@@ -182,9 +188,24 @@ func (kpod *KPod) createContainer(ctx context.Context, container *corev1.Contain
 			}
 		}
 	*/
-	singularityCommand := append([]string{kpod.Provider.HPC.SingularityPath(), "exec"}, kpod.Envs...)
+	var singularityCommand []string
+
+	// linter calls me out on converting the integer first to rune and then to string... dunno, i'll comply
+	if kpod.PauseContainerPID != 0 {
+		//nolint:lll    // panic(errors.Wrapf(nil, "Invalid pauseContainer's PID; can't proceed without an already established network namespace."))
+		singularityCommand = append(singularityCommand, []string{
+			"nsenter", "-t", string(rune(kpod.PauseContainerPID)), "-n",
+		}...)
+	}
+
+	singularityExec := []string{
+		kpod.Provider.HPC.SingularityPath(), "exec",
+	}
+
+	singularityCommand = append(singularityCommand, singularityExec...)
+	singularityCommand = append(singularityCommand, kpod.Envs...)
 	singularityCommand = append(singularityCommand, kpod.Mounts...)
-	singularityCommand = append(singularityCommand, kpod.containerRegistry+container.Image)
+	singularityCommand = append(singularityCommand, kpod.ContainerRegistry+container.Image)
 	singularityCommand = append(singularityCommand, kpod.Commands...)
 	singularityCommand = append(singularityCommand, kpod.CommandArguments...)
 
@@ -262,7 +283,7 @@ func (kpod *KPod) produceSlurmScript(container *corev1.Container, prevJobID int,
 	var sbatchFlagsFromArgo []string
 	sbatchFlagsAsString := ""
 
-	if err := os.MkdirAll(filepath.Join(api.TemporaryDir, kpod.Pod.GetName()), api.SecretPodData); err != nil {
+	if err := os.MkdirAll(kpod.TemporaryDir(), api.TemporaryPodDataPermissions); err != nil {
 		return "", errors.Wrapf(err, "Could not create '%s' directory", filepath.Join(api.TemporaryDir, kpod.Pod.GetName()))
 	}
 
@@ -387,7 +408,7 @@ func (kpod *KPod) Save() error {
 		return errors.Wrapf(err, "cannot marhsall pod '%s' to json", kpod.Pod.GetName())
 	}
 
-	if err := os.WriteFile(kpod.PodSpecFilePath(), marshalledPod, 0o600); err != nil {
+	if err := os.WriteFile(kpod.PodSpecFilePath(), marshalledPod, api.PodSpecJsonFilePermissions); err != nil {
 		return errors.Wrapf(err, "cannot write pod json file '%s'", kpod.PodSpecFilePath())
 	}
 
@@ -397,9 +418,79 @@ func (kpod *KPod) Save() error {
 func (kpod *KPod) CreateSubDirectory(name string) (string, error) {
 	fullPath := filepath.Join(kpod.RuntimeDir(), name)
 
-	if err := os.MkdirAll(fullPath, 0o766); err != nil {
+	if err := os.MkdirAll(fullPath, api.PodGlobalDirectoryPermissions); err != nil {
 		return fullPath, errors.Wrapf(err, "cannot create dir '%s'", fullPath)
 	}
 
 	return fullPath, nil
+}
+
+func (kpod *KPod) generatePauseContainerName() string {
+	return filepath.Join(kpod.Pod.GetNamespace(), kpod.Pod.GetName(), api.PauseContainerName)
+}
+
+func (kpod *KPod) GetPauseContainerPID() (int, error) {
+	pauseInstanceName := kpod.generatePauseContainerName()
+	pid, err := hpc.GetPauseInstancePID(pauseInstanceName)
+	if err != nil {
+		return 0, errors.Wrapf(err, "Could not get pauseContainer's PID")
+	}
+
+	return pid, nil
+}
+
+func (kpod *KPod) CreatePauseContainer() error {
+	container := new(corev1.Container)
+	container.Name = api.PauseContainerName
+	container.Image = "scratch"
+	sbatchFlagsAsString := ""
+
+	singularityCommand := append([]string{kpod.Provider.HPC.SingularityPath(), "instance", "start"}, kpod.ContainerRegistry+container.Image)
+	singularityCommand = append(singularityCommand, api.PauseContainerCommand...)
+
+	if err := os.MkdirAll(kpod.TemporaryDir(), api.TemporaryPodDataPermissions); err != nil {
+		return errors.Wrapf(err, "Could not create '%s' directory", kpod.TemporaryDir())
+	}
+
+	ssfPath := kpod.ScriptFilePath(container)
+
+	scriptFile, err := os.Create(ssfPath)
+	if err != nil {
+		return errors.Wrapf(err, "Cant create slurm_script '%s'", ssfPath)
+	}
+
+	finalScriptData := kpod.Provider.HPC.SbatchMacros(kpod.JobName(container), sbatchFlagsAsString) +
+		"\n" +
+		strings.Join(singularityCommand, " ") + " >> " + kpod.StdOutputFilePath(container) +
+		" 2>> " + kpod.StdErrorFilePath(container) +
+		"\n echo $? > " + kpod.ExitCodeFilePath(container)
+
+	if _, err = scriptFile.WriteString(finalScriptData); err != nil {
+		return errors.Wrapf(err, "Can't write sbatch script in file '%s'", ssfPath)
+	}
+
+	if err := scriptFile.Close(); err != nil {
+		return errors.Wrap(err, "Close")
+	}
+
+	out, err := kpod.Provider.HPC.SBatchFromFile(ssfPath)
+	if err != nil {
+		return errors.Wrapf(err, "Can't submit sbatch script")
+	}
+
+	// if sbatch script is successfully submitted check for job id
+	if _, err := kpod.handleJobID(container, out); err != nil {
+		return errors.Wrapf(err, "handleJobID")
+	}
+
+	pid, err := kpod.GetPauseContainerPID()
+	if err != nil {
+		return errors.Wrapf(err, "Can't get pauseContainer PID")
+	}
+
+	// note the pauseContainer's PID for later use
+	// so that the future containers of this pod, join this namespace
+	kpod.PauseContainerPID = pid
+
+	return nil
 }

@@ -17,16 +17,18 @@ package provider
 import (
 	"context"
 	"fmt"
-	"github.com/carv-ics-forth/knoc/hpc"
 	"io"
 	"io/fs"
-	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/validation"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/carv-ics-forth/knoc/hpc"
+
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/carv-ics-forth/knoc/api"
 	"github.com/carv-ics-forth/knoc/pkg/manager"
@@ -57,13 +59,12 @@ type Provider struct {
 
 // InitConfig is the config passed to initialize a registered provider.
 type InitConfig struct {
-	ConfigPath        string
-	NodeName          string
-	InternalIP        string
-	DaemonPort        int32
-	FSEventDispatcher *hpc.FSEventDispatcher
-	HPC               *hpc.HPCEnvironment
-	ResourceManager   *manager.ResourceManager
+	ConfigPath      string
+	NodeName        string
+	InternalIP      string
+	DaemonPort      int32
+	HPC             *hpc.HPCEnvironment
+	ResourceManager *manager.ResourceManager
 }
 
 // NewProvider creates a new Provider, which implements the PodNotifier interface
@@ -120,11 +121,14 @@ func (p *Provider) UpdatePod(_ context.Context, pod *corev1.Pod) error {
 		"obj", api.ObjectKeyFromObject(pod),
 	)
 
-	key := api.ObjectKeyFromObject(pod)
+	kpod, err := NewKPod(p, pod, api.DefaultContainerRegistry)
+	if err != nil {
+		return errors.Wrap(err, "Could not create Pod from the underlying filesystem")
+	}
 
-	p.pods[key] = pod
-	// TODO: stop and start the new pod
-	// p.notifier(pod)
+	if err := kpod.Save(); err != nil {
+		return errors.Wrap(err, "Could not save Pod to the underlying filesystem")
+	}
 
 	return nil
 }
@@ -157,7 +161,7 @@ func (p *Provider) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 }
 
 // GetPod returns a pod by name that is stored in memory.
-func (p *Provider) GetPod(ctx context.Context, namespace, name string) (*corev1.Pod, error) {
+func (p *Provider) GetPod(_ context.Context, namespace, name string) (*corev1.Pod, error) {
 	p.Logger.Info("-> GetPod",
 		"namespace", namespace,
 		"name", name,
@@ -497,7 +501,6 @@ func PrepareExecutionEnvironment(p *Provider, kpod *KPod) error {
 			for _, item := range vol.DownwardAPI.Items {
 				itemPath := filepath.Join(downApiDir, item.Path)
 				value, err := ExtractFieldPathAsString(pod, item.FieldRef.FieldPath)
-
 				if err != nil {
 					return err
 				}
@@ -553,7 +556,7 @@ func PrepareExecutionEnvironment(p *Provider, kpod *KPod) error {
 					// TODO: Update upon exceeded expiration date
 					// TODO: Ensure that these files are deleted in failure cases
 					fullPath := filepath.Join(projectedVolPath, projectedSrc.ServiceAccountToken.Path)
-					if err := os.WriteFile(fullPath, secret.Data[projectedSrc.ServiceAccountToken.Path], fs.FileMode(0766)); err != nil {
+					if err := os.WriteFile(fullPath, secret.Data[projectedSrc.ServiceAccountToken.Path], fs.FileMode(0o766)); err != nil {
 						return errors.Wrapf(err, "cannot write config map file '%s'", fullPath)
 					}
 
@@ -576,7 +579,7 @@ func PrepareExecutionEnvironment(p *Provider, kpod *KPod) error {
 					for k, item := range configMap.Data {
 						// TODO: Ensure that these files are deleted in failure cases
 						itemPath := filepath.Join(projectedVolPath, k)
-						if err := os.WriteFile(itemPath, []byte(item), fs.FileMode(0766)); err != nil {
+						if err := os.WriteFile(itemPath, []byte(item), fs.FileMode(0o766)); err != nil {
 							return errors.Wrapf(err, "cannot write config map file '%s'", itemPath)
 						}
 					}
@@ -599,7 +602,7 @@ func PrepareExecutionEnvironment(p *Provider, kpod *KPod) error {
 					for k, item := range secret.Data {
 						// TODO: Ensure that these files are deleted in failure cases
 						itemPath := filepath.Join(projectedVolPath, k)
-						if err := os.WriteFile(itemPath, item, fs.FileMode(0766)); err != nil {
+						if err := os.WriteFile(itemPath, item, fs.FileMode(0o766)); err != nil {
 							return errors.Wrapf(err, "cannot write config map file '%s'", itemPath)
 						}
 					}

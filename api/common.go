@@ -15,9 +15,10 @@
 package api
 
 import (
+	"time"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 )
@@ -48,6 +49,8 @@ const (
 	DELETE = Operation("delete")
 )
 
+var PauseContainerCommand = []string{"sleep", "infinity"}
+
 const (
 	// Provider configuration defaults.
 	DefaultCPUCapacity    = "20"
@@ -62,20 +65,25 @@ const (
 	DefaultMaxWorkers   = 10
 	DefaultMaxQueueSize = 100
 
-	ExitCodeExtension        = ".exitCode"
-	RuntimeDir               = ".knoc"
-	TemporaryDir             = ".tmp"
-	SecretPodData            = 0760
-	PodSecretVolPerms        = 0755
-	PodSecretVolDir          = "/secrets"
-	PodSecretFilePerms       = 0644
-	PodConfigMapVolPerms     = 0755
-	PodConfigMapVolDir       = "/configmaps"
-	PodConfigMapFilePerms    = 0644
-	PodDownwardApiVolPerms   = 0755
-	PodDownwardApiVolDir     = "/downwardapis"
-	PodDownwardApiFilePerms  = 0644
-	DefaultContainerRegistry = "docker://"
+	ExitCodeExtension             = ".exitCode"
+	JobIdExtension                = ".jid"
+	PauseContainerName            = "pause"
+	RuntimeDir                    = ".knoc"
+	TemporaryDir                  = ".tmp"
+	PodGlobalDirectoryPermissions = 0o766
+	PodSpecJsonFilePermissions    = 0o600
+	SecretPodDataPermissions      = 0o760
+	TemporaryPodDataPermissions   = 0o760
+	PodSecretVolPermissions       = 0o755
+	PodSecretVolDir               = "/secrets"
+	PodSecretFilePermissions      = 0o644
+	PodConfigMapVolPermissions    = 0o755
+	PodConfigMapVolDir            = "/configmaps"
+	PodConfigMapFilePermissions   = 0o644
+	PodDownwardApiVolPermissions  = 0o755
+	PodDownwardApiVolDir          = "/downwardapis"
+	PodDownwardApiFilePermissions = 0o644
+	DefaultContainerRegistry      = "docker://"
 )
 
 /*

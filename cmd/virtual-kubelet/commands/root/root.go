@@ -16,10 +16,11 @@ package root
 
 import (
 	"context"
-	"github.com/carv-ics-forth/knoc/hpc"
 	"os"
 	"path"
 	"time"
+
+	"github.com/carv-ics-forth/knoc/hpc"
 
 	"github.com/carv-ics-forth/knoc/pkg/manager"
 	"github.com/carv-ics-forth/knoc/provider"
