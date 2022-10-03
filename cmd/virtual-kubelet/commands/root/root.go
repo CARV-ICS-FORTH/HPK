@@ -117,7 +117,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	newProvider, err := provider.NewProvider(provider.InitConfig{
 		ConfigPath:      c.ProviderConfigPath,
 		NodeName:        c.NodeName,
-		InternalIP:      os.Getenv("VKUBELET_POD_IP"),
+		InternalIP:      envOr("VKUBELET_POD_IP", "127.0.0.1"),
 		DaemonPort:      c.ListenPort,
 		ResourceManager: rm,
 		HPC:             hpc.NewHPCEnvironment(),
@@ -244,4 +244,12 @@ func waitFor(ctx context.Context, time time.Duration, ready <-chan struct{}) err
 	case <-ctx.Done():
 		return errors.Wrap(ctx.Err(), "Error while starting up VK")
 	}
+}
+
+func envOr(name, def string) string {
+	if v, ok := os.LookupEnv(name); ok {
+		return v
+	}
+
+	return def
 }

@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  generateName: busyecho-
+  name: busyecho
 spec:
   containers:
     - image: busybox

@@ -141,6 +141,7 @@ func serveHTTP(ctx context.Context, s *http.Server, l net.Listener, name string)
 			log.G(ctx).WithError(err).Errorf("Error setting up %s http server", name)
 		}
 	}
+
 	l.Close()
 }
 

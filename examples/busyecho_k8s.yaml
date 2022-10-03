@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: busyecho
+  name: busyecho-k8s
   annotations:
     slurm-job.knoc.io/flags: "--job-name=testcoin"
 spec:

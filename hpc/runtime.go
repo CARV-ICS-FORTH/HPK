@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/carv-ics-forth/knoc/api"
+	"github.com/carv-ics-forth/knoc/pkg/ui"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
@@ -30,14 +31,16 @@ type HPCEnvironment struct {
 // and returns the binary's path, otherwise panics
 func CheckExistenceOrDie(binary string) string {
 	if path, err := exec.LookPath(binary); err != nil {
-		panic(errors.Wrapf(err, "Could not find '%s'", binary))
+		ui.Fail(err)
 	} else {
 		if _, err := os.Stat(path); os.IsNotExist(err) {
-			panic(errors.Wrapf(err, "'%s' doesn't exist", binary))
+			ui.Fail(err)
 		} else {
 			return path
 		}
 	}
+
+	panic("should never reach here")
 }
 
 func GetPauseInstancePID(instanceName string) (int, error) {
@@ -57,9 +60,12 @@ func GetPauseInstancePID(instanceName string) (int, error) {
 		if len(records[i]) == 0 {
 			continue
 		}
+
 		trimmed := strings.Join(strings.Fields(records[i]), " ")
 		fields := strings.Split(trimmed, " ")
+
 		logrus.Warn(fields)
+
 		pid, err := strconv.Atoi(fields[1])
 		// panic("kaka")
 		if err != nil {
@@ -79,7 +85,7 @@ func NewHPCEnvironment() *HPCEnvironment {
 		sbatchExecutablePath:      CheckExistenceOrDie(SBATCH),
 		scancelExecutablePath:     CheckExistenceOrDie(SCANCEL),
 		singularityExecutablePath: CheckExistenceOrDie(SINGULARITY),
-		mpiexecExecutablePath:     CheckExistenceOrDie(MPIEXEC),
+		// mpiexecExecutablePath:     CheckExistenceOrDie(MPIEXEC),
 
 		FSEventDispatcher: NewFSEventDispatcher(Options{
 			MaxWorkers:   api.DefaultMaxWorkers,

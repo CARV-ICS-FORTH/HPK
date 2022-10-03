@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -11,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/carv-ics-forth/knoc/hpc"
+	"github.com/carv-ics-forth/knoc/provider/paths"
+	"github.com/hashicorp/go-multierror"
 
 	"github.com/carv-ics-forth/knoc/api"
 	"github.com/fsnotify/fsnotify"
@@ -22,15 +23,20 @@ import (
 
 var escapeScripts = regexp.MustCompile(`(--[A-Za-z0-9\-]+=)(\$[{\(][A-Za-z0-9_]+[\)\}])`)
 
-func LoadKPod(provider *Provider, key api.ObjectKey, cRg string) (*KPod, error) {
+var errNotFound = errors.New("pod is not found")
+
+func LoadKPod(provider *Provider, podRef api.ObjectKey, cRg string) (*KPod, error) {
 	var pod corev1.Pod
 
-	pod.Namespace = key.Namespace
-	pod.Name = key.Name
+	pod.Namespace = podRef.Namespace
+	pod.Name = podRef.Name
 
-	podSpecFilePath := filepath.Join(api.RuntimeDir, pod.GetNamespace(), pod.GetName(), pod.GetName()+".json")
+	podSpecFilePath := paths.PodSpecFilePath(podRef)
+
 	specEnc, err := os.ReadFile(podSpecFilePath)
-	if err != nil {
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, errNotFound
+	} else if err != nil {
 		return nil, errors.Wrapf(err, "cannot read pod json file '%s'", podSpecFilePath)
 	}
 
@@ -42,6 +48,7 @@ func LoadKPod(provider *Provider, key api.ObjectKey, cRg string) (*KPod, error) 
 }
 
 func NewKPod(provider *Provider, pod *corev1.Pod, cRg string) (*KPod, error) {
+
 	kpod := &KPod{
 		Provider:          provider,
 		Pod:               pod,
@@ -53,12 +60,16 @@ func NewKPod(provider *Provider, pod *corev1.Pod, cRg string) (*KPod, error) {
 	}
 
 	// create temporary dir
-	if err := os.MkdirAll(kpod.TemporaryDir(), os.ModePerm); err != nil {
-		return nil, errors.Wrapf(err, "Cant create pod directory '%s'", kpod.TemporaryDir())
+	podRef := api.ObjectKeyFromObject(pod)
+
+	tempDirPath := paths.TemporaryDir(podRef)
+
+	if err := os.MkdirAll(tempDirPath, os.ModePerm); err != nil {
+		return nil, errors.Wrapf(err, "Cant create pod directory '%s'", tempDirPath)
 	}
 
 	// create runtime dir
-	if err := PrepareExecutionEnvironment(provider, kpod); err != nil {
+	if err := CreateBackendVolumes(provider, kpod); err != nil {
 		return nil, errors.Wrapf(err, "Couldn not prepare pod's environment ")
 	}
 
@@ -80,89 +91,66 @@ type KPod struct {
 	ContainerRegistry string
 }
 
-// JobName podName/containerName.
-func (kpod *KPod) JobName(container *corev1.Container) string {
-	return kpod.Pod.Name + "/" + container.Name
-}
+func (kpod *KPod) CreatePod(ctx context.Context, pod *corev1.Pod) error {
+	// return nil
+	var prevJobID *int
+	prevJobID = new(int)
+	*prevJobID = -1
+	lastInitContainerJobID := -1
 
-// TemporaryDir .tmp/namespace/podName.
-func (kpod *KPod) TemporaryDir() string {
-	return filepath.Join(api.TemporaryDir, kpod.Pod.GetNamespace(), kpod.Pod.Name)
-}
+	// // create a dummy container that will be a placeholder of network namespaces
+	// FIXME: not currently supported
+	// if err := kpod.CreatePauseContainer(); err != nil {
+	//	panic(errors.Wrapf(err, "Could not create pause Container"))
+	// }
 
-// RuntimeDir .knoc/namespace/podName.
-func (kpod *KPod) RuntimeDir() string {
-	return filepath.Join(api.RuntimeDir, kpod.Pod.GetNamespace(), kpod.Pod.Name)
-}
-
-// ScriptFilePath .tmp/namespace/podName/containerName.sh.
-func (kpod *KPod) ScriptFilePath(container *corev1.Container) string {
-	return filepath.Join(kpod.TemporaryDir(), container.Name+".sh")
-}
-
-// StdOutputFilePath .knoc/namespace/podName/containerName.stdout.
-func (kpod *KPod) StdOutputFilePath(container *corev1.Container) string {
-	return filepath.Join(kpod.RuntimeDir(), container.Name+".stdout")
-}
-
-// StdErrorFilePath .knoc/namespace/podName/containerName.stderr.
-func (kpod *KPod) StdErrorFilePath(container *corev1.Container) string {
-	return filepath.Join(kpod.RuntimeDir(), container.Name+".stderr")
-}
-
-// ExitCodeFilePath .knoc/namespace/podName/containerName.exitCode.
-func (kpod *KPod) ExitCodeFilePath(container *corev1.Container) string {
-	return filepath.Join(kpod.RuntimeDir(), container.Name+".exitCode")
-}
-
-// JobIDFilePath .knoc/namespace/podName/containerName.jid.
-func (kpod *KPod) JobIDFilePath(container *corev1.Container) string {
-	return filepath.Join(kpod.RuntimeDir(), container.Name+".jid")
-}
-
-// PodSpecFilePath .knoc/namespace/podName/podName.json.
-func (kpod *KPod) PodSpecFilePath() string {
-	return filepath.Join(kpod.RuntimeDir(), kpod.Pod.GetName()+".json")
-}
-
-func (kpod *KPod) GenerateMountPaths(mount corev1.VolumeMount) string {
-	return fmt.Sprintf("%s/%s/%s:%s", api.RuntimeDir, kpod.Pod.GetName(), mount.Name, mount.MountPath)
-}
-
-func (kpod *KPod) ExecuteOperation(ctx context.Context, mode api.Operation) error {
-	switch mode {
-	case api.SUBMIT:
-		// return nil
-		var prevJobID *int
-		prevJobID = new(int)
-		*prevJobID = -1
-		lastInitContainerJobID := -1
-
-		//// create a dummy container that will be a placeholder of network namespaces
-		// FIXME: not currently supported
-		//if err := kpod.CreatePauseContainer(); err != nil {
-		//	panic(errors.Wrapf(err, "Could not create pause Container"))
-		//}
-
-		for index := range kpod.Pod.Spec.InitContainers {
-			if err := kpod.createContainer(ctx, &kpod.Pod.Spec.InitContainers[index], prevJobID); err != nil {
-				return errors.Wrapf(err, "Could not create container from door")
-			}
-
-			// We're keeping the last init container jobID to give it to the main Containers as a dependency,
-			// since we don't want sequential execution on main Containers
-			lastInitContainerJobID = *prevJobID
+	for index := range pod.Spec.InitContainers {
+		if err := kpod.createContainer(ctx, &pod.Spec.InitContainers[index], prevJobID); err != nil {
+			return errors.Wrapf(err, "Could not create container from door")
 		}
 
-		for index := range kpod.Pod.Spec.Containers {
-			*prevJobID = lastInitContainerJobID
-			if err := kpod.createContainer(ctx, &kpod.Pod.Spec.Containers[index], prevJobID); err != nil {
-				return errors.Wrapf(err, "Could not create container from door")
-			}
-		}
-	case api.DELETE:
-		/* ... */
+		// We're keeping the last init container jobID to give it to the main Containers as a dependency,
+		// since we don't want sequential execution on main Containers
+		lastInitContainerJobID = *prevJobID
+
+		// register a status placeholder for the created container
+		pod.Status.InitContainerStatuses = append(pod.Status.InitContainerStatuses, corev1.ContainerStatus{
+			Name:                 pod.Spec.InitContainers[index].Name,
+			State:                corev1.ContainerState{},
+			LastTerminationState: corev1.ContainerState{},
+			Ready:                false,
+			RestartCount:         0,
+			Image:                pod.Spec.InitContainers[index].Image,
+			ImageID:              "", // TODO: add what ?
+			ContainerID:          "", // TODO: add the underlying fs path to container
+			Started:              nil,
+		})
 	}
+
+	for index := range pod.Spec.Containers {
+		if err := kpod.createContainer(ctx, &pod.Spec.Containers[index], &lastInitContainerJobID); err != nil {
+			return errors.Wrapf(err, "Could not create container from door")
+		}
+
+		// register a status placeholder for the created container
+		pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, corev1.ContainerStatus{
+			Name:                 pod.Spec.Containers[index].Name,
+			State:                corev1.ContainerState{},
+			LastTerminationState: corev1.ContainerState{},
+			Ready:                false,
+			RestartCount:         0,
+			Image:                pod.Spec.Containers[index].Image,
+			ImageID:              "", // TODO: add what ?
+			ContainerID:          "", // TODO: add the underlying fs path to container
+			Started:              nil,
+		})
+	}
+
+	// set the ip of the running pods to the virtual node
+	pod.Status.PodIP = kpod.Provider.InternalIP
+	pod.Status.PodIPs = []corev1.PodIP{{
+		IP: kpod.Provider.InternalIP,
+	}}
 
 	return nil
 }
@@ -270,21 +258,27 @@ func (kpod *KPod) PrepareContainerData(container *corev1.Container) error {
 func (kpod *KPod) prepareMounts(container *corev1.Container) []string {
 	mountArgs := make([]string, 0, len(container.VolumeMounts))
 
+	podRef := api.ObjectKeyFromObject(kpod.Pod)
+
 	for _, mountVar := range container.VolumeMounts {
-		mountArgs = append(mountArgs, kpod.GenerateMountPaths(mountVar))
+		mountArgs = append(mountArgs, paths.GenerateMountPaths(podRef, mountVar))
 	}
 
 	return []string{"--bind", strings.Join(mountArgs, ",")}
 }
 
 func (kpod *KPod) produceSlurmScript(container *corev1.Container, prevJobID int, command []string) (string, error) {
-	sbatchRelativePath := kpod.ScriptFilePath(container)
+	podRef := api.ObjectKeyFromObject(kpod.Pod)
+
+	sbatchRelativePath := paths.ScriptFilePath(podRef, container.Name)
 
 	var sbatchFlagsFromArgo []string
 	sbatchFlagsAsString := ""
 
-	if err := os.MkdirAll(kpod.TemporaryDir(), api.TemporaryPodDataPermissions); err != nil {
-		return "", errors.Wrapf(err, "Could not create '%s' directory", filepath.Join(api.TemporaryDir, kpod.Pod.GetName()))
+	tmpDir := paths.TemporaryDir(podRef)
+
+	if err := os.MkdirAll(tmpDir, api.TemporaryPodDataPermissions); err != nil {
+		return "", errors.Wrapf(err, "Could not create '%s' directory", tmpDir)
 	}
 
 	if slurmFlags, ok := kpod.Pod.GetAnnotations()["slurm-job.knoc.io/flags"]; ok {
@@ -313,49 +307,39 @@ func (kpod *KPod) produceSlurmScript(container *corev1.Container, prevJobID int,
 	return sbatchRelativePath, nil
 }
 
-func (kpod *KPod) writeSlurmScriptToFile(sbatchFlagsAsString string, c *corev1.Container, commandArray []string) error {
-	ssfPath := kpod.ScriptFilePath(c)
+func (kpod *KPod) writeSlurmScriptToFile(sbatchFlagsAsString string, container *corev1.Container, commandArray []string) error {
+	podRef := api.ObjectKeyFromObject(kpod.Pod)
 
-	scriptFile, err := os.Create(ssfPath)
-	if err != nil {
-		return errors.Wrapf(err, "Cant create slurm_script '%s'", ssfPath)
-	}
+	scriptFile := paths.ScriptFilePath(podRef, container.Name)
+	stdoutPath := paths.StdOutputFilePath(podRef, container.Name)
+	stderrPath := paths.StdErrorFilePath(podRef, container.Name)
+	exitCodePath := paths.ExitCodeFilePath(podRef, container.Name)
 
-	finalScriptData := kpod.Provider.HPC.SbatchMacros(kpod.JobName(c), sbatchFlagsAsString) + "\n" +
-		strings.Join(commandArray, " ") + " >> " + kpod.StdOutputFilePath(c) +
-		" 2>> " + kpod.StdErrorFilePath(c) +
-		"\n echo $? > " + kpod.ExitCodeFilePath(c)
+	finalScriptData := kpod.Provider.HPC.SbatchMacros(paths.JobName(podRef, container), sbatchFlagsAsString) + "\n" +
+		strings.Join(commandArray, " ") + " >> " + stdoutPath +
+		" 2>> " + stderrPath +
+		"\n echo $? > " + exitCodePath
 
-	if _, err = scriptFile.WriteString(finalScriptData); err != nil {
-		return errors.Wrapf(err, "Can't write sbatch script in file '%s'", ssfPath)
-	}
+	logrus.Info("Writing slurm script at '%s'", scriptFile)
 
-	if err := scriptFile.Close(); err != nil {
-		return errors.Wrap(err, "Close")
-	}
-
-	return nil
+	return os.WriteFile(scriptFile, []byte(finalScriptData), 777)
 }
 
 func (kpod *KPod) handleJobID(container *corev1.Container, output string) (int, error) {
 	r := regexp.MustCompile(`Submitted batch job (?P<jid>\d+)`)
 	jid := r.FindStringSubmatch(output)
 
-	f, err := os.Create(kpod.JobIDFilePath(container))
-	if err != nil {
-		return -1, errors.Wrap(err, "Cant create jid_file")
-	}
-
-	if _, err := f.WriteString(jid[1]); err != nil {
-		return -1, errors.Wrap(err, "Cant write jid_file")
-	}
-
 	intJobID, err := strconv.Atoi(jid[1])
 	if err != nil {
 		return 0, errors.Wrap(err, "Cant convert jid as integer. Parsed irregular output!")
 	}
 
-	return intJobID, f.Close()
+	podRef := api.ObjectKeyFromObject(kpod.Pod)
+	jobIDPath := paths.JobIDFilePath(podRef, container.Name)
+
+	logrus.Info("Writing jid file at %s", jobIDPath)
+
+	return intJobID, os.WriteFile(jobIDPath, []byte(jid[1]), 777)
 }
 
 func (kpod *KPod) WatchPodDirectory(ctx context.Context) error {
@@ -366,7 +350,7 @@ func (kpod *KPod) WatchPodDirectory(ctx context.Context) error {
 	}
 
 	// Add a path.
-	if err := watcher.Add(kpod.RuntimeDir()); err != nil {
+	if err := watcher.Add(paths.RuntimeDir(api.ObjectKeyFromObject(kpod.Pod))); err != nil {
 		return errors.Wrap(err, "add path to watcher has failed")
 	}
 
@@ -408,15 +392,15 @@ func (kpod *KPod) Save() error {
 		return errors.Wrapf(err, "cannot marhsall pod '%s' to json", kpod.Pod.GetName())
 	}
 
-	if err := os.WriteFile(kpod.PodSpecFilePath(), marshalledPod, api.PodSpecJsonFilePermissions); err != nil {
-		return errors.Wrapf(err, "cannot write pod json file '%s'", kpod.PodSpecFilePath())
+	if err := os.WriteFile(paths.PodSpecFilePath(api.ObjectKeyFromObject(kpod.Pod)), marshalledPod, api.PodSpecJsonFilePermissions); err != nil {
+		return errors.Wrapf(err, "cannot write pod json file '%s'", paths.PodSpecFilePath(api.ObjectKeyFromObject(kpod.Pod)))
 	}
 
 	return nil
 }
 
 func (kpod *KPod) CreateSubDirectory(name string) (string, error) {
-	fullPath := filepath.Join(kpod.RuntimeDir(), name)
+	fullPath := filepath.Join(paths.RuntimeDir(api.ObjectKeyFromObject(kpod.Pod)), name)
 
 	if err := os.MkdirAll(fullPath, api.PodGlobalDirectoryPermissions); err != nil {
 		return fullPath, errors.Wrapf(err, "cannot create dir '%s'", fullPath)
@@ -440,6 +424,8 @@ func (kpod *KPod) GetPauseContainerPID() (int, error) {
 }
 
 func (kpod *KPod) CreatePauseContainer() error {
+	podRef := api.ObjectKeyFromObject(kpod.Pod)
+
 	container := new(corev1.Container)
 	container.Name = api.PauseContainerName
 	container.Image = "scratch"
@@ -448,22 +434,22 @@ func (kpod *KPod) CreatePauseContainer() error {
 	singularityCommand := append([]string{kpod.Provider.HPC.SingularityPath(), "instance", "start"}, kpod.ContainerRegistry+container.Image)
 	singularityCommand = append(singularityCommand, api.PauseContainerCommand...)
 
-	if err := os.MkdirAll(kpod.TemporaryDir(), api.TemporaryPodDataPermissions); err != nil {
-		return errors.Wrapf(err, "Could not create '%s' directory", kpod.TemporaryDir())
+	if err := os.MkdirAll(paths.TemporaryDir(podRef), api.TemporaryPodDataPermissions); err != nil {
+		return errors.Wrapf(err, "Could not create '%s' directory", paths.TemporaryDir(podRef))
 	}
 
-	ssfPath := kpod.ScriptFilePath(container)
+	ssfPath := paths.ScriptFilePath(podRef, container.Name)
 
 	scriptFile, err := os.Create(ssfPath)
 	if err != nil {
 		return errors.Wrapf(err, "Cant create slurm_script '%s'", ssfPath)
 	}
 
-	finalScriptData := kpod.Provider.HPC.SbatchMacros(kpod.JobName(container), sbatchFlagsAsString) +
+	finalScriptData := kpod.Provider.HPC.SbatchMacros(paths.JobName(podRef, container), sbatchFlagsAsString) +
 		"\n" +
-		strings.Join(singularityCommand, " ") + " >> " + kpod.StdOutputFilePath(container) +
-		" 2>> " + kpod.StdErrorFilePath(container) +
-		"\n echo $? > " + kpod.ExitCodeFilePath(container)
+		strings.Join(singularityCommand, " ") + " >> " + paths.StdOutputFilePath(podRef, container.Name) +
+		" 2>> " + paths.StdErrorFilePath(podRef, container.Name) +
+		"\n echo $? > " + paths.ExitCodeFilePath(podRef, container.Name)
 
 	if _, err = scriptFile.WriteString(finalScriptData); err != nil {
 		return errors.Wrapf(err, "Can't write sbatch script in file '%s'", ssfPath)
@@ -491,6 +477,26 @@ func (kpod *KPod) CreatePauseContainer() error {
 	// note the pauseContainer's PID for later use
 	// so that the future containers of this pod, join this namespace
 	kpod.PauseContainerPID = pid
+
+	return nil
+}
+
+func DeletePodDirectory(pod *corev1.Pod) error {
+	podRef := api.ObjectKeyFromObject(pod)
+
+	var merr *multierror.Error
+
+	if err := os.RemoveAll(paths.RuntimeDir(podRef)); err != nil && !errors.Is(err, errNotFound) {
+		merr = multierror.Append(merr, errors.Wrapf(err, "failed to delete runtime dir for '%s'", pod.GetName()))
+	}
+
+	if err := os.RemoveAll(paths.TemporaryDir(podRef)); err != nil && !errors.Is(err, errNotFound) {
+		merr = multierror.Append(merr, errors.Wrapf(err, "failed to delete tempdir dir for '%s'", pod.GetName()))
+	}
+
+	if merr.ErrorOrNil() != nil {
+		return merr.ErrorOrNil()
+	}
 
 	return nil
 }

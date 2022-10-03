@@ -19,7 +19,9 @@ import (
 	"runtime"
 
 	"github.com/carv-ics-forth/knoc/api"
+	"github.com/matishsiao/goInfo"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -32,7 +34,13 @@ func (p *Provider) CreateVirtualNode(ctx context.Context, name string, taint *co
 		taints = append(taints, *taint)
 	}
 
-	node := &corev1.Node{
+	resources := corev1.ResourceList{
+		"cpu":    resource.MustParse("30"),
+		"memory": resource.MustParse("10Gi"),
+		"pods":   resource.MustParse("100"),
+	}
+
+	return &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 			Labels: map[string]string{
@@ -41,24 +49,110 @@ func (p *Provider) CreateVirtualNode(ctx context.Context, name string, taint *co
 				"kubernetes.io/os":       runtime.GOOS,
 				"kubernetes.io/hostname": name,
 				"alpha.service-controller.kubernetes.io/exclude-balancer": "true",
+				"node.kubernetes.io/exclude-from-external-load-balancers": "true",
 			},
 		},
 		Spec: corev1.NodeSpec{
 			Taints: taints,
 		},
 		Status: corev1.NodeStatus{
-			NodeInfo: corev1.NodeSystemInfo{
-				OperatingSystem: runtime.GOOS,
-				Architecture:    runtime.GOARCH,
-				KubeletVersion:  api.BuildVersion,
-			},
-			Capacity:        p.Capacity(ctx),
-			Allocatable:     p.Capacity(ctx),
-			Conditions:      p.NodeConditions(ctx),
+			Capacity:        resources,
+			Allocatable:     resources,
+			Phase:           corev1.NodeRunning,
+			Conditions:      NodeConditions(ctx),
 			Addresses:       p.NodeAddresses(ctx),
-			DaemonEndpoints: *p.NodeDaemonEndpoints(ctx),
+			DaemonEndpoints: p.NodeDaemonEndpoints(ctx),
+			NodeInfo:        p.NodeSystemInfo(ctx),
+			Images:          nil,
+			VolumesInUse:    nil,
+			VolumesAttached: nil,
+			Config:          nil,
 		},
 	}
+}
 
-	return node
+func NodeConditions(_ context.Context) []corev1.NodeCondition {
+	// NodeConditions returns a list of conditions (Ready, OutOfDisk, etc), for updates to the node status
+	// within Kubernetes.
+	// TODO: Make this configurable
+	return []corev1.NodeCondition{
+		{
+			Type:               corev1.NodeReady,
+			Status:             corev1.ConditionTrue,
+			LastHeartbeatTime:  metav1.Now(),
+			LastTransitionTime: metav1.Now(),
+			Reason:             "KubeletPending",
+			Message:            "kubelet is pending.",
+		},
+		{
+			Type:               corev1.NodeMemoryPressure,
+			Status:             corev1.ConditionFalse,
+			LastHeartbeatTime:  metav1.Now(),
+			LastTransitionTime: metav1.Now(),
+			Reason:             "KubeletHasSufficientMemory",
+			Message:            "kubelet has sufficient memory available",
+		},
+		{
+			Type:               corev1.NodeDiskPressure,
+			Status:             corev1.ConditionFalse,
+			LastHeartbeatTime:  metav1.Now(),
+			LastTransitionTime: metav1.Now(),
+			Reason:             "KubeletHasNoDiskPressure",
+			Message:            "kubelet has no disk pressure",
+		},
+		{
+			Type:               corev1.NodePIDPressure,
+			Status:             corev1.ConditionFalse,
+			LastHeartbeatTime:  metav1.Now(),
+			LastTransitionTime: metav1.Now(),
+			Reason:             "KubeletHasNoPIDPressure",
+			Message:            "kubelet has no PID pressure",
+		},
+		{
+			Type:               corev1.NodeNetworkUnavailable,
+			Status:             corev1.ConditionFalse,
+			LastHeartbeatTime:  metav1.Now(),
+			LastTransitionTime: metav1.Now(),
+			Reason:             "RouteCreated",
+			Message:            "RouteController created a route",
+		},
+	}
+}
+
+func (p *Provider) NodeAddresses(_ context.Context) []corev1.NodeAddress {
+	return []corev1.NodeAddress{{
+		Type:    "InternalIP",
+		Address: p.InitConfig.InternalIP,
+	}}
+}
+
+func (p *Provider) NodeDaemonEndpoints(_ context.Context) corev1.NodeDaemonEndpoints {
+	p.Logger.Info("-> NodeDaemonEndpoints")
+	defer p.Logger.Info("<- NodeDaemonEndpoints")
+
+	return corev1.NodeDaemonEndpoints{
+		KubeletEndpoint: corev1.DaemonEndpoint{
+			Port: p.InitConfig.DaemonPort,
+		},
+	}
+}
+
+func (p *Provider) NodeSystemInfo(_ context.Context) corev1.NodeSystemInfo {
+	info, err := goInfo.GetInfo()
+	if err != nil {
+		panic(err)
+	}
+
+	return corev1.NodeSystemInfo{
+		MachineID:               "",
+		SystemUUID:              "",
+		BootID:                  "",
+		KernelVersion:           info.Kernel,
+		OSImage:                 "knoc",
+		ContainerRuntimeVersion: "vkubelet://6.6.6.6",
+		KubeletVersion:          api.BuildVersion,
+		KubeProxyVersion:        "",
+		OperatingSystem:         info.OS,
+		Architecture:            info.Platform,
+	}
 }

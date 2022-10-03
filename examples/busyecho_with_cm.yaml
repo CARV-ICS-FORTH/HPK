@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: busyecho3
+  name: busyecho-cm
 spec:
   containers:
     - image: argoproj/argosay:v2
@@ -20,6 +20,18 @@ spec:
         name: game-config
   restartPolicy: Never
   dnsPolicy: ClusterFirst
+  nodeSelector:
+    kubernetes.io/role: agent
+    kubernetes.io/os: linux
+    type: virtual-kubelet
+  tolerations:
+    - key: virtual-kubelet.io/provider
+      operator: Exists
+    - key: azure.com/aci
+      effect: NoSchedule
+
+
+
   # nodeSelector:
   #   kubernetes.io/role: agent
   #   kubernetes.io/os: linux

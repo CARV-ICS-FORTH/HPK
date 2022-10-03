@@ -42,13 +42,6 @@ var (
 	K8sVersion   = "v1.25.0"
 )
 
-type Operation string
-
-const (
-	SUBMIT = Operation("submit")
-	DELETE = Operation("delete")
-)
-
 var PauseContainerCommand = []string{"sleep", "infinity"}
 
 const (
