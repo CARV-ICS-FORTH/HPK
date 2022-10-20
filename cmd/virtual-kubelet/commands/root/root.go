@@ -20,7 +20,7 @@ import (
 	"path"
 	"time"
 
-	"github.com/carv-ics-forth/knoc/hpc"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	"github.com/carv-ics-forth/knoc/pkg/manager"
 	"github.com/carv-ics-forth/knoc/provider"
@@ -37,7 +37,6 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/record"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
@@ -69,14 +68,34 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		"watchedNamespace", c.KubeNamespace,
 	)
 
-	client, err := kubernetes.NewForConfig(ctrl.GetConfigOrDie())
+	/*---------------------------------------------------
+	 * Starting Kubernetes Client
+	 *---------------------------------------------------*/
+	log.Info(" Starting Kubernetes Client")
+
+	// Config precedence
+	//
+	// * --kubeconfig flag pointing at a file
+	//
+	// * KUBECONFIG environment variable pointing at a file
+	//
+	// * In-cluster config if running in cluster
+	//
+	// * $HOME/.kube/config if exists.
+	cfg, err := config.GetConfig()
 	if err != nil {
-		return err
+		return errors.Wrapf(err, "unable to get kubeconfig")
 	}
 
-	/*
-		Create Informers for interaction with Kubernetes API
-	*/
+	client, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return errors.Wrapf(err, "unable to start kubernetes client")
+	}
+
+	/*---------------------------------------------------
+	 * Load Kubernetes Informers
+	 *---------------------------------------------------*/
+	log.Info("Load Kubernetes Informers")
 
 	// Create a shared informer factory for Kubernetes pods in the current namespace (if specified) and scheduled to the current node.
 	podInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(
@@ -106,24 +125,22 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		return errors.Wrap(err, "could not create resource manager")
 	}
 
-	// Start the informers now, so the provider will get a functional resource
-	// manager.
+	// Start the informers now, so the provider will get a functional resource manager.
 	podInformerFactory.Start(ctx.Done())
 	scmInformerFactory.Start(ctx.Done())
 
-	/*
-		Register the Provisioner of Virtual Nodes
-	*/
+	/*---------------------------------------------------
+	 * Register the Provisioner of Virtual Nodes
+	 *---------------------------------------------------*/
+	log.Info("Register the Provisioner of Virtual Nodes")
+
 	newProvider, err := provider.NewProvider(provider.InitConfig{
 		ConfigPath:      c.ProviderConfigPath,
 		NodeName:        c.NodeName,
 		InternalIP:      envOr("VKUBELET_POD_IP", "127.0.0.1"),
 		DaemonPort:      c.ListenPort,
 		ResourceManager: rm,
-		HPC:             hpc.NewHPCEnvironment(),
 	})
-
-	go newProvider.HPC.FSEventDispatcher.Run(ctx, newProvider)
 
 	if err != nil {
 		return err
@@ -140,12 +157,13 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	}
 	defer cancelHTTP()
 
-	/*
-		Create a New Virtual Node and prepare the Controller for it
-	*/
+	/*---------------------------------------------------
+	 * Register a new Virtual Node
+	 *---------------------------------------------------*/
+	log.Info("Register a new Virtual Node")
+
 	var taint *corev1.Taint
 	if !c.DisableTaint {
-		var err error
 		taint, err = getTaint(c)
 		if err != nil {
 			return err
@@ -155,7 +173,6 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	pNode := newProvider.CreateVirtualNode(ctx, c.NodeName, taint)
 
 	// activate fs notifier
-
 	nodeControllerOpts := []node.NodeControllerOpt{
 		node.WithNodeStatusUpdateErrorHandler(func(ctx context.Context, err error) error {
 			if !k8serrors.IsNotFound(err) {
@@ -194,9 +211,10 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	eb.StartLogging(logrus.Infof)
 	eb.StartRecordingToSink(&corev1client.EventSinkImpl{Interface: client.CoreV1().Events(c.KubeNamespace)})
 
-	/*
-		Run the Controller for Virtual Nodes.
-	*/
+	/*---------------------------------------------------
+	 * Start the controller for the Virtual Node
+	 *---------------------------------------------------*/
+	log.Info("Start the controller for the Virtual Node")
 
 	pc, err := node.NewPodController(node.PodControllerConfig{
 		PodClient:         client.CoreV1(),

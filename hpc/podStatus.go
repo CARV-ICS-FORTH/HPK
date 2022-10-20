@@ -11,33 +11,52 @@ import (
 	"time"
 
 	"github.com/carv-ics-forth/knoc/api"
-	"github.com/carv-ics-forth/knoc/provider/paths"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func renewPodStatus(ctx context.Context, podKey api.ObjectKey) error {
+	pod, err := LoadPod(ctx, podKey)
+	if err != nil {
+		return errors.Wrapf(err, "unable to load pod")
+	}
+
+	if err := resolvePodStatus(pod); err != nil {
+		return errors.Wrapf(err, "unable to update pod status")
+	}
+
+	// save the updated Pod status.
+	if err := SavePod(ctx, pod); err != nil {
+		return errors.Wrapf(err, "unable to store pod")
+	}
+
+	return nil
+}
+
 type test struct {
 	expression bool
 	change     func(status *corev1.PodStatus)
 }
 
-func updatePodStatus(ctx context.Context, inspect InspectFS, namespace, podName string) error {
-	//	find container with given podName and containerName
-	pod, err := inspect.GetPod(ctx, namespace, podName)
-	if err != nil {
-		return errors.Wrapf(err, "Cannot find Pod '%s'", podName)
-	}
+func resolvePodStatus(pod *corev1.Pod) error {
+	podKey := api.ObjectKeyFromObject(pod)
+	logger := defaultLogger.WithValues("pod", podKey)
 
+	/*---------------------------------------------------
+	 * Load Container Statuses
+	 *---------------------------------------------------*/
 	if err := LoadContainerStatuses(pod); err != nil {
-		return errors.Wrapf(err, "Cannot update container status for Pod '%s'", podName)
+		return errors.Wrapf(err, "Cannot update container status for Pod '%s'", podKey)
 	}
 
-	/*
-		Init Containers
-	*/
+	/*---------------------------------------------------
+	 * Check status of Init Containers
+	 *---------------------------------------------------*/
 	if pod.Status.Phase == corev1.PodPending {
+		logger.Info(" O Checking for status of Init Containers")
+
 		for _, initContainer := range pod.Status.InitContainerStatuses {
 
 			if initContainer.State.Terminated != nil {
@@ -47,9 +66,11 @@ func updatePodStatus(ctx context.Context, inspect InspectFS, namespace, podName 
 		}
 	}
 
-	/*
-		Containers
-	*/
+	/*---------------------------------------------------
+	 * Classify container statuses
+	 *---------------------------------------------------*/
+	logger.Info(" O Checking for status of Containers Containers")
+
 	var state Classifier
 	state.Reset()
 
@@ -59,60 +80,44 @@ func updatePodStatus(ctx context.Context, inspect InspectFS, namespace, podName 
 
 	totalJobs := len(pod.Spec.Containers)
 
-	// FIXME: this DOES NOT WORK because the Pod reads information from the stored Pod.Spec
-	// Instead, we want to resolve the container status from the containers on the underlying fs.
+	/*---------------------------------------------------
+	 * Handle Pod lifecycle based on Container Statuses
+	 *---------------------------------------------------*/
 
-	// Handle lifecycle
 	testSequence := []test{
-		{ // At least one job has failed
+		{ /*-- FAILED: at least one job has failed --*/
 			expression: state.NumFailedJobs() > 0,
 			change: func(status *corev1.PodStatus) {
-				//	... Failed
-
 				status.Phase = corev1.PodFailed
 				status.Reason = "ContainerFailed"
 				status.Message = fmt.Sprintf("Failed containers: %s", state.ListFailedJobs())
-
-				logrus.Warn("Change Phase to Failed. Status: ", status)
 			},
 		},
 
-		{ // All jobs are successfully completed
+		{ /*-- SUCCESS: all jobs are successfully completed --*/
 			expression: state.NumSuccessfulJobs() == totalJobs,
 			change: func(status *corev1.PodStatus) {
-				//	... Success
-				logrus.Warn("Change Phase to Success")
-
 				status.Phase = corev1.PodSucceeded
 			},
 		},
 
-		{ // All jobs are created, and at least one is still running
+		{ /*-- RUNNING: one job is still running --*/
 			expression: state.NumRunningJobs()+state.NumSuccessfulJobs() == totalJobs,
 			change: func(status *corev1.PodStatus) {
-				//	... Running
-				logrus.Warn("Change Phase to Running")
-
 				status.Phase = corev1.PodRunning
 			},
 		},
 
-		{ // Some Jobs are not yet created
-			expression: pod.Status.Phase == corev1.PodPending,
+		{ /*-- PENDING: some jobs are not yet created --*/
+			expression: state.NumPendingJobs() > 0,
 			change: func(status *corev1.PodStatus) {
-				//	... Pending
-				logrus.Warn("Change Phase to Pending")
-
 				status.Phase = corev1.PodPending
 			},
 		},
 
-		{ // Invalid state transition
+		{ /*-- FAILED: invalid state transition --*/
 			expression: true,
 			change: func(status *corev1.PodStatus) {
-				//	... Failed
-				logrus.Warn("Change Phase to Failed")
-
 				status.Phase = corev1.PodFailed
 			},
 		},
@@ -122,11 +127,6 @@ func updatePodStatus(ctx context.Context, inspect InspectFS, namespace, podName 
 		if testcase.expression { // Check if any lifecycle condition is met
 			// update the cached Pod Status.
 			testcase.change(&pod.Status)
-
-			// save the updated Pod status.
-			if err := inspect.UpdatePod(ctx, pod); err != nil {
-				return errors.Wrapf(err, "cannot update pod status")
-			}
 
 			return nil
 		}
@@ -146,38 +146,44 @@ func updatePodStatus(ctx context.Context, inspect InspectFS, namespace, podName 
 *************************************************************/
 
 func LoadContainerStatuses(pod *corev1.Pod) error {
-	if len(pod.Spec.InitContainers) != len(pod.Status.InitContainerStatuses) {
-		panic("inconsistent number of .Spec and .Status for InitContainers")
-	}
+	podKey := api.ObjectKeyFromObject(pod)
 
-	if len(pod.Spec.Containers) != len(pod.Status.ContainerStatuses) {
-		panic("inconsistent number of .Spec and .Status for Containers")
-	}
-
+	/*---------------------------------------------------
+	 * Init Containers
+	 *---------------------------------------------------*/
 	for i, container := range pod.Spec.InitContainers {
-		code, valid := readIntFromFile(paths.ExitCodeFilePath(api.ObjectKeyFromObject(pod), container.Name))
+		exitCodePath := ExitCodeFilePath(podKey, container.Name)
 
-		if !valid {
-			// still running
+		code, exists := readIntFromFile(exitCodePath)
+		if !exists {
+			/*-- running --*/
 			continue
 		}
 
+		/*-- terminated --*/
 		pod.Status.InitContainerStatuses[i].State.Terminated.ExitCode = int32(code)
 	}
 
+	/*---------------------------------------------------
+	 * Containers
+	 *---------------------------------------------------*/
 	for i, container := range pod.Spec.Containers {
-		status := &pod.Status.ContainerStatuses[i]
+		exitCodePath := ExitCodeFilePath(podKey, container.Name)
+		jobIDPath := JobIDFilePath(podKey, container.Name)
 
-		code, valid := readIntFromFile(paths.ExitCodeFilePath(api.ObjectKeyFromObject(pod), container.Name))
-		if !valid {
-			// still running
+		code, exists := readIntFromFile(exitCodePath)
+		if !exists {
+			/*-- running --*/
 			continue
 		}
 
-		containerID, valid := readStringFromFile(paths.JobIDFilePath(api.ObjectKeyFromObject(pod), container.Name))
-		if !valid {
+		/*-- terminated --*/
+		containerID, exists := readStringFromFile(jobIDPath)
+		if !exists {
 			panic("this should never happen")
 		}
+
+		status := &pod.Status.ContainerStatuses[i]
 
 		if status.RestartCount == 0 {
 			(*status).State.Terminated = &corev1.ContainerStateTerminated{
@@ -223,7 +229,6 @@ func readStringFromFile(filepath string) (string, bool) {
 func readIntFromFile(filepath string) (int, bool) {
 	out, err := os.ReadFile(filepath)
 	if err != nil {
-		logrus.Warnf("cannot read file '%s'", filepath)
 		return -1, false
 	}
 
@@ -233,9 +238,7 @@ func readIntFromFile(filepath string) (int, bool) {
 	if scanner.Scan() {
 		code, err := strconv.Atoi(scanner.Text())
 		if err != nil {
-			logrus.Warn("cannot decode content to int. Err", err)
-
-			return -1, false
+			panic(errors.Wrap(err, "cannot decode content to int"))
 		}
 
 		return code, true
@@ -649,7 +652,7 @@ func (e *LocalExecutor) ExecuteOperation(ctx context.Context, mode api.Operation
 
 		*prevJobID = jid
 
-		return WatchPodDirectory(ctx, pak.RuntimeDir())
+		return WatchPath(ctx, pak.RuntimeDir())
 	}
 */
 
@@ -705,7 +708,7 @@ func slurmBatchSubmit(e *LocalExecutor, path string) (string, error) {
 
 func writeSlurmScriptToFile(pak *api.KPod, sbatchFlagsAsString string, c *corev1.Container, commandArray []string) error {
 
-	ssfPath := pak.ScriptFilePath(c)
+	ssfPath := pak.SBatchFilePath(c)
 
 	scriptFile, err := os.Create(ssfPath)
 	if err != nil {

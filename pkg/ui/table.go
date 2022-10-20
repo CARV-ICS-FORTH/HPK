@@ -35,7 +35,7 @@ func (ui *UI) JSONTable(tableData TableData, writer io.Writer) error {
 }
 
 func (ui *UI) NewArrayTable(a [][]string) ArrayTable {
-	return ArrayTable(a)
+	return a
 }
 
 type ArrayTable [][]string

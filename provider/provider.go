@@ -17,22 +17,16 @@ package provider
 import (
 	"context"
 	"io"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/carv-ics-forth/knoc/api"
 	"github.com/carv-ics-forth/knoc/hpc"
 	"github.com/carv-ics-forth/knoc/pkg/manager"
-	"github.com/carv-ics-forth/knoc/pkg/utils"
-	"github.com/carv-ics-forth/knoc/provider/paths"
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	vkapi "github.com/virtual-kubelet/virtual-kubelet/node/api"
 	"github.com/virtual-kubelet/virtual-kubelet/node/api/statsv1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
@@ -52,7 +46,6 @@ type InitConfig struct {
 	NodeName        string
 	InternalIP      string
 	DaemonPort      int32
-	HPC             *hpc.HPCEnvironment
 	ResourceManager *manager.ResourceManager
 }
 
@@ -72,24 +65,25 @@ func NewProvider(config InitConfig) (*Provider, error) {
 
 // CreatePod accepts a Pod definition and stores it in memory.
 func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
-	p.Logger.Info("-> CreatePod",
-		"obj", api.ObjectKeyFromObject(pod),
-	)
+	podKey := api.ObjectKeyFromObject(pod)
+	logger := p.Logger.WithValues("obj", podKey)
 
-	defer p.Logger.Info("<- CreatePod",
-		"obj", api.ObjectKeyFromObject(pod),
-	)
+	logger.Info("-> CreatePod")
+	defer logger.Info("<- CreatePod")
 
-	wrappedPod, err := NewKPod(p, pod, api.DefaultContainerRegistry)
-	if err != nil {
-		return errors.Wrapf(err, "failed to create kpod")
+	/*
+		// set the ip of the running pods to the virtual node
+		pod.Status.PodIP = provider.InternalIP
+		pod.Status.PodIPs = []corev1.PodIP{{
+			IP: provider.InternalIP,
+		}}
+	*/
+
+	if err := hpc.CreatePod(ctx, pod, p.ResourceManager, api.DefaultContainerRegistry); err != nil {
+		panic(errors.Wrapf(err, "failed to submit job"))
 	}
 
-	if err := wrappedPod.CreatePod(ctx, pod); err != nil {
-		return errors.Wrapf(err, "failed to submit job")
-	}
-
-	return wrappedPod.Save()
+	return nil
 }
 
 // UpdatePod accepts a Pod definition and updates its reference.
@@ -104,14 +98,18 @@ func (p *Provider) UpdatePod(_ context.Context, pod *corev1.Pod) error {
 		"phase", pod.Status.Phase,
 	)
 
-	kpod, err := NewKPod(p, pod, api.DefaultContainerRegistry)
-	if err != nil {
-		return errors.Wrap(err, "Could not create Pod from the underlying filesystem")
-	}
+	/*
 
-	if err := kpod.Save(); err != nil {
-		return errors.Wrap(err, "Could not save Pod to the underlying filesystem")
-	}
+		podHandler, err := hpc.NewPodHandler(p.Logger, p.ResourceManager, pod, api.DefaultContainerRegistry)
+		if err != nil {
+			return errors.Wrap(err, "Could not create Pod from the underlying filesystem")
+		}
+
+		if err := podHandler.Save(); err != nil {
+			return errors.Wrap(err, "Could not save Pod to the underlying filesystem")
+		}
+
+	*/
 
 	return nil
 }
@@ -132,7 +130,7 @@ func (p *Provider) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 		where all the containers are in a terminal state, as well as the pod.
 		DeletePod may be called multiple times for the same pod
 	*/
-	if err := DeletePodDirectory(pod); err != nil {
+	if err := hpc.DeletePod(ctx, pod); err != nil {
 		return errors.Wrapf(err, "failed to delete pods")
 	}
 
@@ -166,7 +164,7 @@ func (p *Provider) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 }
 
 // GetPod returns a pod by name that is stored in memory.
-func (p *Provider) GetPod(_ context.Context, namespace, name string) (*corev1.Pod, error) {
+func (p *Provider) GetPod(ctx context.Context, namespace, name string) (*corev1.Pod, error) {
 	p.Logger.Info("-> GetPod",
 		"namespace", namespace,
 		"name", name,
@@ -176,21 +174,14 @@ func (p *Provider) GetPod(_ context.Context, namespace, name string) (*corev1.Po
 		"name", name,
 	)
 
-	key := api.ObjectKey{
-		Namespace: namespace,
-		Name:      name,
-	}
+	podKey := api.ObjectKey{Namespace: namespace, Name: name}
 
-	kpod, err := LoadKPod(p, key, api.DefaultContainerRegistry)
+	pod, err := hpc.LoadPod(ctx, podKey)
 	if err != nil {
-		return nil, errors.Wrap(err, "Failed to load KPod")
+		return nil, errors.Wrapf(err, "unable to load pod '%s'", podKey)
 	}
 
-	if kpod.Pod == nil {
-		panic("undefined behavior. this should never happen.")
-	}
-
-	return kpod.Pod, nil
+	return pod, nil
 }
 
 // GetPodStatus returns the status of a pod by name that is "running".
@@ -206,13 +197,11 @@ func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*c
 		"name", name,
 	)
 
-	pod, err := p.GetPod(ctx, namespace, name)
-	if err != nil {
-		return nil, errors.Wrapf(err, "cannot get pod")
-	}
+	podKey := api.ObjectKey{Namespace: namespace, Name: name}
 
-	if pod == nil {
-		panic("this should never happen -- or at least happen gracefully and documented")
+	pod, err := hpc.LoadPod(ctx, podKey)
+	if err != nil {
+		return nil, errors.Wrapf(err, "unable to load pod '%s'", podKey)
 	}
 
 	return &pod.Status, nil
@@ -335,268 +324,4 @@ func (p *Provider) GetStatsSummary(context.Context) (*statsv1alpha1.Summary, err
 	defer p.Logger.Info("<- GetStatsSummary")
 
 	panic("poutsakia")
-}
-
-/************************************************************
-
-		Needed to avoid dependencies on nodeutils.
-
-************************************************************/
-
-func CreateBackendVolumes(p *Provider, kpod *KPod) error {
-	pod := kpod.Pod
-
-	/*
-		Copy volumes from local Pod to remote Environment
-	*/
-	for _, vol := range pod.Spec.Volumes {
-		switch {
-		case vol.VolumeSource.ConfigMap != nil:
-			/*  == Example ==
-			volumes:
-			  - name: config-volume
-			    configMap:
-			      name: game-config
-			*/
-			source := vol.VolumeSource.ConfigMap
-
-			configMap, err := p.ResourceManager.GetConfigMap(source.Name, pod.GetNamespace())
-			if k8serrors.IsNotFound(err) {
-				if source.Optional != nil && !*source.Optional {
-					return errors.Wrapf(err, "Configmap '%s' is required by Pod '%s' and does not exist", source.Name, pod.GetName())
-				}
-			}
-
-			if err != nil {
-				return errors.Wrapf(err, "Error getting configmap '%s' from API server", pod.Name)
-			}
-
-			// .knoc/namespace/podName/volName/*
-			podConfigMapDir, err := kpod.CreateSubDirectory(vol.Name)
-			if err != nil {
-				return errors.Wrapf(err, "cannot create dir '%s' for configMap", podConfigMapDir)
-			}
-
-			for k, v := range configMap.Data {
-				// TODO: Ensure that these files are deleted in failure cases
-				fullPath := filepath.Join(podConfigMapDir, k)
-
-				if err := os.WriteFile(fullPath, []byte(v), fs.FileMode(*source.DefaultMode)); err != nil {
-					return errors.Wrapf(err, "cannot write config map file '%s'", fullPath)
-				}
-			}
-
-		case vol.VolumeSource.Secret != nil:
-			source := vol.VolumeSource.Secret
-
-			secret, err := p.ResourceManager.GetSecret(source.SecretName, pod.Namespace)
-			if k8serrors.IsNotFound(err) {
-				if source.Optional != nil && !*source.Optional {
-					return errors.Wrapf(err, "Secret '%s' is required by Pod '%s' and does not exist", source.SecretName, pod.GetName())
-				}
-			}
-
-			if err != nil {
-				return errors.Wrapf(err, "Error getting secret '%s' from API server", pod.Name)
-			}
-
-			// .knoc/namespace/podName/secretName/*
-			podSecretDir, err := kpod.CreateSubDirectory(vol.Name)
-			if err != nil {
-				return errors.Wrapf(err, "cannot create dir '%s' for secrets", podSecretDir)
-			}
-
-			for k, v := range secret.Data {
-				fullPath := filepath.Join(podSecretDir, k)
-
-				if err := os.WriteFile(fullPath, v, fs.FileMode(*source.DefaultMode)); err != nil {
-					return errors.Wrapf(err, "Could not write secret file %s", fullPath)
-				}
-			}
-
-		case vol.VolumeSource.EmptyDir != nil:
-			// .knoc/namespace/podName/*
-
-			// mounted for every container
-			emptyDir, err := kpod.CreateSubDirectory(vol.Name)
-			if err != nil {
-				return errors.Wrapf(err, "cannot create dir '%s' for emptyDir", emptyDir)
-			}
-			// without size limit for now
-
-		case vol.VolumeSource.DownwardAPI != nil:
-			// .knoc/namespace/podName/*
-			downApiDir, err := kpod.CreateSubDirectory(vol.Name)
-			if err != nil {
-				return errors.Wrapf(err, "cannot create dir '%s' for downwardApi", downApiDir)
-			}
-
-			for _, item := range vol.DownwardAPI.Items {
-				itemPath := filepath.Join(downApiDir, item.Path)
-				value, err := utils.ExtractFieldPathAsString(pod, item.FieldRef.FieldPath)
-				if err != nil {
-					return err
-				}
-
-				if err := os.WriteFile(itemPath, []byte(value), fs.FileMode(*vol.Projected.DefaultMode)); err != nil {
-					return errors.Wrapf(err, "cannot write config map file '%s'", itemPath)
-				}
-			}
-		case vol.VolumeSource.Projected != nil:
-			// .knoc/namespace/podName/*
-			projectedVolPath, err := kpod.CreateSubDirectory(vol.Name)
-			if err != nil {
-				return errors.Wrapf(err, "cannot create dir '%s' for projected volume", projectedVolPath)
-			}
-
-			for _, projectedSrc := range vol.Projected.Sources {
-				switch {
-				case projectedSrc.DownwardAPI != nil:
-					for _, item := range projectedSrc.DownwardAPI.Items {
-						itemPath := filepath.Join(projectedVolPath, item.Path)
-
-						value, err := utils.ExtractFieldPathAsString(pod, item.FieldRef.FieldPath)
-						if err != nil {
-							return err
-						}
-
-						if err := os.WriteFile(itemPath, []byte(value), fs.FileMode(*vol.Projected.DefaultMode)); err != nil {
-							return errors.Wrapf(err, "cannot write config map file '%s'", itemPath)
-						}
-					}
-
-				case projectedSrc.ServiceAccountToken != nil:
-					serviceAccount, err := p.ResourceManager.GetServiceAccount(pod.Spec.ServiceAccountName, pod.GetNamespace())
-					if err != nil {
-						return errors.Wrapf(err, "Error getting configmap '%s' from API server", pod.Name)
-					}
-
-					if serviceAccount == nil {
-						panic("this should never happen ")
-					}
-
-					if serviceAccount.AutomountServiceAccountToken != nil && *serviceAccount.AutomountServiceAccountToken {
-						for _, secretRef := range serviceAccount.Secrets {
-							secret, err := p.ResourceManager.GetSecret(secretRef.Name, pod.GetNamespace())
-							if err != nil {
-								return errors.Wrapf(err, "get secret error")
-							}
-
-							// TODO: Update upon exceeded expiration date
-							// TODO: Ensure that these files are deleted in failure cases
-							fullPath := filepath.Join(projectedVolPath, projectedSrc.ServiceAccountToken.Path)
-							if err := os.WriteFile(fullPath, secret.Data[projectedSrc.ServiceAccountToken.Path], fs.FileMode(0o766)); err != nil {
-								return errors.Wrapf(err, "cannot write config map file '%s'", fullPath)
-							}
-						}
-					}
-
-				case projectedSrc.ConfigMap != nil:
-					configMap, err := p.ResourceManager.GetConfigMap(projectedSrc.ConfigMap.Name, pod.GetNamespace())
-					{ // err check
-						if projectedSrc.ConfigMap.Optional != nil && !*projectedSrc.ConfigMap.Optional {
-							return errors.Wrapf(err, "Configmap '%s' is required by Pod '%s' and does not exist", projectedSrc.ConfigMap.Name, pod.GetName())
-						}
-
-						if err != nil {
-							return errors.Wrapf(err, "Error getting configmap '%s' from API server", pod.Name)
-						}
-
-						if configMap == nil {
-							continue
-						}
-					}
-
-					for k, item := range configMap.Data {
-						// TODO: Ensure that these files are deleted in failure cases
-						itemPath := filepath.Join(projectedVolPath, k)
-						if err := os.WriteFile(itemPath, []byte(item), fs.FileMode(0o766)); err != nil {
-							return errors.Wrapf(err, "cannot write config map file '%s'", itemPath)
-						}
-					}
-
-				case projectedSrc.Secret != nil:
-					secret, err := p.ResourceManager.GetSecret(projectedSrc.Secret.Name, pod.GetNamespace())
-					{ // err check
-						if projectedSrc.Secret.Optional != nil && !*projectedSrc.Secret.Optional {
-							return errors.Wrapf(err, "Secret '%s' is required by Pod '%s' and does not exist", projectedSrc.Secret.Name, pod.GetName())
-						}
-
-						if err != nil {
-							return errors.Wrapf(err, "Error getting secret '%s' from API server", pod.Name)
-						}
-
-						if secret == nil {
-							continue
-						}
-					}
-
-					for k, item := range secret.Data {
-						// TODO: Ensure that these files are deleted in failure cases
-						itemPath := filepath.Join(projectedVolPath, k)
-						if err := os.WriteFile(itemPath, item, fs.FileMode(0o766)); err != nil {
-							return errors.Wrapf(err, "cannot write config map file '%s'", itemPath)
-						}
-					}
-				}
-			}
-
-		case vol.VolumeSource.HostPath != nil:
-			hostPathVolPath := filepath.Join(paths.RuntimeDir(api.ObjectKeyFromObject(kpod.Pod)), vol.Name)
-
-			switch *vol.VolumeSource.HostPath.Type {
-			case corev1.HostPathUnset:
-				// For backwards compatible, leave it empty if unset
-				// .knoc/podName/volName/*
-				if err := os.MkdirAll(hostPathVolPath, 755); err != nil {
-					return errors.Wrapf(err, "cannot create '%s'", hostPathVolPath)
-				}
-			case corev1.HostPathDirectoryOrCreate:
-				// If nothing exists at the given path, an empty directory will be created there
-				// as needed with file mode 0755, having the same group and ownership with Kubelet.
-
-				// .knoc/podName/volName/*
-				if err := os.MkdirAll(hostPathVolPath, 755); err != nil {
-					return errors.Wrapf(err, "cannot create '%s'", hostPathVolPath)
-				}
-			case corev1.HostPathDirectory:
-				// A directory must exist at the given path
-				// .knoc/podName/volName/*
-				if err := os.MkdirAll(hostPathVolPath, 755); err != nil {
-					return errors.Wrapf(err, "cannot create '%s'", hostPathVolPath)
-				}
-
-			case corev1.HostPathFileOrCreate:
-				// If nothing exists at the given path, an empty file will be created there
-				// as needed with file mode 0644, having the same group and ownership with Kubelet.
-				// .knoc/podName/volName/*
-				f, err := os.Create(hostPathVolPath)
-				if err != nil {
-					return errors.Wrapf(err, "cannot create '%s'", hostPathVolPath)
-				}
-
-				if err := f.Close(); err != nil {
-					return errors.Wrapf(err, "cannot close file '%s'", hostPathVolPath)
-				}
-			case corev1.HostPathFile:
-				// A file must exist at the given path
-				// .knoc/podName/volName/*
-				f, err := os.Create(hostPathVolPath)
-				if err != nil {
-					return errors.Wrapf(err, "cannot create '%s'", hostPathVolPath)
-				}
-
-				if err := f.Close(); err != nil {
-					return errors.Wrapf(err, "cannot close file '%s'", hostPathVolPath)
-				}
-			case corev1.HostPathSocket, corev1.HostPathCharDev, corev1.HostPathBlockDev:
-				// A UNIX socket/char device/ block device must exist at the given path
-				continue
-			default:
-				panic("bug")
-			}
-		}
-	}
-
-	return nil
 }

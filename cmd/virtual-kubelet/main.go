@@ -51,6 +51,7 @@ func main() {
 		if preRun != nil {
 			return preRun(cmd, args)
 		}
+
 		return nil
 	}
 
@@ -64,6 +65,7 @@ func main() {
 			}
 			logrus.SetLevel(lvl)
 		}
+
 		return nil
 	}
 

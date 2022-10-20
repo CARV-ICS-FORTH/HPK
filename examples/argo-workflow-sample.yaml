@@ -9,7 +9,7 @@ spec:
     - name: hello
       metadata:
         annotations:
-          slurm-job.knoc.io/flags: "--mem=2G --exclude=tie3,tie4"
+          slurm-job.knoc.io/flags: "--mem=2G --nodes=1 --exclude=tie3,tie4"
       steps: # The type of this "template" is "steps"
         - - name: hello
             template: whalesay    # We reference our second "template" here

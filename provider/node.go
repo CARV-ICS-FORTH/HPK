@@ -16,6 +16,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 
 	"github.com/carv-ics-forth/knoc/api"
@@ -138,21 +139,38 @@ func (p *Provider) NodeDaemonEndpoints(_ context.Context) corev1.NodeDaemonEndpo
 }
 
 func (p *Provider) NodeSystemInfo(_ context.Context) corev1.NodeSystemInfo {
+	// goinfo.GetInfo may crash sometimes. use this method to recover and continue.
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println("Recovered from goinfo failure:", r)
+		}
+	}()
+
+	var kernelVersion string
+	var operatingSystem string
+	var architecture string
+
 	info, err := goInfo.GetInfo()
 	if err != nil {
-		panic(err)
+		kernelVersion = "unknown"
+		operatingSystem = runtime.GOOS
+		architecture = runtime.GOARCH
+	} else {
+		kernelVersion = info.Kernel
+		operatingSystem = info.OS
+		architecture = info.Platform
 	}
 
 	return corev1.NodeSystemInfo{
 		MachineID:               "",
 		SystemUUID:              "",
 		BootID:                  "",
-		KernelVersion:           info.Kernel,
+		KernelVersion:           kernelVersion,
 		OSImage:                 "knoc",
 		ContainerRuntimeVersion: "vkubelet://6.6.6.6",
 		KubeletVersion:          api.BuildVersion,
 		KubeProxyVersion:        "",
-		OperatingSystem:         info.OS,
-		Architecture:            info.Platform,
+		OperatingSystem:         operatingSystem,
+		Architecture:            architecture,
 	}
 }

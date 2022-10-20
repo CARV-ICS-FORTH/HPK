@@ -42,65 +42,58 @@ var (
 	K8sVersion   = "v1.25.0"
 )
 
-var PauseContainerCommand = []string{"sleep", "infinity"}
-
 const (
-	// Provider configuration defaults.
-	DefaultCPUCapacity    = "20"
-	DefaultMemoryCapacity = "100Gi"
-	DefaultPodCapacity    = "20"
-
-	// Values used in tracing as attribute keys.
-	NamespaceKey     = "namespace"
-	NameKey          = "name"
-	ContainerNameKey = "containerName"
-
-	DefaultMaxWorkers   = 10
+	DefaultMaxWorkers   = 1
 	DefaultMaxQueueSize = 100
 
-	ExitCodeExtension             = ".exitCode"
-	JobIdExtension                = ".jid"
-	PauseContainerName            = "pause"
-	RuntimeDir                    = ".knoc"
-	TemporaryDir                  = ".tmp"
-	PodGlobalDirectoryPermissions = 0o766
-	PodSpecJsonFilePermissions    = 0o600
-	SecretPodDataPermissions      = 0o760
-	TemporaryPodDataPermissions   = 0o760
-	PodSecretVolPermissions       = 0o755
-	PodSecretVolDir               = "/secrets"
-	PodSecretFilePermissions      = 0o644
-	PodConfigMapVolPermissions    = 0o755
-	PodConfigMapVolDir            = "/configmaps"
-	PodConfigMapFilePermissions   = 0o644
-	PodDownwardApiVolPermissions  = 0o755
-	PodDownwardApiVolDir          = "/downwardapis"
-	PodDownwardApiFilePermissions = 0o644
-	DefaultContainerRegistry      = "docker://"
+	ExitCodeExtension = ".exitCode"
+	JobIdExtension    = ".jid"
+
+	PauseContainerName  = "pause"
+	PauseContainerImage = "scratch"
+
+	RuntimeDir               = ".hpk"
+	TemporaryDir             = ".tmp"
+	PodSecretVolDir          = "/secrets"
+	PodConfigMapVolDir       = "/configmaps"
+	PodDownwardApiVolDir     = "/downwardapis"
+	DefaultContainerRegistry = "docker://"
 )
 
 /*
-type KNOCProvider struct {
-	HPCEnvironment
++-----+---+--------------------------+
+| rwx | 7 | Read, write and execute  |
+| rw- | 6 | Read, write              |
+| r-x | 5 | Read, and execute        |
+| r-- | 4 | Read,                    |
+| -wx | 3 | Write and execute        |
+| -w- | 2 | Write                    |
+| --x | 1 | Execute                  |
+| --- | 0 | no permissions           |
++------------------------------------+
 
-	NodeName           string
-	OperatingSystem    string
-	InternalIP         string
-	DaemonEndpointPort int32
-	Pods               map[string]*corev1.Pod
-	Config             KNOCConfig
-	StartTime          time.Time
-	ResourceManager    *manager.ResourceManager
-	Notifier           func(*corev1.Pod)
-}
-
-type KNOCConfig struct {
-	CPU    string `json:"cpu,omitempty"`
-	Memory string `json:"memory,omitempty"`
-	Pods   string `json:"pods,omitempty"`
-}
-
++------------+------+-------+
+| Permission | Octal| Field |
++------------+------+-------+
+| rwx------  | 0700 | User  |
+| ---rwx---  | 0070 | Group |
+| ------rwx  | 0007 | Other |
++------------+------+-------+
 */
+
+const (
+	PodGlobalDirectoryPermissions = 0777
+	PodSpecJsonFilePermissions    = 0600
+	ContainerJobPermissions       = 0777
+
+	SecretPodDataPermissions      = 0760
+	PodSecretVolPermissions       = 0755
+	PodSecretFilePermissions      = 0644
+	PodConfigMapVolPermissions    = 0755
+	PodConfigMapFilePermissions   = 0644
+	PodDownwardApiVolPermissions  = 0755
+	PodDownwardApiFilePermissions = 0644
+)
 
 // ObjectKey identifies a Kubernetes Object.
 type ObjectKey = types.NamespacedName

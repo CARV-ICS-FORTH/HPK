@@ -39,4 +39,14 @@ in [Documentation](https://github.com/CARV-ICS-FORTH/KNoC/blob/master/doc/README
 ssh -L 0.0.0.0:30002:192.168.1.31:22 thegates
 
 192.168.1.31 is the IP of the head/login node.
+
+scp -P 7777 /tmp/hpk.sif localhost:~/
 ```
+
+
+
+# Build locally and push to remote HPC
+docker build . -t icsforth/hpk &&  singularity build /tmp/hpk.sif docker-daemon://icsforth/hpk:latest && scp /tmp/hpk.sif eupex@amonra.oats.inaf.it:~/
+
+# On the HPC Cluster
+singularity run --bind /bin,/boot,/etc,/home,/lib,/lib32,/lib64,/libx32,/lost+found,/media,/mnt,/opt,/proc,/root,/run,/sbin,/snap,/srv,/swap.img,/sys,/tmp,/usr,/var  hpk.sif

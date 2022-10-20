@@ -1,0 +1,2 @@
+# Ignore the dockerfile, so to avoid rebuild everything when making changes into it.
+Dockerfile

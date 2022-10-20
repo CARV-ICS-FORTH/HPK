@@ -1,33 +1,34 @@
-FROM ubuntu:latest as builder
-RUN apt-get update && apt-get install -y golang-go build-essential git
+# Build the HPK operator binary
+FROM golang:1.19 as builder
+
 WORKDIR /build
+
+# Copy the Go Modules manifests
+COPY go.mod go.mod
+COPY go.sum go.sum
+
+# cache deps before building and copying source so that we don't need to re-download as much
+# and so that source changes don't invalidate our downloaded layer
+RUN go mod download
+
+# Copy the project's source code (except for whatever is included in the .dockerignore)
 COPY . .
-RUN go mod tidy && go get
-RUN make build
 
-FROM ubuntu:latest
-RUN apt-get update && apt-get install -y openssh-server sudo curl
-RUN useradd --create-home --shell /bin/bash user0 && echo "user0:user0" | chpasswd && adduser user0 sudo && mkdir -p /home/user0/.ssh
+# Build release
+#RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build  -a -o /hpk ./cmd/virtual-kubelet
 
-WORKDIR /home/user0
+# Build dev
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -race -a -o /hpk ./cmd/virtual-kubelet
 
-ENV APISERVER_CERT_LOCATION /home/user0/knoc-crt.pem
-ENV APISERVER_KEY_LOCATION /home/user0/knoc-key.pem
-ENV KUBELET_PORT 10250
 
-# Copy the configuration file for the knoc provider.
-COPY --from=builder /build/deploy/knoc-cfg.json /home/user0/knoc-cfg.json
-# Copy the certificate for the HTTPS server.
-COPY --from=builder /build/deploy/knoc-crt.pem /home/user0/knoc-crt.pem
-# Copy the private key for the HTTPS server.
-COPY --from=builder /build/deploy/knoc-key.pem /home/user0/knoc-key.pem
+# Super minimal image just to package the hpk binary. It does not include anything.
+# Seriously, nothing. Not even shell to login.
+# We rely on singularity/apptainer to mount all the peripheral mountpoints of the host HPC environment.
+#
+# For example:
+# singularity run --bind /usr/bin docker://icsforth/hpk:latest
+FROM scratch
 
-COPY --from=builder /build/bin/virtual-kubelet /usr/local/bin/virtual-kubelet
-COPY --from=builder /build/bin/door /usr/local/bin/door
+COPY --from=builder /hpk /hpk
 
-RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-RUN chmod +x kubectl && \
-    mv ./kubectl /usr/local/bin/kubectl
-
-USER user0
-CMD ["/usr/local/bin/virtual-kubelet"]
+ENTRYPOINT ["/hpk"]
