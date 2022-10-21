@@ -4,12 +4,11 @@ metadata:
   generateName: steps-
 spec:
   entrypoint: hello
-
   templates:
     - name: hello
-      metadata:
-        annotations:
-          slurm-job.knoc.io/flags: "--mem=2G --nodes=1 --exclude=tie3,tie4"
+#      metadata:
+#        annotations:
+#          slurm-job.knoc.io/flags: "--mem=50M"
       steps: # The type of this "template" is "steps"
         - - name: hello
             template: whalesay    # We reference our second "template" here
@@ -17,9 +16,9 @@ spec:
               parameters: [ { name: message, value: "hello1" } ]
 
     - name: whalesay             # The second "template" in this Workflow, it is referenced by "hello"
-      metadata:
-        annotations:
-          slurm-job.knoc.io/flags: "--mem=2G --exclude=tie3,tie4"
+#      metadata:
+#        annotations:
+#          slurm-job.knoc.io/flags: "--mem=50M"
       inputs:
         parameters:
           - name: message

@@ -50,3 +50,7 @@ docker build . -t icsforth/hpk &&  singularity build /tmp/hpk.sif docker-daemon:
 
 # On the HPC Cluster
 singularity run --bind /bin,/boot,/etc,/home,/lib,/lib32,/lib64,/libx32,/lost+found,/media,/mnt,/opt,/proc,/root,/run,/sbin,/snap,/srv,/swap.img,/sys,/tmp,/usr,/var  hpk.sif
+
+# jedi
+singularity run --bind /bin,/boot,/etc,/home,/lib,/lib32,/lib64,/libx32,/lost+found,/media,/mnt,/opt,/proc,/root,/sbin,/snap,/srv,/swap.img,/sys,/tmp,/usr,/var  hpk.sif
+

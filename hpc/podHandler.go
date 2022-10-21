@@ -39,21 +39,21 @@ type podHandler struct {
 }
 
 func LoadPod(ctx context.Context, podRef api.ObjectKey) (*corev1.Pod, error) {
-	podSpecFilePath := PodSpecFilePath(podRef)
+	encodedPodFilepath := PodSpecFilePath(podRef)
 
-	specEnc, err := os.ReadFile(podSpecFilePath)
+	encodedPod, err := os.ReadFile(encodedPodFilepath)
 	if err != nil {
 		// if not found, it means that Pod that:
 		// 1) the pod is  not scheduled on this node (user's problem).
 		// 2) someone removed the file (administrator's problem).
 		// 3) we have a race condition (our problem).
-		return nil, errors.Wrapf(err, "cannot read pod description file '%s'", podSpecFilePath)
+		return nil, errors.Wrapf(err, "cannot read pod description file '%s'", encodedPodFilepath)
 	}
 
 	var pod corev1.Pod
 
-	if err := json.Unmarshal(specEnc, &pod); err != nil {
-		return nil, errors.Wrapf(err, "cannot decode pod description file '%s'", podSpecFilePath)
+	if err := json.Unmarshal(encodedPod, &pod); err != nil {
+		return nil, errors.Wrapf(err, "cannot decode pod description file '%s'", encodedPodFilepath)
 	}
 
 	return &pod, nil
@@ -61,8 +61,6 @@ func LoadPod(ctx context.Context, podRef api.ObjectKey) (*corev1.Pod, error) {
 
 func SavePod(ctx context.Context, pod *corev1.Pod) error {
 	podKey := api.ObjectKeyFromObject(pod)
-	logger := defaultLogger.WithValues("pod", podKey)
-	logger.Info("Store: Update Pod ", "phase", pod.Status.Phase, "Reason", pod.Status.Reason)
 
 	encodedPod, err := json.Marshal(pod)
 	if err != nil {
@@ -103,7 +101,23 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, rmanager *manager.ResourceM
 		return errors.Wrapf(err, "Cant create sbatch directory '%s'", sbatchDir)
 	}
 
-	// Use the saved description as placeholder for queued creation requests.
+	/*---------------------------------------------------
+	 * Pre-Populate Container.Status from Container.Spec
+	 *---------------------------------------------------*/
+	pod.Status.InitContainerStatuses = make([]corev1.ContainerStatus, len(pod.Spec.InitContainers))
+	for i := 0; i < len(pod.Spec.InitContainers); i++ {
+		pod.Status.InitContainerStatuses[i].Name = pod.Spec.InitContainers[i].Name
+	}
+
+	pod.Status.ContainerStatuses = make([]corev1.ContainerStatus, len(pod.Spec.Containers))
+	pod.Status.ContainerStatuses = make([]corev1.ContainerStatus, len(pod.Spec.Containers))
+	for i := 0; i < len(pod.Spec.Containers); i++ {
+		pod.Status.ContainerStatuses[i].Name = pod.Spec.Containers[i].Name
+	}
+
+	/*---------------------------------------------------
+	 * Kind of Journaling for Pod Creation on Slurm
+	 *---------------------------------------------------*/
 	if err := SavePod(ctx, pod); err != nil {
 		return errors.Wrapf(err, "failed to save pod description")
 	}

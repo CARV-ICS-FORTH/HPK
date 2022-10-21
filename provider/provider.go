@@ -17,7 +17,6 @@ package provider
 import (
 	"context"
 	"io"
-	"time"
 
 	"github.com/carv-ics-forth/knoc/api"
 	"github.com/carv-ics-forth/knoc/hpc"
@@ -79,6 +78,9 @@ func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 		}}
 	*/
 
+	/*---------------------------------------------------
+	 * Pass Pod to backend functions
+	 *---------------------------------------------------*/
 	if err := hpc.CreatePod(ctx, pod, p.ResourceManager, api.DefaultContainerRegistry); err != nil {
 		panic(errors.Wrapf(err, "failed to submit job"))
 	}
@@ -98,8 +100,9 @@ func (p *Provider) UpdatePod(_ context.Context, pod *corev1.Pod) error {
 		"phase", pod.Status.Phase,
 	)
 
-	/*
+	panic("POUTSAKIA ROZ")
 
+	/*
 		podHandler, err := hpc.NewPodHandler(p.Logger, p.ResourceManager, pod, api.DefaultContainerRegistry)
 		if err != nil {
 			return errors.Wrap(err, "Could not create Pod from the underlying filesystem")
@@ -108,7 +111,6 @@ func (p *Provider) UpdatePod(_ context.Context, pod *corev1.Pod) error {
 		if err := podHandler.Save(); err != nil {
 			return errors.Wrap(err, "Could not save Pod to the underlying filesystem")
 		}
-
 	*/
 
 	return nil
@@ -124,39 +126,31 @@ func (p *Provider) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 		"obj", api.ObjectKeyFromObject(pod),
 	)
 
+	if err := hpc.DeletePod(ctx, pod); err != nil {
+		return errors.Wrapf(err, "failed to delete pod '%s'", api.ObjectKeyFromObject(pod))
+	}
+
+	pod.Status.Phase = corev1.PodSucceeded
+
 	/*
 		DeletePod takes a Kubernetes Pod and deletes it from the provider.
 		TODO: Once a pod is deleted, the provider is expected to call the NotifyPods callback with a terminal pod status
 		where all the containers are in a terminal state, as well as the pod.
 		DeletePod may be called multiple times for the same pod
 	*/
-	if err := hpc.DeletePod(ctx, pod); err != nil {
-		return errors.Wrapf(err, "failed to delete pods")
-	}
-
-	pod.Status.Phase = corev1.PodSucceeded
-
 	for i := range pod.Status.InitContainerStatuses {
 		pod.Status.InitContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
-			ExitCode:    0,
-			Signal:      0,
-			Reason:      "PodIsDeleted",
-			Message:     "Pod is being deleted",
-			StartedAt:   metav1.Time{Time: time.Now()},
-			FinishedAt:  metav1.Time{Time: time.Now()},
-			ContainerID: "",
+			Reason:     "PodIsDeleted",
+			Message:    "Pod is being deleted",
+			FinishedAt: metav1.Now(),
 		}
 	}
 
 	for i := range pod.Status.ContainerStatuses {
 		pod.Status.ContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
-			ExitCode:    0,
-			Signal:      0,
-			Reason:      "PodIsDeleted",
-			Message:     "Pod is being deleted",
-			StartedAt:   metav1.Time{Time: time.Now()},
-			FinishedAt:  metav1.Time{Time: time.Now()},
-			ContainerID: "",
+			Reason:     "PodIsDeleted",
+			Message:    "Pod is being deleted",
+			FinishedAt: metav1.Now(),
 		}
 	}
 
@@ -201,7 +195,10 @@ func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*c
 
 	pod, err := hpc.LoadPod(ctx, podKey)
 	if err != nil {
-		return nil, errors.Wrapf(err, "unable to load pod '%s'", podKey)
+		// if the pod is not found, then the only thing we can do is to create a mock-up status.
+		// on error, the virtual-kubelet sets the status.Reason to "ProviderFailure" and the status.Message to err.
+		// however, it is up to us to set the status.Phase to failed.
+		return &corev1.PodStatus{Phase: corev1.PodFailed}, errors.Wrapf(err, "unable to load pod '%s'", podKey)
 	}
 
 	return &pod.Status, nil

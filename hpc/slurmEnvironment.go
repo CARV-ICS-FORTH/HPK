@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/carv-ics-forth/knoc/api"
+	"github.com/carv-ics-forth/knoc/pkg/process"
 	"github.com/carv-ics-forth/knoc/pkg/ui"
 	"github.com/fsnotify/fsnotify"
 	"github.com/pkg/errors"
@@ -50,21 +51,21 @@ func (hpc *Environment) SingularityPath() string {
 }
 
 func (hpc *Environment) Scancel(args string) (string, error) {
-	output, err := exec.Command(hpc.scancelExecutablePath, args).Output()
+	out, err := process.Execute(hpc.scancelExecutablePath, args)
 	if err != nil {
-		return "", errors.Wrap(err, "Could not run scancel")
+		return string(out), errors.Wrap(err, "Could not run scancel")
 	}
 
-	return string(output), nil
+	return string(out), nil
 }
 
 func (hpc *Environment) SBatchFromFile(ctx context.Context, path string) (string, error) {
-	output, err := exec.CommandContext(ctx, hpc.sbatchExecutablePath, path).Output()
+	out, err := process.Execute(hpc.sbatchExecutablePath, path)
 	if err != nil {
-		return "", errors.Wrapf(err, "sbatch execution error.")
+		return string(out), errors.Wrapf(err, "sbatch execution error")
 	}
 
-	return string(output), nil
+	return string(out), nil
 }
 
 func (hpc *Environment) SbatchMacros(instanceName string, sbatchFlags string) string {
@@ -211,21 +212,25 @@ func (d *FSEventDispatcher) Run(ctx context.Context) {
 
 						switch filepath.Ext(file) {
 						case api.JobIdExtension: /* <---- Slurm Job Creation / Pod Scheduling */
-							logger.Info("Event: Slurm Job Started", "file", file)
+							logger.Info("--> Event: Slurm Job Started", "file", file)
 
 							if err := renewPodStatus(ctx, podKey); err != nil {
 								logger.Error(err, "failed to handle job creation event")
 							}
 
+							logger.Info("<-- Event: Pod Status Renewed")
+
 						case api.ExitCodeExtension: /*-- Slurm Job Completion / Pod Termination --*/
-							logger.Info("Event: Slurm Job Completed", "file", file)
+							logger.Info("--> Event: Slurm Job Completed", "file", file)
 
 							if err := renewPodStatus(ctx, podKey); err != nil {
 								logger.Error(err, "failed to handle job completion event")
 							}
 
+							logger.Info("<-- Event: Pod Status Renewed")
+
 						default:
-							logger.Info("Ignore fsnotify event", "op", "write", "file", file)
+							logger.V(7).Info("Ignore fsnotify event", "op", "write", "file", file)
 						}
 					}
 				}

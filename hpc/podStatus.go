@@ -8,26 +8,26 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/carv-ics-forth/knoc/api"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func renewPodStatus(ctx context.Context, podKey api.ObjectKey) error {
+	/*-- Load Pod from reference --*/
 	pod, err := LoadPod(ctx, podKey)
 	if err != nil {
 		return errors.Wrapf(err, "unable to load pod")
 	}
 
+	/*-- Recalculate the Pod status from locally stored containers --*/
 	if err := resolvePodStatus(pod); err != nil {
 		return errors.Wrapf(err, "unable to update pod status")
 	}
 
-	// save the updated Pod status.
+	/*-- Update the top-level Pod description --*/
 	if err := SavePod(ctx, pod); err != nil {
 		return errors.Wrapf(err, "unable to store pod")
 	}
@@ -45,6 +45,17 @@ func resolvePodStatus(pod *corev1.Pod) error {
 	logger := defaultLogger.WithValues("pod", podKey)
 
 	/*---------------------------------------------------
+	 * Filter-out Pods with Unsupported Fields
+	 *---------------------------------------------------*/
+	if pod.GetNamespace() == "kube-system" {
+		pod.Status.Phase = corev1.PodFailed
+		pod.Status.Reason = "UnsupportedFeatures"
+		pod.Status.Message = "This version of HPK is not intended for kube-system jobs"
+
+		return nil
+	}
+
+	/*---------------------------------------------------
 	 * Load Container Statuses
 	 *---------------------------------------------------*/
 	if err := LoadContainerStatuses(pod); err != nil {
@@ -58,7 +69,6 @@ func resolvePodStatus(pod *corev1.Pod) error {
 		logger.Info(" O Checking for status of Init Containers")
 
 		for _, initContainer := range pod.Status.InitContainerStatuses {
-
 			if initContainer.State.Terminated != nil {
 				// the Pod is pending is at least one InitContainer is still running
 				return nil
@@ -69,7 +79,7 @@ func resolvePodStatus(pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Classify container statuses
 	 *---------------------------------------------------*/
-	logger.Info(" O Checking for status of Containers Containers")
+	logger.Info(" O Checking for status of Containers")
 
 	var state Classifier
 	state.Reset()
@@ -81,9 +91,8 @@ func resolvePodStatus(pod *corev1.Pod) error {
 	totalJobs := len(pod.Spec.Containers)
 
 	/*---------------------------------------------------
-	 * Handle Pod lifecycle based on Container Statuses
+	 * Define Expected Lifecycle Transitions
 	 *---------------------------------------------------*/
-
 	testSequence := []test{
 		{ /*-- FAILED: at least one job has failed --*/
 			expression: state.NumFailedJobs() > 0,
@@ -123,11 +132,12 @@ func resolvePodStatus(pod *corev1.Pod) error {
 		},
 	}
 
+	/*---------------------------------------------------
+	 * Check for Expected Lifecycle Transitions or panic
+	 *---------------------------------------------------*/
 	for _, testcase := range testSequence {
-		if testcase.expression { // Check if any lifecycle condition is met
-			// update the cached Pod Status.
+		if testcase.expression {
 			testcase.change(&pod.Status)
-
 			return nil
 		}
 	}
@@ -149,77 +159,113 @@ func LoadContainerStatuses(pod *corev1.Pod) error {
 	podKey := api.ObjectKeyFromObject(pod)
 
 	/*---------------------------------------------------
-	 * Init Containers
+	 * Generic Handler for ContainerStatus
 	 *---------------------------------------------------*/
-	for i, container := range pod.Spec.InitContainers {
-		exitCodePath := ExitCodeFilePath(podKey, container.Name)
-
-		code, exists := readIntFromFile(exitCodePath)
-		if !exists {
-			/*-- running --*/
-			continue
+	handleStatus := func(containerStatus *corev1.ContainerStatus) {
+		if containerStatus.RestartCount > 0 {
+			panic("Restart is not yet supported")
 		}
 
-		/*-- terminated --*/
-		pod.Status.InitContainerStatuses[i].State.Terminated.ExitCode = int32(code)
+		jobIDPath := JobIDFilePath(podKey, containerStatus.Name)
+		jobID, jobIDExists := readStringFromFile(jobIDPath)
+
+		/*-- StateWaiting: no jobid, means that the job is still in the Slurm queue --*/
+		if !jobIDExists {
+			containerStatus.State.Waiting = &corev1.ContainerStateWaiting{
+				Reason:  "JobWaitingInSlurm",
+				Message: "Job waiting in the Slurm queue",
+			}
+		}
+
+		/*-- StateRunning: existing jobid, means that the job is running --*/
+		if jobIDExists && containerStatus.State.Running == nil {
+			/*-- fields driven by probes. --*/
+			started := true
+			containerStatus.Started = &started
+			containerStatus.Ready = true
+
+			containerStatus.State.Running = &corev1.ContainerStateRunning{
+				StartedAt: metav1.Now(), // fixme: we should get this info from the file's ctime
+			}
+		}
+
+		/*-- StateTerminated: existing exitcode, means that the job is complete --*/
+		exitCodePath := ExitCodeFilePath(podKey, containerStatus.Name)
+		exitCode, exitCodeExists := readIntFromFile(exitCodePath)
+
+		if exitCodeExists {
+			var reason string
+
+			if exitCode == 0 {
+				reason = "Success"
+			} else {
+				reason = "Failed"
+			}
+
+			containerStatus.State.Terminated = &corev1.ContainerStateTerminated{
+				ExitCode:    int32(exitCode),
+				Signal:      0,
+				Reason:      reason,
+				Message:     trytoDecodeExitCode(exitCode),
+				StartedAt:   containerStatus.State.Running.StartedAt,
+				FinishedAt:  metav1.Now(), // fixme: get it from the file's ctime
+				ContainerID: jobID,
+			}
+		}
 	}
 
 	/*---------------------------------------------------
-	 * Containers
+	 * Iterate containers and call the Generic Handler
 	 *---------------------------------------------------*/
-	for i, container := range pod.Spec.Containers {
-		exitCodePath := ExitCodeFilePath(podKey, container.Name)
-		jobIDPath := JobIDFilePath(podKey, container.Name)
+	for i := 0; i < len(pod.Status.InitContainerStatuses); i++ {
+		handleStatus(&pod.Status.InitContainerStatuses[i])
+	}
 
-		code, exists := readIntFromFile(exitCodePath)
-		if !exists {
-			/*-- running --*/
-			continue
-		}
-
-		/*-- terminated --*/
-		containerID, exists := readStringFromFile(jobIDPath)
-		if !exists {
-			panic("this should never happen")
-		}
-
-		status := &pod.Status.ContainerStatuses[i]
-
-		if status.RestartCount == 0 {
-			(*status).State.Terminated = &corev1.ContainerStateTerminated{
-				ExitCode:    int32(code),
-				Signal:      0,
-				Reason:      "",
-				Message:     trytoDecodeExitCode(code),
-				StartedAt:   metav1.Time{Time: time.Time{}}, // FIXME: should be taken by the fs info
-				FinishedAt:  metav1.Time{Time: time.Now()},
-				ContainerID: containerID,
-			}
-		} else {
-			(*status).State.Terminated.ExitCode = int32(code)
-			(*status).State.Terminated.Message = trytoDecodeExitCode(code)
-			(*status).State.Terminated.StartedAt = metav1.Time{Time: time.Time{}} // FIXME: should be taken by the fs info
-			(*status).State.Terminated.FinishedAt = metav1.Time{Time: time.Now()}
-		}
+	for i := 0; i < len(pod.Status.ContainerStatuses); i++ {
+		handleStatus(&pod.Status.ContainerStatuses[i])
 	}
 
 	return nil
 }
 
+// awesome work: https://komodor.com/learn/exit-codes-in-containers-and-kubernetes-the-complete-guide/
 func trytoDecodeExitCode(code int) string {
 	switch code {
+	case 0:
+		return "Purposely Stopped"
+	case 1:
+		return "Application error"
+	case 125:
+		return "Container failed to run error"
+	case 126:
+		return "Command invoke error"
+	case 127:
+		return "File or directory not found"
+	case 128:
+		return "Invalid argument used on exit"
+	case 134:
+		return "Abnormal termination (SIGABRT)"
+	case 137:
+		return "Immediate termination (SIGKILL)"
+	case 139:
+		return "Segmentation fault (SIGSEGV)"
+	case 143:
+		return "Graceful termination (SIGTERM)"
 	case 255:
-		return "this usually indicates initialization failure"
+		return "Exit Status Out Of Range"
 	default:
-		return ""
+		return "Unknown Exist Code"
 	}
 }
 
 func readStringFromFile(filepath string) (string, bool) {
 	out, err := os.ReadFile(filepath)
-	if err != nil {
-		logrus.Warnf("cannot read file '%s'", filepath)
+	if os.IsNotExist(err) {
+		return "", false
+	}
 
+	if err != nil {
+		defaultLogger.Error(err, "cannot read file", "path", filepath)
 		return "", false
 	}
 
@@ -228,7 +274,12 @@ func readStringFromFile(filepath string) (string, bool) {
 
 func readIntFromFile(filepath string) (int, bool) {
 	out, err := os.ReadFile(filepath)
+	if os.IsNotExist(err) {
+		return -1, false
+	}
+
 	if err != nil {
+		defaultLogger.Error(err, "cannot read file", "path", filepath)
 		return -1, false
 	}
 
