@@ -12,7 +12,9 @@ import (
 	"github.com/carv-ics-forth/knoc/pkg/manager"
 	"github.com/carv-ics-forth/knoc/pkg/utils"
 	"github.com/go-logr/logr"
+	"github.com/hashicorp/go-multierror"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/carv-ics-forth/knoc/api"
@@ -38,7 +40,7 @@ type podHandler struct {
 	logger       logr.Logger
 }
 
-func LoadPod(ctx context.Context, podRef api.ObjectKey) (*corev1.Pod, error) {
+func GetPod(ctx context.Context, podRef api.ObjectKey) (*corev1.Pod, error) {
 	encodedPodFilepath := PodSpecFilePath(podRef)
 
 	encodedPod, err := os.ReadFile(encodedPodFilepath)
@@ -59,8 +61,39 @@ func LoadPod(ctx context.Context, podRef api.ObjectKey) (*corev1.Pod, error) {
 	return &pod, nil
 }
 
+func GetPods(ctx context.Context) ([]*corev1.Pod, error) {
+	var pods []*corev1.Pod
+	var merr *multierror.Error
+
+	/*---------------------------------------------------
+	 * Iterate the filesystem and extract local pods
+	 *---------------------------------------------------*/
+	filepath.Walk(api.RuntimeDir, func(path string, info os.FileInfo, err error) error {
+		encodedPod, err := os.ReadFile(path)
+		if err != nil {
+			merr = multierror.Append(merr, errors.Wrapf(err, "cannot read pod description file '%s'", path))
+		}
+
+		var pod corev1.Pod
+
+		if err := json.Unmarshal(encodedPod, &pod); err != nil {
+			merr = multierror.Append(merr, errors.Wrapf(err, "cannot decode pod description file '%s'", path))
+		}
+
+		/*-- return only the pods that are known to be running --*/
+		if pod.Status.Phase == corev1.PodRunning {
+			pods = append(pods, &pod)
+		}
+
+		return nil
+	})
+
+	return pods, merr.ErrorOrNil()
+}
+
 func SavePod(ctx context.Context, pod *corev1.Pod) error {
 	podKey := api.ObjectKeyFromObject(pod)
+	logger := defaultLogger.WithValues("pod", podKey)
 
 	encodedPod, err := json.Marshal(pod)
 	if err != nil {
@@ -73,10 +106,39 @@ func SavePod(ctx context.Context, pod *corev1.Pod) error {
 		return errors.Wrapf(err, "cannot write pod json file '%s'", encodedPodFile)
 	}
 
+	logger.Info("DISK <-- Event: Pod Status Renewed",
+		"version", pod.ResourceVersion,
+		"phase", pod.Status.Phase,
+	)
+
 	return nil
 }
 
 func DeletePod(ctx context.Context, pod *corev1.Pod) error {
+	/*
+		DeletePod takes a Kubernetes Pod and deletes it from the provider.
+		TODO: Once a pod is deleted, the provider is expected
+		to call the NotifyPods callback with a terminal pod status
+		where all the containers are in a terminal state, as well as the pod.
+		DeletePod may be called multiple times for the same pod
+	*/
+
+	for i := range pod.Status.InitContainerStatuses {
+		pod.Status.InitContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
+			Reason:     "PodIsDeleted",
+			Message:    "Pod is being deleted",
+			FinishedAt: metav1.Now(),
+		}
+	}
+
+	for i := range pod.Status.ContainerStatuses {
+		pod.Status.ContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
+			Reason:     "PodIsDeleted",
+			Message:    "Pod is being deleted",
+			FinishedAt: metav1.Now(),
+		}
+	}
+
 	podDir := RuntimeDir(api.ObjectKeyFromObject(pod))
 
 	if err := os.RemoveAll(podDir); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -93,7 +155,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, rmanager *manager.ResourceM
 	/*---------------------------------------------------
 	 * Prepare Pod Environment & handler
 	 *---------------------------------------------------*/
-	logger.Info("== Creating Pod ==", "pod", podKey)
+	logger.Info("== Creating Pod ==")
 
 	// create pod's top-level and internal sbatch directories
 	sbatchDir := SBatchDirectory(podKey)
@@ -107,12 +169,15 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, rmanager *manager.ResourceM
 	pod.Status.InitContainerStatuses = make([]corev1.ContainerStatus, len(pod.Spec.InitContainers))
 	for i := 0; i < len(pod.Spec.InitContainers); i++ {
 		pod.Status.InitContainerStatuses[i].Name = pod.Spec.InitContainers[i].Name
+		pod.Status.InitContainerStatuses[i].Image = pod.Spec.InitContainers[i].Image
 	}
 
 	pod.Status.ContainerStatuses = make([]corev1.ContainerStatus, len(pod.Spec.Containers))
 	pod.Status.ContainerStatuses = make([]corev1.ContainerStatus, len(pod.Spec.Containers))
 	for i := 0; i < len(pod.Spec.Containers); i++ {
 		pod.Status.ContainerStatuses[i].Name = pod.Spec.Containers[i].Name
+		pod.Status.ContainerStatuses[i].Image = pod.Spec.Containers[i].Image
+
 	}
 
 	/*---------------------------------------------------
@@ -155,14 +220,14 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, rmanager *manager.ResourceM
 	/*---------------------------------------------------
 	 * Submit Container Creation Requests
 	 *---------------------------------------------------*/
-	var lastInitContainerJobID = -1
-	var lastContainerJobID = -1
+	lastInitContainerJobID := -1
+	lastContainerJobID := -1
 
-	logger.Info("* Submit creation requests for init containers")
+	logger.Info(" * Submit creation requests for init containers")
 
 	for i, initContainer := range pod.Spec.InitContainers {
 		if err := h.submitContainerCreationRequest(ctx, &pod.Spec.InitContainers[i], &lastInitContainerJobID); err != nil {
-			return errors.Wrapf(err, "failed to submit creation request for init-container '%s'", initContainer.Name)
+			return errors.Wrapf(err, "creation request failed for init-container '%s'", initContainer.Name)
 		}
 	}
 
@@ -170,7 +235,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, rmanager *manager.ResourceM
 
 	for i, container := range h.Pod.Spec.Containers {
 		if err := h.submitContainerCreationRequest(ctx, &pod.Spec.Containers[i], &lastContainerJobID); err != nil {
-			return errors.Wrapf(err, "failed to submit creation request for container '%s'", container.Name)
+			return errors.Wrapf(err, "creation request failed for container '%s'", container.Name)
 		}
 	}
 
@@ -225,21 +290,6 @@ func (h *podHandler) submitContainerCreationRequest(ctx context.Context, contain
 		return cleanedFlagValues
 	}
 
-	/*
-		local singularity image files currently unavailable
-	*/
-	/*
-		if strings.HasPrefix(c.Image, "/") {
-
-			if imageURI, ok := c.GetObjectMeta().GetAnnotations()["slurm-job.knoc.io/image-root"]; ok {
-				logrus.Debugln(imageURI)
-				image = imageURI + c.Image
-			} else {
-				return errors.Errorf("image-uri annotation not specified for path in remote filesystem")
-			}
-		}
-	*/
-
 	/*---------------------------------------------------
 	 * Build the Singularity Command
 	 *---------------------------------------------------*/
@@ -265,13 +315,12 @@ func (h *podHandler) submitContainerCreationRequest(ctx context.Context, contain
 	/*---------------------------------------------------
 	 * Submit the singularity command to Slurm
 	 *---------------------------------------------------*/
-
 	jobID, err := h.submitSlurmJob(ctx, container, *prevJobID, singularityCommand)
 	if err != nil {
-		return errors.Wrap(err, "slurm submission error")
+		return errors.Wrap(err, "slurm error")
 	}
 
-	h.logger.Info(" * Request Submitted to Slurm", "jobID", jobID)
+	h.logger.Info(" * Job has been submitted to Slurm", "jobID", jobID)
 
 	return nil
 }
@@ -327,7 +376,9 @@ func (h *podHandler) submitSlurmJob(ctx context.Context, container *corev1.Conta
 
 	out, err := Executables.SBatchFromFile(ctx, scriptFile)
 	if err != nil {
-		return -1, errors.Wrapf(err, "sbatch execution error. out: %s", out)
+		h.logger.Error(err, "sbatch submission error", "out", out)
+
+		return -1, errors.Wrapf(err, "sbatch submission error")
 	}
 
 	/*---------------------------------------------------
@@ -633,116 +684,3 @@ func (h *podHandler) createBackendVolumes() error {
 
 	return nil
 }
-
-/*
-
-func (h *podHandler) generatePauseContainerName() string {
-	return filepath.Join(h.Pod.GetNamespace(), h.Pod.GetName(), api.PauseContainerName)
-}
-
-func (h *podHandler) GetPauseContainerPID() (int, error) {
-	pauseInstanceName := h.generatePauseContainerName()
-	pid, err := GetPauseInstancePID(pauseInstanceName)
-	if err != nil {
-		return 0, errors.Wrapf(err, "Could not get pauseContainer's PID")
-	}
-
-	return pid, nil
-}
-
-func (h *podHandler) CreatePauseContainer(ctx context.Context) error {
-	container := corev1.Container{
-		Name:  api.PauseContainerName,
-		Image: api.PauseContainerImage,
-	}
-
-	podKey := api.ObjectKeyFromObject(h.Pod)
-	containerKey := podKey.String() + "/" + container.Name
-
-	sbatchFlagsAsString := ""
-
-	singularityCommand := append([]string{Executables.SingularityPath(), "instance", "start"}, h.ContainerRegistry+container.Image)
-	singularityCommand = append(singularityCommand, "sleep", "infinity")
-
-	ssfPath := SBatchFilePath(podKey, container.Name)
-
-	scriptFile, err := os.Create(ssfPath)
-	if err != nil {
-		return errors.Wrapf(err, "Cant create slurm_script '%s'", ssfPath)
-	}
-
-	finalScriptData := Executables.SbatchMacros(containerKey, sbatchFlagsAsString) +
-		"\n" +
-		strings.Join(singularityCommand, " ") + " >> " + StdOutputFilePath(podKey, container.Name) +
-		" 2>> " + StdErrorFilePath(podKey, container.Name) +
-		"\n echo $? > " + ExitCodeFilePath(podKey, container.Name)
-
-	if _, err = scriptFile.WriteString(finalScriptData); err != nil {
-		return errors.Wrapf(err, "Can't write sbatch script in file '%s'", ssfPath)
-	}
-
-	if err := scriptFile.Close(); err != nil {
-		return errors.Wrap(err, "Close")
-	}
-
-	out, err := Executables.SBatchFromFile(ctx, ssfPath)
-	if err != nil {
-		return errors.Wrapf(err, "sbatch submission error")
-	}
-
-	// if sbatch script is successfully submitted check for job id
-	if _, err := parseSlurmJobID(podKey, container.Name, out); err != nil {
-		return errors.Wrapf(err, "parseSlurmJobID")
-	}
-
-	pid, err := h.GetPauseContainerPID()
-	if err != nil {
-		return errors.Wrapf(err, "Can't get pauseContainer PID")
-	}
-
-	// note the pauseContainer's PID for later use
-	// so that the future containers of this pod, join this namespace
-	h.PauseContainerPID = pid
-
-	return nil
-}
-
-
-func GetPauseInstancePID(instanceName string) (int, error) {
-	out, err := exec.Command("singularity", "instance", "list").Output()
-	if err != nil {
-		return 0, errors.Wrapf(err, "Could not retrieve instance list for instance '%s'", instanceName)
-	}
-	// create an array from output that's been split by record (row)
-	records := strings.Split(string(out), "\n")
-	// get rid of the column names
-	records = records[1:]
-
-	// linear search for the pause Instance
-	// logrus.Debug()
-	logrus.Warn(records)
-	for i := range records {
-		if len(records[i]) == 0 {
-			continue
-		}
-
-		trimmed := strings.Join(strings.Fields(records[i]), " ")
-		fields := strings.Split(trimmed, " ")
-
-		logrus.Warn(fields)
-
-		pid, err := strconv.Atoi(fields[1])
-		if err != nil {
-			return 0, errors.Wrapf(err, "Could not convert instance PID for instance '%s'", instanceName)
-		}
-
-		if fields[0] == instanceName {
-			return pid, nil
-		}
-	}
-
-	return 0, errors.Wrapf(err, "Could not find instance PID for instance '%s'", instanceName)
-}
-
-
-*/

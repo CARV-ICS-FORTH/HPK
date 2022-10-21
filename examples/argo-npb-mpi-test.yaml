@@ -21,7 +21,7 @@ spec:
     - name: npb
       metadata:
         annotations:
-          slurm-job.knoc.io/flags: "--mem=8G --nodes=3 --nodelist=tie0,tie1,tie3 --ntasks={{inputs.parameters.cpus}}"
+          slurm-job.knoc.io/flags: "--nodes=1 --nodelist=jedi1 --ntasks={{inputs.parameters.cpus}}"
           slurm-job.knoc.io/mpi-flags: "--mca btl self,tcp,vader --mca btl_tcp_if_include ib0 "
       inputs:
         parameters:

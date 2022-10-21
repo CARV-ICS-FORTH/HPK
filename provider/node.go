@@ -121,10 +121,16 @@ func NodeConditions(_ context.Context) []corev1.NodeCondition {
 }
 
 func (p *Provider) NodeAddresses(_ context.Context) []corev1.NodeAddress {
-	return []corev1.NodeAddress{{
-		Type:    "InternalIP",
-		Address: p.InitConfig.InternalIP,
-	}}
+	return []corev1.NodeAddress{
+		{
+			Type:    corev1.NodeExternalIP,
+			Address: p.InitConfig.InternalIP,
+		},
+		{
+			Type:    corev1.NodeInternalIP,
+			Address: p.InitConfig.InternalIP,
+		},
+	}
 }
 
 func (p *Provider) NodeDaemonEndpoints(_ context.Context) corev1.NodeDaemonEndpoints {

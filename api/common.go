@@ -32,8 +32,9 @@ const (
 	DefaultPodSyncWorkers       = 1
 	DefaultKubeNamespace        = corev1.NamespaceAll
 
-	DefaultTaintEffect = string(corev1.TaintEffectNoSchedule)
 	DefaultTaintKey    = "virtual-kubelet.io/provider"
+	DefaultTaintValue  = "hpk"
+	DefaultTaintEffect = string(corev1.TaintEffectNoSchedule)
 )
 
 var (
@@ -82,17 +83,17 @@ const (
 */
 
 const (
-	PodGlobalDirectoryPermissions = 0777
-	PodSpecJsonFilePermissions    = 0600
-	ContainerJobPermissions       = 0777
+	PodGlobalDirectoryPermissions = 0o777
+	PodSpecJsonFilePermissions    = 0o600
+	ContainerJobPermissions       = 0o777
 
-	SecretPodDataPermissions      = 0760
-	PodSecretVolPermissions       = 0755
-	PodSecretFilePermissions      = 0644
-	PodConfigMapVolPermissions    = 0755
-	PodConfigMapFilePermissions   = 0644
-	PodDownwardApiVolPermissions  = 0755
-	PodDownwardApiFilePermissions = 0644
+	SecretPodDataPermissions      = 0o760
+	PodSecretVolPermissions       = 0o755
+	PodSecretFilePermissions      = 0o644
+	PodConfigMapVolPermissions    = 0o755
+	PodConfigMapFilePermissions   = 0o644
+	PodDownwardApiVolPermissions  = 0o755
+	PodDownwardApiFilePermissions = 0o644
 )
 
 // ObjectKey identifies a Kubernetes Object.

@@ -54,3 +54,9 @@ singularity run --bind /bin,/boot,/etc,/home,/lib,/lib32,/lib64,/libx32,/lost+fo
 # jedi
 singularity run --bind /bin,/boot,/etc,/home,/lib,/lib32,/lib64,/libx32,/lost+found,/media,/mnt,/opt,/proc,/root,/sbin,/snap,/srv,/swap.img,/sys,/tmp,/usr,/var  hpk.sif
 
+
+## Enable Logs
+https://ritazh.com/understanding-kubectl-logs-with-virtual-kubelet-a135e83ae0ee
+
+export VKUBELET_POD_IP=$(dig +short myip.opendns.com @resolver1.opendns.com)
+./hpk ...

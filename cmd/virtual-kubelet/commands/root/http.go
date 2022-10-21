@@ -16,14 +16,13 @@ package root
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"os"
 
 	"github.com/carv-ics-forth/knoc/provider"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	"github.com/virtual-kubelet/virtual-kubelet/log"
 	"github.com/virtual-kubelet/virtual-kubelet/node/api"
 )
@@ -55,22 +54,33 @@ func loadTLSConfig(certPath, keyPath string) (*tls.Config, error) {
 	}, nil
 }
 
+type apiServerConfig struct {
+	CertPath    string
+	KeyPath     string
+	Addr        string
+	MetricsAddr string
+}
+
 func setupHTTPServer(ctx context.Context, p *provider.Provider, cfg *apiServerConfig) (_ func(), retErr error) {
 	var closers []io.Closer
+
 	cancel := func() {
 		for _, c := range closers {
 			c.Close()
 		}
 	}
+
 	defer func() {
 		if retErr != nil {
 			cancel()
 		}
 	}()
 
+	/*---------------------------------------------------
+	 * Enable Logs and Interaction with container
+	 *---------------------------------------------------*/
 	if cfg.CertPath == "" || cfg.KeyPath == "" {
-		log.G(ctx).
-			WithField("certPath", cfg.CertPath).
+		logrus.WithField("certPath", cfg.CertPath).
 			WithField("keyPath", cfg.KeyPath).
 			Error("TLS certificates not provided, not setting up pod http server")
 	} else {
@@ -96,12 +106,17 @@ func setupHTTPServer(ctx context.Context, p *provider.Provider, cfg *apiServerCo
 			Handler:   mux,
 			TLSConfig: tlsCfg,
 		}
+
 		go serveHTTP(ctx, s, l, "pods")
+
 		closers = append(closers, s)
 	}
 
+	/*---------------------------------------------------
+	 * Enable Virtual-Kubelet Metrics
+	 *---------------------------------------------------*/
 	if cfg.MetricsAddr == "" {
-		log.G(ctx).Info("Pod metrics server not setup due to empty metrics address")
+		logrus.Warn("Pod metrics server not setup due to empty metrics address")
 	} else {
 		l, err := net.Listen("tcp", cfg.MetricsAddr)
 		if err != nil {
@@ -126,7 +141,9 @@ func setupHTTPServer(ctx context.Context, p *provider.Provider, cfg *apiServerCo
 		s := &http.Server{
 			Handler: mux,
 		}
+
 		go serveHTTP(ctx, s, l, "pod metrics")
+
 		closers = append(closers, s)
 	}
 
@@ -143,23 +160,4 @@ func serveHTTP(ctx context.Context, s *http.Server, l net.Listener, name string)
 	}
 
 	l.Close()
-}
-
-type apiServerConfig struct {
-	CertPath    string
-	KeyPath     string
-	Addr        string
-	MetricsAddr string
-}
-
-func getAPIConfig(c Opts) (*apiServerConfig, error) {
-	config := apiServerConfig{
-		CertPath: os.Getenv("APISERVER_CERT_LOCATION"),
-		KeyPath:  os.Getenv("APISERVER_KEY_LOCATION"),
-	}
-
-	config.Addr = fmt.Sprintf(":%d", c.ListenPort)
-	config.MetricsAddr = c.MetricsAddr
-
-	return &config, nil
 }

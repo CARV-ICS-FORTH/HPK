@@ -22,11 +22,11 @@ import (
 	"github.com/carv-ics-forth/knoc/hpc"
 	"github.com/carv-ics-forth/knoc/pkg/manager"
 	"github.com/go-logr/logr"
+	"github.com/niemeyer/pretty"
 	"github.com/pkg/errors"
 	vkapi "github.com/virtual-kubelet/virtual-kubelet/node/api"
 	"github.com/virtual-kubelet/virtual-kubelet/node/api/statsv1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
@@ -67,50 +67,86 @@ func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	podKey := api.ObjectKeyFromObject(pod)
 	logger := p.Logger.WithValues("obj", podKey)
 
+	/*---------------------------------------------------
+	 * Preamble used for Request tracing on the logs
+	 *---------------------------------------------------*/
 	logger.Info("-> CreatePod")
-	defer logger.Info("<- CreatePod")
 
-	/*
-		// set the ip of the running pods to the virtual node
-		pod.Status.PodIP = provider.InternalIP
-		pod.Status.PodIPs = []corev1.PodIP{{
-			IP: provider.InternalIP,
-		}}
-	*/
+	defer func() {
+		logger.Info("<- CreatePod", "podIP", pod.Status.PodIP)
+	}()
 
 	/*---------------------------------------------------
-	 * Pass Pod to backend functions
+	 * Assign Virtual Kubelet podIP as the node's internalIP
+	 *---------------------------------------------------*/
+
+	/*
+		This is needed so that node-level logging requests
+		will be handled by the Virtual Kubelet
+		https://ritazh.com/understanding-kubectl-logs-with-virtual-kubelet-a135e83ae0ee
+	*/
+	pod.Status.PodIP = p.InitConfig.InternalIP
+
+	/*---------------------------------------------------
+	 * Pass the pod for creation to the backend
 	 *---------------------------------------------------*/
 	if err := hpc.CreatePod(ctx, pod, p.ResourceManager, api.DefaultContainerRegistry); err != nil {
-		panic(errors.Wrapf(err, "failed to submit job"))
+		return errors.Wrapf(err, "unable to create pod")
 	}
 
 	return nil
 }
 
 // UpdatePod accepts a Pod definition and updates its reference.
-func (p *Provider) UpdatePod(_ context.Context, pod *corev1.Pod) error {
-	p.Logger.Info("-> UpdatePod",
-		"obj", api.ObjectKeyFromObject(pod),
-		"phase", pod.Status.Phase,
-	)
+func (p *Provider) UpdatePod(ctx context.Context, newPod *corev1.Pod) error {
+	podKey := api.ObjectKeyFromObject(newPod)
+	logger := p.Logger.WithValues("obj", podKey)
 
-	defer p.Logger.Info("<- UpdatePod",
-		"obj", api.ObjectKeyFromObject(pod),
-		"phase", pod.Status.Phase,
-	)
+	/*---------------------------------------------------
+	 * Preamble used for Request tracing on the logs
+	 *---------------------------------------------------*/
+	logger.Info("-> UpdatePod", "phase", newPod.Status.Phase)
 
-	panic("POUTSAKIA ROZ")
+	defer func() {
+		logger.Info("<- UpdatePod", "phase", newPod.Status.Phase)
+	}()
+
+	/*---------------------------------------------------
+	 * Ensure that received pod is newer than the local
+	 *---------------------------------------------------*/
+	oldPod, err := hpc.GetPod(ctx, podKey)
+	if err != nil {
+		return errors.Wrapf(err, "unable to load local pod")
+	}
+
+	if oldPod.ResourceVersion >= newPod.ResourceVersion {
+		/*-- The received pod is old, so we can safely discard it --*/
+		logger.Info("Discard update since its ResourceVersion is older than the local")
+
+		return nil
+	}
+
+	/*---------------------------------------------------
+	 * Identify any intermediate actions that must taken
+	 *---------------------------------------------------*/
+	if metaDiff := pretty.Diff(oldPod.ObjectMeta, newPod.ObjectMeta); len(metaDiff) > 0 {
+		/* ... */
+	}
+
+	if specDiff := pretty.Diff(oldPod.Spec, newPod.Spec); len(specDiff) > 0 {
+		/* ... */
+	}
+
+	if statusDiff := pretty.Diff(oldPod.Status, newPod.Status); len(statusDiff) > 0 {
+		/* ... */
+	}
 
 	/*
-		podHandler, err := hpc.NewPodHandler(p.Logger, p.ResourceManager, pod, api.DefaultContainerRegistry)
-		if err != nil {
-			return errors.Wrap(err, "Could not create Pod from the underlying filesystem")
-		}
+		WARNING: We should never replace the old version with the newer
+		since it may lead to race conditions.
 
-		if err := podHandler.Save(); err != nil {
-			return errors.Wrap(err, "Could not save Pod to the underlying filesystem")
-		}
+		It is possible to Slurm to trigger a local event, that will
+		be lost if we replace the version.
 	*/
 
 	return nil
@@ -118,130 +154,66 @@ func (p *Provider) UpdatePod(_ context.Context, pod *corev1.Pod) error {
 
 // DeletePod deletes the specified pod out of memory.
 func (p *Provider) DeletePod(ctx context.Context, pod *corev1.Pod) error {
-	p.Logger.Info("-> DeletePod",
-		"obj", api.ObjectKeyFromObject(pod),
-	)
+	podKey := api.ObjectKeyFromObject(pod)
+	logger := p.Logger.WithValues("obj", podKey)
 
-	defer p.Logger.Info("<- DeletePod",
-		"obj", api.ObjectKeyFromObject(pod),
-	)
+	/*---------------------------------------------------
+	 * Preamble used for Request tracing on the logs
+	 *---------------------------------------------------*/
+	logger.Info("-> DeletePod")
+	defer logger.Info("<- DeletePod")
 
-	if err := hpc.DeletePod(ctx, pod); err != nil {
-		return errors.Wrapf(err, "failed to delete pod '%s'", api.ObjectKeyFromObject(pod))
-	}
+	return hpc.DeletePod(ctx, pod)
+}
 
-	pod.Status.Phase = corev1.PodSucceeded
+// GetPods returns a list of all pods known to be "running".
+func (p *Provider) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
+	/*---------------------------------------------------
+	 * Preamble used for Request tracing on the logs
+	 *---------------------------------------------------*/
+	p.Logger.Info("-> GetPods")
+	defer p.Logger.Info("<- GetPods")
 
-	/*
-		DeletePod takes a Kubernetes Pod and deletes it from the provider.
-		TODO: Once a pod is deleted, the provider is expected to call the NotifyPods callback with a terminal pod status
-		where all the containers are in a terminal state, as well as the pod.
-		DeletePod may be called multiple times for the same pod
-	*/
-	for i := range pod.Status.InitContainerStatuses {
-		pod.Status.InitContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
-			Reason:     "PodIsDeleted",
-			Message:    "Pod is being deleted",
-			FinishedAt: metav1.Now(),
-		}
-	}
-
-	for i := range pod.Status.ContainerStatuses {
-		pod.Status.ContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
-			Reason:     "PodIsDeleted",
-			Message:    "Pod is being deleted",
-			FinishedAt: metav1.Now(),
-		}
-	}
-
-	return nil
+	return hpc.GetPods(ctx)
 }
 
 // GetPod returns a pod by name that is stored in memory.
 func (p *Provider) GetPod(ctx context.Context, namespace, name string) (*corev1.Pod, error) {
-	p.Logger.Info("-> GetPod",
-		"namespace", namespace,
-		"name", name,
-	)
-	defer p.Logger.Info("<- GetPod",
-		"namespace", namespace,
-		"name", name,
-	)
-
 	podKey := api.ObjectKey{Namespace: namespace, Name: name}
+	logger := p.Logger.WithValues("obj", podKey)
 
-	pod, err := hpc.LoadPod(ctx, podKey)
-	if err != nil {
-		return nil, errors.Wrapf(err, "unable to load pod '%s'", podKey)
-	}
+	/*---------------------------------------------------
+	 * Preamble used for Request tracing on the logs
+	 *---------------------------------------------------*/
+	logger.Info("-> GetPod")
+	defer logger.Info("<- GetPod")
 
-	return pod, nil
+	return hpc.GetPod(ctx, podKey)
 }
 
 // GetPodStatus returns the status of a pod by name that is "running".
 // returns nil if a pod by that name is not found.
 func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*corev1.PodStatus, error) {
-	p.Logger.Info("-> GetPodStatus",
-		"namespace", namespace,
-		"name", name,
-	)
-
-	defer p.Logger.Info("<- GetPodStatus",
-		"namespace", namespace,
-		"name", name,
-	)
-
 	podKey := api.ObjectKey{Namespace: namespace, Name: name}
+	logger := p.Logger.WithValues("obj", podKey)
 
-	pod, err := hpc.LoadPod(ctx, podKey)
+	/*---------------------------------------------------
+	 * Preamble used for Request tracing on the logs
+	 *---------------------------------------------------*/
+	logger.Info("-> GetPodStatus")
+	defer logger.Info("<- GetPodStatus")
+
+	pod, err := hpc.GetPod(ctx, podKey)
 	if err != nil {
-		// if the pod is not found, then the only thing we can do is to create a mock-up status.
-		// on error, the virtual-kubelet sets the status.Reason to "ProviderFailure" and the status.Message to err.
-		// however, it is up to us to set the status.Phase to failed.
+		/*
+			if the pod is not found, then the only thing we can do is to create a mock-up status.
+			on error, the virtual-kubelet sets the status.Reason to "ProviderFailure" and the status.Message to err.
+			however, it is up to us to set the status.Phase to failed.
+		*/
 		return &corev1.PodStatus{Phase: corev1.PodFailed}, errors.Wrapf(err, "unable to load pod '%s'", podKey)
 	}
 
 	return &pod.Status, nil
-}
-
-// GetPods returns a list of all pods known to be "running".
-func (p *Provider) GetPods(_ context.Context) ([]*corev1.Pod, error) {
-	p.Logger.Info("-> GetPods")
-	defer p.Logger.Info("<- GetPods")
-
-	/*
-		TODO: inspect the underlying system for Pods in the Runtime Directory (.knoc)
-		Pod status: inspect .knoc (network, volumes, lifetime)
-		Container status: query SLURM
-		Hint: use batch operations
-	*/
-
-	/*
-
-		pods := make([]*corev1.Pod, 0)
-		for _, cg := range p.GetCgs() {
-			c := cg
-			pod, err := containerGroupToPod(&c)
-			if err != nil {
-				msg := fmt.Sprint("error converting container group to pod", cg.ContainerGroupId, err)
-				log.G(context.TODO()).WithField("Method", "GetPods").Info(msg)
-				continue
-			}
-			pods = append(pods, pod)
-		}
-		return pods, nil
-
-		var pods []*corev1.Pod
-
-		// TODO: we need "running" pods, or everything ?
-
-		for _, pod := range p.pods {
-			pods = append(pods, pod)
-		}
-
-	*/
-
-	return nil, nil
 }
 
 /************************************************************
@@ -251,74 +223,50 @@ func (p *Provider) GetPods(_ context.Context) ([]*corev1.Pod, error) {
 ************************************************************/
 
 // GetContainerLogs retrieves the logs of a container by name from the provider.
-func (p *Provider) GetContainerLogs(_ context.Context, namespace, podName, containerName string, _ vkapi.ContainerLogOpts) (io.ReadCloser, error) {
-	p.Logger.Info("-> GetContainerLogs")
-	defer p.Logger.Info("<- GetContainerLogs")
+func (p *Provider) GetContainerLogs(ctx context.Context, namespace, podName, containerName string, opts vkapi.ContainerLogOpts) (io.ReadCloser, error) {
+	podKey := api.ObjectKey{Namespace: namespace, Name: podName}
+	logger := p.Logger.WithValues("obj", podKey)
 
-	key := api.ObjectKey{
-		Namespace: namespace,
-		Name:      podName,
-	}
+	/*---------------------------------------------------
+	 * Preamble used for Request tracing on the logs
+	 *---------------------------------------------------*/
+	logger.Info("-> GetContainerLogs", "container", containerName)
+	defer logger.Info("<- GetContainerLogs", "container", containerName)
 
-	/*
-		stdout, err := os.OpenFile(paths.StdOutputFilePath(key, containerName))
-		if err != nil {
-			return nil, errors.Wrapf(err, "Failed to open stdout")
-		}
-
-		stderr, err := os.OpenFile(paths.StdErrorFilePath(key, containerName))
-		if err != nil {
-			return nil, errors.Wrapf(err, "Failed to open stdout")
-		}
-
-		io.MultiReader()
-
-		key := api.ObjectKey{
-			Namespace: namespace,
-			Name:      podName,
-		}
-
-
-	*/
-	_ = key
-	/*
-		// if _, exists := p.pods[key]; !exists {
-			return nil, errors.Errorf("pod '%s' is not known to the provider", key)
-		}
-
-		// search in pod running directory, for the container.out
-		containerLogsFile := filepath.Join(api.RuntimeDir, podName, containerName, ".out")
-
-		f, err := os.Open(containerLogsFile)
-		if err != nil {
-			return nil, errors.Wrapf(err, "cannot open file '%s'", containerLogsFile)
-		}
-
-		return f, nil
-
-	*/
-	return nil, errors.Errorf("ContainerLogs is not yet supported")
+	panic("not yet supported")
 }
 
 // RunInContainer executes a command in a container in the pod, copying data
 // between in/out/err and the container's stdin/stdout/stderr.
-func (p *Provider) RunInContainer(_ context.Context, namespace, name, container string, cmd []string, attach vkapi.AttachIO) error {
-	p.Logger.Info("-> RunInContainer")
-	defer p.Logger.Info("<- RunInContainer")
+func (p *Provider) RunInContainer(ctx context.Context, namespace, podName, containerName string, cmd []string, attach vkapi.AttachIO) error {
+	podKey := api.ObjectKey{Namespace: namespace, Name: podName}
+	logger := p.Logger.WithValues("obj", podKey)
 
-	p.Logger.Info("RunInContainer not supported", "cmd", cmd)
+	/*---------------------------------------------------
+	 * Preamble used for Request tracing on the logs
+	 *---------------------------------------------------*/
+	logger.Info("-> RunInContainer", "container", containerName)
+	defer logger.Info("<- RunInContainer", "container", containerName)
 
-	return nil
+	panic("not yet supported")
 }
 
 func (p *Provider) ConfigureNode(_ context.Context, _ corev1.Node) {
+	/*---------------------------------------------------
+	 * Preamble used for Request tracing on the logs
+	 *---------------------------------------------------*/
 	p.Logger.Info("-> ConfigureNode")
 	defer p.Logger.Info("<- ConfigureNode")
+
+	panic("not yet supported")
 }
 
 func (p *Provider) GetStatsSummary(context.Context) (*statsv1alpha1.Summary, error) {
+	/*---------------------------------------------------
+	 * Preamble used for Request tracing on the logs
+	 *---------------------------------------------------*/
 	p.Logger.Info("-> GetStatsSummary")
 	defer p.Logger.Info("<- GetStatsSummary")
 
-	panic("poutsakia")
+	panic("not yet supported")
 }

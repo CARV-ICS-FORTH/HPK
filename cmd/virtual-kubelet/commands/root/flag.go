@@ -74,7 +74,7 @@ func installFlags(flags *pflag.FlagSet, c *Opts) {
 	flags.BoolVar(&c.DisableTaint, "disable-taint", false, "disable the virtual-kubelet node taint")
 
 	flags.StringVar(&c.TaintKey, "taint-key", api.DefaultTaintKey, "Set node taint key")
-	flags.StringVar(&c.TaintValue, "taint-value", "", "Set node taint value")
+	flags.StringVar(&c.TaintValue, "taint-value", api.DefaultTaintValue, "Set node taint value")
 	flags.StringVar(&c.TaintEffect, "taint-effect", api.DefaultTaintEffect, "Set node taint effect")
 }
 
@@ -82,10 +82,6 @@ func installFlags(flags *pflag.FlagSet, c *Opts) {
 // Taint effect is read from the environment
 // The taint key/value may be overwritten by the environment.
 func getTaint(o Opts) (*corev1.Taint, error) {
-	if o.TaintValue == "" {
-		o.TaintValue = "knoc"
-	}
-
 	var effect corev1.TaintEffect
 	switch o.TaintEffect {
 	case "NoSchedule":

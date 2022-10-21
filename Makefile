@@ -52,6 +52,7 @@ bin/%:
 	CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' -o bin/$(*) $(VERSION_FLAGS) ./cmd/$(*)
 
 
+
 # # skaffold deploys the virtual-kubelet to the Kubernetes cluster targeted by the current kubeconfig using skaffold.
 # # The current context (as indicated by "kubectl config current-context") must be one of "minikube" or "docker-for-desktop".
 # # MODE must be set to one of "dev" (default), "delete" or "run", and is used as the skaffold command to be run.

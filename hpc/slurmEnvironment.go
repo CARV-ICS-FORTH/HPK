@@ -68,6 +68,18 @@ func (hpc *Environment) SBatchFromFile(ctx context.Context, path string) (string
 	return string(out), nil
 }
 
+/* TODO: Replace the custom sbatch synthesis with a template
+var sBatchTemplate = `
+#!/bin/bash
+
+
+#SBATCH --job-name={{.JobName}}
+{{- range $key, $value := .Flags }}
+--{{$key}}=${{value}}
+{{- end }}
+`
+*/
+
 func (hpc *Environment) SbatchMacros(instanceName string, sbatchFlags string) string {
 	return "#!/bin/bash" +
 		"\n#SBATCH --job-name=" + instanceName +
@@ -212,22 +224,18 @@ func (d *FSEventDispatcher) Run(ctx context.Context) {
 
 						switch filepath.Ext(file) {
 						case api.JobIdExtension: /* <---- Slurm Job Creation / Pod Scheduling */
-							logger.Info("--> Event: Slurm Job Started", "file", file)
+							logger.Info("SLURM --> Event: Job Started", "file", file)
 
 							if err := renewPodStatus(ctx, podKey); err != nil {
 								logger.Error(err, "failed to handle job creation event")
 							}
 
-							logger.Info("<-- Event: Pod Status Renewed")
-
 						case api.ExitCodeExtension: /*-- Slurm Job Completion / Pod Termination --*/
-							logger.Info("--> Event: Slurm Job Completed", "file", file)
+							logger.Info("SLURM --> Event: Job Completed", "file", file)
 
 							if err := renewPodStatus(ctx, podKey); err != nil {
 								logger.Error(err, "failed to handle job completion event")
 							}
-
-							logger.Info("<-- Event: Pod Status Renewed")
 
 						default:
 							logger.V(7).Info("Ignore fsnotify event", "op", "write", "file", file)

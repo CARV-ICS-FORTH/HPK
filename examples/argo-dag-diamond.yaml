@@ -12,14 +12,14 @@ metadata:
   namespace: default
 spec:
   entrypoint: diamond
-  podMetadata:
-    annotations:
-      slurm-job.knoc.io/flags: "--mem=4G "
+#  podMetadata:
+#    annotations:
+#      slurm-job.knoc.io/flags: "--mem=4G "
   templates:
     - name: diamond
-      metadata:
-        annotations:
-          slurm-job.knoc.io/flags: "--mem=2G --exclude=tie0,tie3,tie4"
+#      metadata:
+#        annotations:
+#          slurm-job.knoc.io/flags: "--mem=2G --exclude=tie0,tie3,tie4"
       dag:
         tasks:
           - name: A
@@ -43,9 +43,9 @@ spec:
               parameters: [ { name: message, value: D } ]
 
     - name: echo
-      metadata:
-        annotations:
-          slurm-job.knoc.io/flags: "--mem=2G --exclude=tie0,tie3,tie4"
+#      metadata:
+#        annotations:
+#          slurm-job.knoc.io/flags: "--mem=2G --exclude=tie0,tie3,tie4"
       inputs:
         parameters:
           - name: message

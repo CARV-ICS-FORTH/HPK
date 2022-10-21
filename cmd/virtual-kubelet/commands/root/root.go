@@ -16,6 +16,7 @@ package root
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path"
 	"time"
@@ -141,21 +142,27 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		DaemonPort:      c.ListenPort,
 		ResourceManager: rm,
 	})
-
 	if err != nil {
 		return err
 	}
 
-	apiConfig, err := getAPIConfig(c)
-	if err != nil {
-		return err
-	}
+	/*---------------------------------------------------
+	 * Start an HTTPs server for serving metrics/logs
+	 *---------------------------------------------------*/
+	log.Info("Initialize HTTPS server")
+	{
+		cancelHTTP, err := setupHTTPServer(ctx, newProvider, &apiServerConfig{
+			CertPath:    os.Getenv("APISERVER_CERT_LOCATION"),
+			KeyPath:     os.Getenv("APISERVER_KEY_LOCATION"),
+			Addr:        fmt.Sprintf(":%d", c.ListenPort),
+			MetricsAddr: "",
+		})
+		if err != nil {
+			return errors.Wrapf(err, "unable to start http server")
+		}
 
-	cancelHTTP, err := setupHTTPServer(ctx, newProvider, apiConfig)
-	if err != nil {
-		return err
+		defer cancelHTTP()
 	}
-	defer cancelHTTP()
 
 	/*---------------------------------------------------
 	 * Register a new Virtual Node
@@ -216,7 +223,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	 *---------------------------------------------------*/
 	log.Info("Start the controller for the Virtual Node")
 
-	pc, err := node.NewPodController(node.PodControllerConfig{
+	podController, err := node.NewPodController(node.PodControllerConfig{
 		PodClient:         client.CoreV1(),
 		PodInformer:       podInformer,
 		EventRecorder:     eb.NewRecorder(scheme.Scheme, corev1.EventSource{Component: path.Join(pNode.Name, "pod-controller")}),
@@ -230,7 +237,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	}
 
 	go func() {
-		if err := pc.Run(ctx, c.PodSyncWorkers); err != nil && errors.Cause(err) != context.Canceled {
+		if err := podController.Run(ctx, c.PodSyncWorkers); err != nil && errors.Cause(err) != context.Canceled {
 			log.Error(err, "pod controller failed")
 			os.Exit(-1)
 		}
@@ -240,7 +247,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		// If there is a startup timeout, it does two things:
 		// 1. It causes the VK to shut down if we haven't gotten into an operational state in a time period
 		// 2. It prevents node advertisement from happening until we're in an operational state
-		err = waitFor(ctx, c.StartupTimeout, pc.Ready())
+		err = waitFor(ctx, c.StartupTimeout, podController.Ready())
 		if err != nil {
 			return err
 		}
@@ -264,10 +271,10 @@ func waitFor(ctx context.Context, time time.Duration, ready <-chan struct{}) err
 	}
 }
 
-func envOr(name, def string) string {
+func envOr(name, alt string) string {
 	if v, ok := os.LookupEnv(name); ok {
 		return v
 	}
 
-	return def
+	return alt
 }
