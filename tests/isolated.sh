@@ -12,7 +12,7 @@ apptainer pull --force docker://godlovedc/lolcow
 
 # Start an Iperf Pod environment in apptainer
 echo "Starting Iperf server"
-apptainer exec --net --network=flannel  --fakeroot iperf2_latest.sif sh -c  "hostname -I; iperf -s" &
+apptainer exec --net --fakeroot iperf2_latest.sif sh -c  "hostname -I; iperf -s" &
 
 
 # Fancy prompty message
@@ -22,4 +22,4 @@ EOF
 
 read -p  'Server IP: ' serverIP
 
-apptainer exec --net --network=flannel  --fakeroot iperf2_latest.sif sh -c  "hostname -I; iperf -c ${serverIP}"
+apptainer exec --net --fakeroot iperf2_latest.sif sh -c  "hostname -I; iperf -c ${serverIP}"

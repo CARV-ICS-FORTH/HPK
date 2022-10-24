@@ -47,8 +47,8 @@ apptainer pull --force docker://godlovedc/lolcow
 # Start a nested Pod environment in apptainer
 echo "Starting Server Pod"
 
-apptainer exec --net --network=flannel  --fakeroot                                            \
---bind /bin,/etc,/home,/lib,/lib32,/lib64,/libx32,/opt,/root,/sbin,/run,/sys,/usr,/var,/tmp   \
+apptainer exec --net --fakeroot                                            \
+--bind /bin,/etc/apptainer,/home,/lib,/lib32,/lib64,/libx32,/opt,/root,/sbin,/run,/sys,/usr,/var,/tmp   \
 docker://icsforth/scratch                                                                     \
 /tmp/start_intra_pod.sh
 
@@ -61,4 +61,4 @@ EOF
 
 read -p  'Server IP: ' serverIP
 
-apptainer exec --net --network=flannel  --fakeroot iperf2_latest.sif sh -c  "hostname -I; iperf -c ${serverIP}"
+apptainer exec --net --fakeroot iperf2_latest.sif sh -c  "hostname -I; iperf -c ${serverIP}"

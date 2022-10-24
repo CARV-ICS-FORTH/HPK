@@ -43,7 +43,7 @@ apptainer pull --force docker://godlovedc/lolcow
 # Start a nested Pod environment in apptainer
 echo "Starting Pod"
 
-apptainer exec --net --network=flannel  --fakeroot                                            \
---bind /bin,/etc,/home,/lib,/lib32,/lib64,/libx32,/opt,/root,/sbin,/run,/sys,/usr,/var,/tmp   \
-docker://icsforth/scratch                                                                     \
+apptainer exec --net --fakeroot                                            \
+--bind /bin,/etc/apptainer,/home,/lib,/lib32,/lib64,/libx32,/opt,/root,/sbin,/run,/sys,/usr,/var,/tmp   \
+docker://alpine                                                                     \
 /tmp/start_intra_pod.sh
