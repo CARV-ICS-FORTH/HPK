@@ -1,4 +1,4 @@
-package hpc
+package slurm
 
 import (
 	"context"
@@ -23,9 +23,9 @@ import (
 ************************************************************/
 
 var Executables = Environment{
-	sbatchExecutablePath:      checkExistenceOrDie(SBATCH),
-	scancelExecutablePath:     checkExistenceOrDie(SCANCEL),
-	singularityExecutablePath: checkExistenceOrDie(SINGULARITY),
+	sbatchExecutablePath:      GetPathOrDie(SBATCH),
+	scancelExecutablePath:     GetPathOrDie(SCANCEL),
+	singularityExecutablePath: GetPathOrDie(SINGULARITY),
 }
 
 const (
@@ -88,9 +88,9 @@ func (hpc *Environment) SbatchMacros(instanceName string, sbatchFlags string) st
 		"\npwd; hostname; date\n"
 }
 
-// checkExistenceOrDie searches for an executable named binary in the directories named by the PATH environment variable
+// GetPathOrDie searches for an executable named binary in the directories named by the PATH environment variable
 // and returns the binary's path, otherwise panics
-func checkExistenceOrDie(executableName string) string {
+func GetPathOrDie(executableName string) string {
 	// find the executable
 	path, err := exec.LookPath(executableName)
 	if err != nil {

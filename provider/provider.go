@@ -19,8 +19,8 @@ import (
 	"io"
 
 	"github.com/carv-ics-forth/knoc/api"
-	"github.com/carv-ics-forth/knoc/hpc"
 	"github.com/carv-ics-forth/knoc/pkg/manager"
+	"github.com/carv-ics-forth/knoc/slurm"
 	"github.com/go-logr/logr"
 	"github.com/niemeyer/pretty"
 	"github.com/pkg/errors"
@@ -90,7 +90,7 @@ func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Pass the pod for creation to the backend
 	 *---------------------------------------------------*/
-	if err := hpc.CreatePod(ctx, pod, p.ResourceManager, api.DefaultContainerRegistry); err != nil {
+	if err := slurm.CreatePod(ctx, pod, p.ResourceManager, api.DefaultContainerRegistry); err != nil {
 		return errors.Wrapf(err, "unable to create pod")
 	}
 
@@ -114,7 +114,7 @@ func (p *Provider) UpdatePod(ctx context.Context, newPod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Ensure that received pod is newer than the local
 	 *---------------------------------------------------*/
-	oldPod, err := hpc.GetPod(ctx, podKey)
+	oldPod, err := slurm.GetPod(ctx, podKey)
 	if err != nil {
 		return errors.Wrapf(err, "unable to load local pod")
 	}
@@ -163,7 +163,7 @@ func (p *Provider) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 	logger.Info("-> DeletePod")
 	defer logger.Info("<- DeletePod")
 
-	return hpc.DeletePod(ctx, pod)
+	return slurm.DeletePod(ctx, pod)
 }
 
 // GetPods returns a list of all pods known to be "running".
@@ -174,7 +174,7 @@ func (p *Provider) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
 	p.Logger.Info("-> GetPods")
 	defer p.Logger.Info("<- GetPods")
 
-	return hpc.GetPods(ctx)
+	return slurm.GetPods(ctx)
 }
 
 // GetPod returns a pod by name that is stored in memory.
@@ -188,7 +188,7 @@ func (p *Provider) GetPod(ctx context.Context, namespace, name string) (*corev1.
 	logger.Info("-> GetPod")
 	defer logger.Info("<- GetPod")
 
-	return hpc.GetPod(ctx, podKey)
+	return slurm.GetPod(ctx, podKey)
 }
 
 // GetPodStatus returns the status of a pod by name that is "running".
@@ -203,7 +203,7 @@ func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*c
 	logger.Info("-> GetPodStatus")
 	defer logger.Info("<- GetPodStatus")
 
-	pod, err := hpc.GetPod(ctx, podKey)
+	pod, err := slurm.GetPod(ctx, podKey)
 	if err != nil {
 		/*
 			if the pod is not found, then the only thing we can do is to create a mock-up status.

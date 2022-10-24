@@ -1,4 +1,4 @@
-package hpc
+package slurm
 
 import (
 	"bufio"

@@ -1,4 +1,4 @@
-package hpc
+package slurm
 
 import (
 	"context"
@@ -106,7 +106,7 @@ func SavePod(ctx context.Context, pod *corev1.Pod) error {
 		return errors.Wrapf(err, "cannot write pod json file '%s'", encodedPodFile)
 	}
 
-	logger.Info("DISK <-- Event: Pod Status Renewed",
+	logger.Info("STATE <-- Event: Pod Status Renewed",
 		"version", pod.ResourceVersion,
 		"phase", pod.Status.Phase,
 	)
@@ -115,6 +115,37 @@ func SavePod(ctx context.Context, pod *corev1.Pod) error {
 }
 
 func DeletePod(ctx context.Context, pod *corev1.Pod) error {
+	podKey := api.ObjectKeyFromObject(pod)
+	logger := defaultLogger.WithValues("pod", podKey)
+
+	/*---------------------------------------------------
+	 * Cancel Slurm Jobs
+	 *---------------------------------------------------*/
+	{
+		var merr *multierror.Error
+
+		for _, container := range pod.Status.InitContainerStatuses {
+			_, err := Executables.Scancel(container.ContainerID)
+			if err != nil {
+				merr = multierror.Append(merr, errors.Wrapf(err, "failed to cancel job '%s'", container.ContainerID))
+			}
+		}
+
+		for _, container := range pod.Status.ContainerStatuses {
+			_, err := Executables.Scancel(container.ContainerID)
+			if err != nil {
+				merr = multierror.Append(merr, errors.Wrapf(err, "failed to cancel job '%s'", container.ContainerID))
+			}
+		}
+
+		if merr.ErrorOrNil() != nil {
+			logger.Error(merr, "Pod termination error")
+		}
+	}
+
+	/*---------------------------------------------------
+	 * Remove Pod directory
+	 *---------------------------------------------------*/
 	/*
 		DeletePod takes a Kubernetes Pod and deletes it from the provider.
 		TODO: Once a pod is deleted, the provider is expected

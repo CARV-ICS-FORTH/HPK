@@ -60,3 +60,20 @@ https://ritazh.com/understanding-kubectl-logs-with-virtual-kubelet-a135e83ae0ee
 
 export VKUBELET_POD_IP=$(dig +short myip.opendns.com @resolver1.opendns.com)
 ./hpk ...
+
+
+# Fix the Resolve
+change `/run/systemd/resolve/stub-resolv.conf`
+
+
+# Download Images locally
+
+For example
+```
+singularity pull docker://godlovedc/lolcow
+```
+
+## Instantiate the Pod environment
+
+singularity shell --net --network=flannel --fakeroot --bind /bin,/etc,/home,/lib,/lib32,/lib64,/libx32,/opt,/proc,/root,/sbin,/run,/sys,/usr,/var --compat  docker://icsforth/scratch:latest
+

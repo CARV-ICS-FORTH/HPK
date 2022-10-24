@@ -79,20 +79,7 @@ func setupHTTPServer(ctx context.Context, p *provider.Provider, cfg *apiServerCo
 	/*---------------------------------------------------
 	 * Enable Logs and Interaction with container
 	 *---------------------------------------------------*/
-	if cfg.CertPath == "" || cfg.KeyPath == "" {
-		logrus.WithField("certPath", cfg.CertPath).
-			WithField("keyPath", cfg.KeyPath).
-			Error("TLS certificates not provided, not setting up pod http server")
-	} else {
-		tlsCfg, err := loadTLSConfig(cfg.CertPath, cfg.KeyPath)
-		if err != nil {
-			return nil, err
-		}
-		l, err := tls.Listen("tcp", cfg.Addr, tlsCfg)
-		if err != nil {
-			return nil, errors.Wrap(err, "error setting up listener for pod http server")
-		}
-
+	{
 		mux := http.NewServeMux()
 
 		podRoutes := api.PodHandlerConfig{
@@ -100,16 +87,48 @@ func setupHTTPServer(ctx context.Context, p *provider.Provider, cfg *apiServerCo
 			GetContainerLogs: p.GetContainerLogs,
 			GetPods:          p.GetPods,
 		}
+
 		api.AttachPodRoutes(podRoutes, mux, true)
 
-		s := &http.Server{
-			Handler:   mux,
-			TLSConfig: tlsCfg,
+		if cfg.CertPath == "" || cfg.KeyPath == "" {
+			/*-- No TLS provided --*/
+			s := &http.Server{
+				Handler: mux,
+				Addr:    cfg.Addr,
+			}
+
+			logrus.WithField("address", cfg.Addr).
+				Warn("TLS certificates not provided. Setting up insecure pod http server.")
+
+			go listenAndserveHTTP(ctx, s, "pods")
+
+			closers = append(closers, s)
+		} else {
+			/*-- TLS provided --*/
+			tlsCfg, err := loadTLSConfig(cfg.CertPath, cfg.KeyPath)
+			if err != nil {
+				return nil, err
+			}
+
+			l, err := tls.Listen("tcp", cfg.Addr, tlsCfg)
+			if err != nil {
+				return nil, errors.Wrap(err, "error setting up listener for pod http server")
+			}
+
+			s := &http.Server{
+				Handler:   mux,
+				TLSConfig: tlsCfg,
+			}
+
+			logrus.WithField("address", cfg.Addr).
+				WithField("certPath", cfg.CertPath).
+				WithField("keyPath", cfg.KeyPath).
+				Warn("TLS certificates are found. Setting up secure pod http server.")
+
+			go serveHTTP(ctx, s, l, "pods")
+
+			closers = append(closers, s)
 		}
-
-		go serveHTTP(ctx, s, l, "pods")
-
-		closers = append(closers, s)
 	}
 
 	/*---------------------------------------------------
@@ -160,4 +179,14 @@ func serveHTTP(ctx context.Context, s *http.Server, l net.Listener, name string)
 	}
 
 	l.Close()
+}
+
+func listenAndserveHTTP(ctx context.Context, s *http.Server, name string) {
+	if err := s.ListenAndServe(); err != nil {
+		select {
+		case <-ctx.Done():
+		default:
+			log.G(ctx).WithError(err).Errorf("Error setting up %s http server", name)
+		}
+	}
 }
