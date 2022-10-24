@@ -4,7 +4,7 @@ set -eum pipeline
 #
 # Pod (Nested Singularity) Level
 #
-cat <<EOF > /tmp/start_intra_pod.sh
+cat <<EOF > /tmp/start_nested_pod.sh
   echo "Starting Pod-Level Operations"
 
   # Remove Singularity/Apptainer flags.
@@ -29,7 +29,7 @@ cat <<EOF > /tmp/start_intra_pod.sh
   apptainer exec iperf2_latest.sif iperf -c localhost
 EOF
 
-chmod +x /tmp/start_intra_pod.sh
+chmod +x /tmp/start_nested_pod.sh
 
 #
 # Host Level
@@ -45,5 +45,4 @@ echo "Starting Pod"
 
 apptainer exec --net --fakeroot                                            \
 --bind /bin,/etc/apptainer,/home,/lib,/lib32,/lib64,/libx32,/opt,/root,/sbin,/run,/sys,/usr,/var,/tmp   \
-docker://alpine                                                                     \
-/tmp/start_intra_pod.sh
+docker://alpine /tmp/start_nested_pod.sh
