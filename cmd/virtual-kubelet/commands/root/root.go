@@ -1,4 +1,4 @@
-// Copyright © 2021 FORTH-ICS
+// Copyright © 2022 FORTH-ICS
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -10,7 +10,7 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
-// limitations under the License.package main
+// limitations under the License.
 
 package root
 
@@ -23,8 +23,8 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
-	"github.com/carv-ics-forth/knoc/pkg/manager"
-	"github.com/carv-ics-forth/knoc/provider"
+	"github.com/carv-ics-forth/hpk/pkg/manager"
+	"github.com/carv-ics-forth/hpk/provider"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"

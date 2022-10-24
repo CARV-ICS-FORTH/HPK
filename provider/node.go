@@ -10,7 +10,7 @@
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
-// limitations under the License.package main
+// limitations under the License.
 
 package provider
 
@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/carv-ics-forth/knoc/api"
+	"github.com/carv-ics-forth/hpk/api"
 	"github.com/matishsiao/goInfo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -172,7 +172,7 @@ func (p *Provider) NodeSystemInfo(_ context.Context) corev1.NodeSystemInfo {
 		SystemUUID:              "",
 		BootID:                  "",
 		KernelVersion:           kernelVersion,
-		OSImage:                 "knoc",
+		OSImage:                 "hpk",
 		ContainerRuntimeVersion: "vkubelet://6.6.6.6",
 		KubeletVersion:          api.BuildVersion,
 		KubeProxyVersion:        "",

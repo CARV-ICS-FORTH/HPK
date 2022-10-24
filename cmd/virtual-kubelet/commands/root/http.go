@@ -9,7 +9,8 @@
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing pe
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package root
 
@@ -20,7 +21,7 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/carv-ics-forth/knoc/provider"
+	"github.com/carv-ics-forth/hpk/provider"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/virtual-kubelet/virtual-kubelet/log"

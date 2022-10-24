@@ -1,3 +1,17 @@
+// Copyright © 2022 FORTH-ICS
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package slurm
 
 import (
@@ -9,15 +23,15 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/carv-ics-forth/knoc/pkg/manager"
-	"github.com/carv-ics-forth/knoc/pkg/utils"
+	"github.com/carv-ics-forth/hpk/pkg/manager"
+	"github.com/carv-ics-forth/hpk/pkg/fieldpath"
 	"github.com/go-logr/logr"
 	"github.com/hashicorp/go-multierror"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"github.com/carv-ics-forth/knoc/api"
+	"github.com/carv-ics-forth/hpk/api"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/json"
@@ -363,7 +377,7 @@ func (h *podHandler) submitSlurmJob(ctx context.Context, container *corev1.Conta
 	var sbatchFlagsAsString string
 	{
 		//  parse sbatch flags from Argo
-		if slurmFlags, ok := h.Pod.GetAnnotations()["slurm-job.knoc.io/flags"]; ok {
+		if slurmFlags, ok := h.Pod.GetAnnotations()["slurm-job/flags"]; ok {
 			for _, slurmFlag := range strings.Split(slurmFlags, " ") {
 				sbatchFlagsAsString += "\n#SBATCH " + slurmFlag
 			}
@@ -375,7 +389,7 @@ func (h *podHandler) submitSlurmJob(ctx context.Context, container *corev1.Conta
 		}
 
 		// append mpi-flags to singularity
-		if mpiFlags, ok := h.Pod.GetAnnotations()["slurm-job.knoc.io/mpi-flags"]; ok {
+		if mpiFlags, ok := h.Pod.GetAnnotations()["slurm-job/mpi-flags"]; ok {
 			if mpiFlags != "true" {
 				mpi := append([]string{Executables.MpiexecPath(), "-np", "$SLURM_NTASKS"}, strings.Split(mpiFlags, " ")...)
 				singularityCommand = append(mpi, singularityCommand...)
@@ -463,7 +477,7 @@ func (h *podHandler) createBackendVolumes() error {
 				return errors.Wrapf(err, "Error getting configmap '%s' from API server", pod.Name)
 			}
 
-			// .knoc/namespace/podName/volName/*
+			// .hpk/namespace/podName/volName/*
 			podConfigMapDir, err := createSubDirectory(h.podDirectory, vol.Name)
 			if err != nil {
 				return errors.Wrapf(err, "cannot create dir '%s' for configMap", podConfigMapDir)
@@ -495,7 +509,7 @@ func (h *podHandler) createBackendVolumes() error {
 				return errors.Wrapf(err, "Error getting secret '%s' from API server", pod.Name)
 			}
 
-			// .knoc/namespace/podName/secretName/*
+			// .hpk/namespace/podName/secretName/*
 			podSecretDir, err := createSubDirectory(h.podDirectory, vol.Name)
 			if err != nil {
 				return errors.Wrapf(err, "cannot create dir '%s' for secrets", podSecretDir)
@@ -530,7 +544,7 @@ func (h *podHandler) createBackendVolumes() error {
 
 			for _, item := range vol.DownwardAPI.Items {
 				itemPath := filepath.Join(downApiDir, item.Path)
-				value, err := utils.ExtractFieldPathAsString(pod, item.FieldRef.FieldPath)
+				value, err := fieldpath.ExtractFieldPathAsString(pod, item.FieldRef.FieldPath)
 				if err != nil {
 					return err
 				}
@@ -616,7 +630,7 @@ func (h *podHandler) createBackendVolumes() error {
 					for _, item := range projectedSrc.DownwardAPI.Items {
 						itemPath := filepath.Join(projectedVolPath, item.Path)
 
-						value, err := utils.ExtractFieldPathAsString(pod, item.FieldRef.FieldPath)
+						value, err := fieldpath.ExtractFieldPathAsString(pod, item.FieldRef.FieldPath)
 						if err != nil {
 							return err
 						}
