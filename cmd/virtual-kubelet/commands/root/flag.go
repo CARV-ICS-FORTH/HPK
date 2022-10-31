@@ -17,7 +17,6 @@ package root
 import (
 	"time"
 
-	"github.com/carv-ics-forth/hpk/api"
 	"github.com/spf13/pflag"
 	"github.com/virtual-kubelet/virtual-kubelet/errdefs"
 	corev1 "k8s.io/api/core/v1"
@@ -58,24 +57,24 @@ type Opts struct {
 }
 
 func installFlags(flags *pflag.FlagSet, c *Opts) {
-	flags.StringVar(&c.KubeNamespace, "namespace", api.DefaultKubeNamespace, "kubernetes namespace (default is 'all')")
+	flags.StringVar(&c.KubeNamespace, "namespace", corev1.NamespaceAll, "kubernetes namespace (default is 'all')")
 
-	flags.StringVar(&c.NodeName, "nodename", api.DefaultNodeName, "kubernetes node name")
+	flags.StringVar(&c.NodeName, "nodename", "virtual-kubelet", "kubernetes node name")
 
 	flags.StringVar(&c.ProviderConfigPath, "provider-config", "", "HPC provider configuration file")
-	flags.StringVar(&c.MetricsAddr, "metrics-addr", api.DefaultMetricsAddr, "address to listen for metrics/stats requests")
+	flags.StringVar(&c.MetricsAddr, "metrics-addr", ":10255", "address to listen for metrics/stats requests")
 
-	flags.IntVar(&c.PodSyncWorkers, "pod-sync-workers", api.DefaultPodSyncWorkers, `set the number of pod synchronization workers`)
+	flags.IntVar(&c.PodSyncWorkers, "pod-sync-workers", 1, `set the number of pod synchronization workers`)
 	flags.BoolVar(&c.EnableNodeLease, "enable-node-lease", true, `use node leases (1.13) for node heartbeats`)
 
-	flags.DurationVar(&c.InformerResyncPeriod, "full-resync-period", api.DefaultInformerResyncPeriod, "how often to perform a full resync of pods between kubernetes and the provider")
+	flags.DurationVar(&c.InformerResyncPeriod, "full-resync-period", 1*time.Minute, "how often to perform a full resync of pods between kubernetes and the provider")
 	flags.DurationVar(&c.StartupTimeout, "startup-timeout", 0, "How long to wait for the virtual-kubelet to start")
 
 	flags.BoolVar(&c.DisableTaint, "disable-taint", false, "disable the virtual-kubelet node taint")
 
-	flags.StringVar(&c.TaintKey, "taint-key", api.DefaultTaintKey, "Set node taint key")
-	flags.StringVar(&c.TaintValue, "taint-value", api.DefaultTaintValue, "Set node taint value")
-	flags.StringVar(&c.TaintEffect, "taint-effect", api.DefaultTaintEffect, "Set node taint effect")
+	flags.StringVar(&c.TaintKey, "taint-key", "virtual-kubelet.io/provider", "Set node taint key")
+	flags.StringVar(&c.TaintValue, "taint-value", "hpk", "Set node taint value")
+	flags.StringVar(&c.TaintEffect, "taint-effect", string(corev1.TaintEffectNoSchedule), "Set node taint effect")
 }
 
 // getTaint creates a taint using the provided key/value.

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package manager
+package resourcemanager
 
 import (
 	v1 "k8s.io/api/core/v1"
@@ -50,6 +50,7 @@ func (rm *ResourceManager) GetPods() []*v1.Pod {
 	if err == nil {
 		return l
 	}
+
 	log.L.Errorf("failed to fetch pods from lister: %v", err)
 	return make([]*v1.Pod, 0)
 }

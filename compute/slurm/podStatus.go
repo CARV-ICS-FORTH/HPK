@@ -16,7 +16,6 @@ package slurm
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"os"
 	"sort"
@@ -29,34 +28,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func renewPodStatus(ctx context.Context, podKey api.ObjectKey) error {
-	/*-- Load Pod from reference --*/
-	pod, err := GetPod(ctx, podKey)
-	if err != nil {
-		return errors.Wrapf(err, "unable to load pod")
-	}
-
-	/*-- Recalculate the Pod status from locally stored containers --*/
-	if err := resolvePodStatus(pod); err != nil {
-		return errors.Wrapf(err, "unable to update pod status")
-	}
-
-	/*-- Update the top-level Pod description --*/
-	if err := SavePod(ctx, pod); err != nil {
-		return errors.Wrapf(err, "unable to store pod")
-	}
-
-	return nil
-}
-
 type test struct {
 	expression bool
 	change     func(status *corev1.PodStatus)
 }
 
-func resolvePodStatus(pod *corev1.Pod) error {
+func podStateMapper(pod *corev1.Pod) error {
 	podKey := api.ObjectKeyFromObject(pod)
-	logger := defaultLogger.WithValues("pod", podKey)
+	logger := DefaultLogger.WithValues("pod", podKey)
 
 	/*---------------------------------------------------
 	 * Filter-out Pods with Unsupported Fields
@@ -281,7 +260,7 @@ func readStringFromFile(filepath string) (string, bool) {
 	}
 
 	if err != nil {
-		defaultLogger.Error(err, "cannot read file", "path", filepath)
+		DefaultLogger.Error(err, "cannot read file", "path", filepath)
 		return "", false
 	}
 
@@ -295,7 +274,7 @@ func readIntFromFile(filepath string) (int, bool) {
 	}
 
 	if err != nil {
-		defaultLogger.Error(err, "cannot read file", "path", filepath)
+		DefaultLogger.Error(err, "cannot read file", "path", filepath)
 		return -1, false
 	}
 
