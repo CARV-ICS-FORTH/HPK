@@ -2,7 +2,7 @@
 set -eum pipeline
 
 #
-# Pod (Nested Singularity) Level
+# Pod (Nested Apptainer) Level
 #
 cat > /tmp/start_nested_isolated_pod.sh << "EOF"
   echo "Starting Pod $(hostname -I)"

@@ -115,7 +115,7 @@ func SavePod(pod *corev1.Pod) error {
 		return errors.Wrapf(err, "cannot write pod json file '%s'", encodedPodFile)
 	}
 
-	logger.Info("STATE <-- Event: Pod Status Renewed",
+	logger.Info("DISK <-- Event: Pod Status Renewed",
 		"version", pod.ResourceVersion,
 		"phase", pod.Status.Phase,
 	)
@@ -195,7 +195,7 @@ func CreatePod(pod *corev1.Pod, rmanager *resourcemanager.ResourceManager, regis
 	/*---------------------------------------------------
 	 * Prepare Pod HPCBackend & handler
 	 *---------------------------------------------------*/
-	logger.Info("== Creating Pod ==")
+	logger.Info("== Pod Creation Request ==")
 
 	// create pod's top-level and internal sbatch directories
 	sbatchDir := SBatchDirectory(podKey)
@@ -284,107 +284,89 @@ func CreatePod(pod *corev1.Pod, rmanager *resourcemanager.ResourceManager, regis
 }
 
 func (h *podHandler) submitContainerCreationRequest(container *corev1.Container, prevJobID *int) error {
-	h.logger.Info("== New Container Creation Request  ===", "container", container.Name)
+	h.logger.Info("== Container Creation Request  ==", "container", container.Name)
 
 	/*---------------------------------------------------
-	 * Prepare flags and arguments for Singularity Command
+	 * Prepare fields for Apptainer Template
 	 *---------------------------------------------------*/
-	h.logger.Info(" * Set flags and args for singularity command")
+	h.logger.Info(" * Set flags and args for Apptainer command")
 
-	setEnvOptions := func(container *corev1.Container) []string {
-		envArgs := make([]string, 0, len(container.Env))
+	evaluationFields := ApptainerTemplateFields{
+		Image:   h.ContainerRegistry + container.Image,
+		Command: container.Command,
+		Args:    container.Args,
+		Env: func() []string {
+			envArgs := make([]string, 0, len(container.Env))
 
-		for _, envVar := range container.Env {
-			envArgs = append(envArgs, envVar.Name+"="+envVar.Value)
-		}
-
-		return []string{"--env", strings.Join(envArgs, ",")}
-	}
-
-	setBindOptions := func(container *corev1.Container) []string {
-		mountArgs := make([]string, 0, len(container.VolumeMounts))
-
-		for _, mountVar := range container.VolumeMounts {
-			mountArgs = append(mountArgs, MountPaths(h.podKey, mountVar))
-		}
-
-		return []string{"--bind", strings.Join(mountArgs, ",")}
-	}
-
-	setExec := func(flags []string) []string {
-		// TODO: @malvag, explain yourself.
-		cleanedFlagValues := make([]string, 0, len(flags))
-
-		for _, flag := range flags {
-			flagValurWithEvaluationPending := escapeScripts.FindStringSubmatch(flag)
-			if len(flagValurWithEvaluationPending) > 0 {
-				param := flagValurWithEvaluationPending[1]
-				value := flagValurWithEvaluationPending[2]
-				cleanedFlagValues = append(cleanedFlagValues, param+"'"+value+"'")
-			} else {
-				cleanedFlagValues = append(cleanedFlagValues, flag)
+			for _, envVar := range container.Env {
+				envArgs = append(envArgs, envVar.Name+"="+envVar.Value)
 			}
-		}
 
-		return cleanedFlagValues
+			return envArgs
+		}(),
+		Bind: func() []string {
+			mountArgs := make([]string, 0, len(container.VolumeMounts))
+
+			for _, mountVar := range container.VolumeMounts {
+				mountArgs = append(mountArgs, MountPaths(h.podKey, mountVar))
+			}
+
+			return mountArgs
+		}(),
 	}
 
 	/*---------------------------------------------------
-	 * Build the Singularity Command
+	 * Build the Apptainer Command
 	 *---------------------------------------------------*/
-	h.logger.Info(" * Finalize Singularity Command")
+	h.logger.Info(" * Finalize Apptainer Command")
 
-	var singularityCommand []string
-	{
-		if h.PauseContainerPID != 0 {
-			//nolint:lll    // panic(errors.Wrapf(nil, "Invalid pauseContainer's PID; can't proceed without an already established network namespace."))
-			singularityCommand = append(singularityCommand, []string{
-				"nsenter", "-t", string(rune(h.PauseContainerPID)), "-n",
-			}...)
-		}
+	submitTpl, err := template.New(h.Name).Option("missingkey=error").Parse(ApptainerTemplate)
+	if err != nil {
+		/*-- template errors should be expected from the custom fields where users can inject shitty input.	--*/
+		return errors.Wrapf(err, "Apptainer template error")
+	}
 
-		singularityCommand = append(singularityCommand, "singularity", "exec")               // <---- singularity exec
-		singularityCommand = append(singularityCommand, setEnvOptions(container)...)         // <---- Options
-		singularityCommand = append(singularityCommand, setBindOptions(container)...)        // <---- ...
-		singularityCommand = append(singularityCommand, h.ContainerRegistry+container.Image) // <---- Image
-		singularityCommand = append(singularityCommand, setExec(container.Command)...)       // <---- Execution
-		singularityCommand = append(singularityCommand, setExec(container.Args)...)          // <---- ...
+	var apptainerCmd strings.Builder
+
+	if err := submitTpl.Execute(&apptainerCmd, evaluationFields); err != nil {
+		/*-- since both the template and fields are internal to the code, the evaluation should always succeed	--*/
+		panic(errors.Wrapf(err, "failed to evaluate Apptainer template"))
 	}
 
 	/*---------------------------------------------------
-	 * Submit the singularity command to Slurm
+	 * Submit the Apptainer command to Slurm
 	 *---------------------------------------------------*/
-	if err := h.runContainer(container, *prevJobID, singularityCommand); err != nil {
+	if err := h.runContainer(container, *prevJobID, apptainerCmd.String()); err != nil {
 		return errors.Wrap(err, "slurm error")
 	}
 
 	return nil
 }
 
-func (h *podHandler) runContainer(container *corev1.Container, prevJobID int, singularityCommand []string) error {
+func (h *podHandler) runContainer(container *corev1.Container, prevJobID int, apptainerCmd string) error {
 	/*---------------------------------------------------
-	 * Populate the Fields for Sbatch SubmitTemplate
+	 * Prepare fields for Sbatch Template
 	 *---------------------------------------------------*/
-	evaluatedFields := SBatchTemplateFields{
-		JobName:            h.Name,
-		SingularityCommand: strings.Join(singularityCommand, " "),
-		StdLogsPath:        StdLogsPath(h.podKey, container.Name),
-		ExitCodePath:       ExitCodeFilePath(h.podKey, container.Name),
+	evaluationFields := SBatchTemplateFields{
+		JobName:          h.Name,
+		ApptainerCommand: apptainerCmd,
+		StdLogsPath:      StdLogsPath(h.podKey, container.Name),
+		ExitCodePath:     ExitCodeFilePath(h.podKey, container.Name),
 	}
 
 	// SLURM_JOB_DEPENDENCY ensures sequential execution of init containers and main containers
 	if prevJobID != -1 {
-		evaluatedFields.DependencyList = []string{string(rune(prevJobID))}
+		evaluationFields.DependencyList = []string{string(rune(prevJobID))}
 	}
 
 	//  parse sbatch flags from Argo
 	if slurmFlags, ok := h.Pod.GetAnnotations()["slurm-job/flags"]; ok {
 		for _, slurmFlag := range strings.Split(slurmFlags, " ") {
-			evaluatedFields.CustomFlags = append(evaluatedFields.CustomFlags, "\n#SBATCH "+slurmFlag)
+			evaluationFields.CustomFlags = append(evaluationFields.CustomFlags, "\n#SBATCH "+slurmFlag)
 		}
 	}
 
-	// append mpi-flags to singularity
+	// append mpi-flags to Apptainer
 	/*
 		if mpiFlags, ok := h.Pod.GetAnnotations()["slurm-job/mpi-flags"]; ok {
 			if mpiFlags != "true" {
@@ -397,7 +379,7 @@ func (h *podHandler) runContainer(container *corev1.Container, prevJobID int, si
 	/*---------------------------------------------------
 	 * Generate SBatch script from Sbatch SubmitTemplate + Fields
 	 *---------------------------------------------------*/
-	submitTpl, err := template.New(h.Name).Parse(Slurm.SubmitTemplate)
+	submitTpl, err := template.New(h.Name).Option("missingkey=error").Parse(SBatchTemplate)
 	if err != nil {
 		/*-- template errors should be expected from the custom fields where users can inject shitty input.	--*/
 		return errors.Wrapf(err, "sbatch template error")
@@ -405,7 +387,7 @@ func (h *podHandler) runContainer(container *corev1.Container, prevJobID int, si
 
 	var sbatchScript strings.Builder
 
-	if err := submitTpl.Execute(&sbatchScript, evaluatedFields); err != nil {
+	if err := submitTpl.Execute(&sbatchScript, evaluationFields); err != nil {
 		/*-- since both the template and fields are internal to the code, the evaluation should always succeed	--*/
 		panic(errors.Wrapf(err, "failed to evaluate sbatch template"))
 	}
@@ -428,8 +410,8 @@ func (h *podHandler) runContainer(container *corev1.Container, prevJobID int, si
 		panic(errors.Wrapf(err, "sbatch submission error"))
 	}
 
-	r := regexp.MustCompile(`Submitted batch job (?P<jid>\d+)`)
-	jid := r.FindStringSubmatch(out)
+	expectedOutput := regexp.MustCompile(`Submitted batch job (?P<jid>\d+)`)
+	jid := expectedOutput.FindStringSubmatch(out)
 
 	intJobID, err := strconv.Atoi(jid[1])
 	if err != nil {

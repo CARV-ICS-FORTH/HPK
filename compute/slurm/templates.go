@@ -16,15 +16,55 @@ package slurm
 
 /************************************************************
 
-		Singularity Execution Templates
+		Apptainer Execution Templates
 
 ************************************************************/
 
-var SingularityTemplate = `
-
-echo "Running Singularity Job"
-# ... Append the spec of Singularity Job ... 
+var ApptainerTemplate = `
+apptainer exec \
+{{- if .Env}}
+--env {{ range $index, $variable := .Env}}{{if $index}},{{end}}{{$variable}}{{end}} \
+{{- end}}
+{{- if .Bind}}
+--bind {{ range $index, $path := .Bind}}{{if $index}},{{end}}{{$path}}{{end}} \
+{{- end}}
+{{.Image}} 
+{{- if .Command}} {{ range $index, $cmd := .Command}}{{if $index}} {{end}}{{$cmd}}{{end}}{{- end}}
+{{- if .Args}} {{ range $index, $arg := .Args}}{{if $index}} {{end}}{{$arg}}{{end}}{{- end}}
 `
+
+/*
+
+var ApptainerTemplate = `
+apptainer exec \
+{{- if .Env}}
+--env {{ range $index, $variable := .Env}}{{if $index}},{{end}}{{$variable}}{{end}} \
+{{- end}}
+{{- if .Bind}}
+--bind {{ range $index, $path := .Bind}}{{if $index}},{{end}}{{$path}}{{end}} \
+{{- end}}
+{{.Image}}
+{{- if .Command}} {{ range $index, $cmd := .Command}}{{if $index}} {{end}}{{$cmd}}{{end}}{{- end}}
+{{- if .Args}} {{ range $index, $arg := .Args}}{{if $index}} {{end}}{{$arg}}{{end}}{{- end}}
+`
+
+*/
+
+// ApptainerTemplateFields container the supported fields for the Apptainer template.
+type ApptainerTemplateFields struct {
+	/*--
+		Mandatory Fields
+	--*/
+	Image   string // format: REGISTRY://image:tag
+	Command []string
+	Args    []string // space separated args
+
+	/*--
+		Optional Fields (marked by a pointer)
+	--*/
+	Env  []string // format: VAR=VALUE
+	Bind []string // format: /hostpath:/containerpath or /hostpath
+}
 
 /************************************************************
 
@@ -32,7 +72,7 @@ echo "Running Singularity Job"
 
 ************************************************************/
 
-// SBatchTemplate provides the context for going from singularity jobs to slurm jobs
+// SBatchTemplate provides the context for going from Apptainer jobs to slurm jobs
 // Single # are directives to SBATCH
 // Double ## are comments.
 var SBatchTemplate = `#!/bin/bash
@@ -64,7 +104,7 @@ var SBatchTemplate = `#!/bin/bash
 {{.CustomFlags}}
 {{end}}
 
-set -eu
+set -eum pipeline
 
 trap cleanup EXIT
 cleanup() {
@@ -74,8 +114,8 @@ cleanup() {
 
 pwd; hostname; date
 
-echo "Starting Singularity Job"
-{{.SingularityCommand}}
+echo "Starting Apptainer Job"
+{{.ApptainerCommand}}
 `
 
 // SBatchTemplateFields container the supported fields for the submission template.
@@ -87,13 +127,13 @@ type SBatchTemplateFields struct {
 	// JobName indicate the name of the sbatch job
 	JobName string
 
-	// SingularityCommand is the evaluated singularity command to be executed within sbatch.
-	SingularityCommand string
+	// ApptainerCommand is the evaluated Apptainer command to be executed within sbatch.
+	ApptainerCommand string
 
 	// StdLogsPath instruct Slurm to write stdout and stderr into the specified path
 	StdLogsPath string
 
-	// ExitCodePath is the path where the embedded singularity command will write its exit code
+	// ExitCodePath is the path where the embedded Apptainer command will write its exit code
 	ExitCodePath string
 
 	/*--

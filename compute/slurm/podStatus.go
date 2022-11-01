@@ -28,6 +28,34 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func PodWithExplicitlyUnsupportedFields(pod *corev1.Pod) bool {
+	var unsupportedFields []string
+
+	/*---------------------------------------------------
+	 * Unsupported Fields
+	 *---------------------------------------------------*/
+	if pod.GetNamespace() == "kube-system" {
+		unsupportedFields = append(unsupportedFields, "kube-system namespace")
+	}
+
+	if pod.Spec.Affinity != nil {
+		unsupportedFields = append(unsupportedFields, "affinity directives")
+	}
+
+	/*---------------------------------------------------
+	 * Summary of Unsupported Fields
+	 *---------------------------------------------------*/
+	if len(unsupportedFields) > 0 {
+		pod.Status.Phase = corev1.PodFailed
+		pod.Status.Reason = "UnsupportedFeatures"
+		pod.Status.Message = strings.Join(unsupportedFields, ",")
+
+		return true
+	}
+
+	return false
+}
+
 type test struct {
 	expression bool
 	change     func(status *corev1.PodStatus)
@@ -40,11 +68,7 @@ func podStateMapper(pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Filter-out Pods with Unsupported Fields
 	 *---------------------------------------------------*/
-	if pod.GetNamespace() == "kube-system" {
-		pod.Status.Phase = corev1.PodFailed
-		pod.Status.Reason = "UnsupportedFeatures"
-		pod.Status.Message = "This version of HPK is not intended for kube-system jobs"
-
+	if PodWithExplicitlyUnsupportedFields(pod) {
 		return nil
 	}
 
@@ -59,7 +83,7 @@ func podStateMapper(pod *corev1.Pod) error {
 	 * Check status of Init Containers
 	 *---------------------------------------------------*/
 	if pod.Status.Phase == corev1.PodPending {
-		logger.Info(" O Checking for status of Init Containers")
+		logger.Info(" O Check Init Container Status")
 
 		for _, initContainer := range pod.Status.InitContainerStatuses {
 			if initContainer.State.Terminated != nil {
@@ -72,7 +96,7 @@ func podStateMapper(pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Classify container statuses
 	 *---------------------------------------------------*/
-	logger.Info(" O Checking for status of Containers")
+	logger.Info(" O Check Container Status")
 
 	var state Classifier
 	state.Reset()

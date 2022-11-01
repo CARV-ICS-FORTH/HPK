@@ -23,7 +23,6 @@ import (
 	"sync"
 
 	"github.com/carv-ics-forth/hpk/api"
-	"github.com/carv-ics-forth/hpk/pkg/path"
 	"github.com/carv-ics-forth/hpk/pkg/process"
 	"github.com/fsnotify/fsnotify"
 	"github.com/pkg/errors"
@@ -40,8 +39,8 @@ var DefaultLogger = zap.New(zap.UseDevMode(true))
 ************************************************************/
 
 func init() {
-	Slurm.SubmitCmd = path.GetPathOrDie("sbatch")
-	Slurm.CancelCmd = path.GetPathOrDie("scancel")
+	Slurm.SubmitCmd = "sbatch"  // path.GetPathOrDie("sbatch")
+	Slurm.CancelCmd = "scancel" // path.GetPathOrDie("scancel")
 	Slurm.SubmitTemplate = SBatchTemplate
 
 	if err := StartReconciler(context.Background()); err != nil {

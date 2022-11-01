@@ -201,8 +201,7 @@ func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*c
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
 	logger.Info("-> GetPodStatus")
-	defer logger.Info("<- GetPodStatus")
-
+	
 	pod, err := slurm.GetPod(podKey)
 	if err != nil {
 		/*
@@ -212,6 +211,8 @@ func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*c
 		*/
 		return &corev1.PodStatus{Phase: corev1.PodFailed}, errors.Wrapf(err, "unable to load pod '%s'", podKey)
 	}
+
+	logger.Info("<- GetPodStatus", "phase", pod.Status.Phase)
 
 	return &pod.Status, nil
 }

@@ -2,14 +2,14 @@
 set -eum pipeline
 
 #
-# Pod (Nested Singularity) Level
+# Pod (Nested Apptainer) Level
 #
 cat <<EOF > /tmp/start_nested_pod.sh
   echo "Starting Pod-Level Operations"
 
-  # Remove Singularity/Apptainer flags.
-  # If not removed, they will be consumed by the nested singularity and overwrite paths.
-  echo "Reset Singularity/Apptainer Flags"
+  # Remove Apptainer/Singularity flags.
+  # If not removed, they will be consumed by the nested apptainer/singularity and overwrite paths.
+  echo "Reset Apptainer/Singularity Flags"
 
   unset SINGULARITY_BIND
   unset SINGULARITY_CONTAINER

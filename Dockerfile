@@ -23,10 +23,10 @@ RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -race -a -o /hpk ./cmd/virtua
 
 # Super minimal image just to package the hpk binary. It does not include anything.
 # Seriously, nothing. Not even shell to login.
-# We rely on singularity/apptainer to mount all the peripheral mountpoints of the host HPC environment.
+# We rely on Apptainer/Singularity to mount all the peripheral mountpoints of the host HPC environment.
 #
 # For example:
-# singularity run --bind /usr/bin docker://icsforth/hpk:latest
+# apptainer run --bind /usr/bin docker://icsforth/hpk:latest
 FROM scratch
 
 COPY --from=builder /hpk /hpk
