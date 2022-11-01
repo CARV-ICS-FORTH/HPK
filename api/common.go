@@ -15,49 +15,15 @@
 package api
 
 import (
-	"time"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-
-	corev1 "k8s.io/api/core/v1"
-)
-
-// Defaults for root command options
-const (
-	DefaultNodeName             = "virtual-kubelet"
-	DefaultInformerResyncPeriod = 1 * time.Minute
-	DefaultMetricsAddr          = ":10255"
-	DefaultListenPort           = 10250
-	DefaultPodSyncWorkers       = 1
-	DefaultKubeNamespace        = corev1.NamespaceAll
-
-	DefaultTaintKey    = "virtual-kubelet.io/provider"
-	DefaultTaintValue  = "hpk"
-	DefaultTaintEffect = string(corev1.TaintEffectNoSchedule)
-)
-
-var (
-	BuildVersion = "N/A"
-	BuildTime    = "N/A"
-	K8sVersion   = "v1.25.0"
 )
 
 const (
-	DefaultMaxWorkers   = 1
-	DefaultMaxQueueSize = 100
-
 	ExitCodeExtension = ".exitCode"
 	JobIdExtension    = ".jid"
 
-	PauseContainerName  = "pause"
-	PauseContainerImage = "scratch"
-
 	RuntimeDir               = ".hpk"
-	TemporaryDir             = ".tmp"
-	PodSecretVolDir          = "/secrets"
-	PodConfigMapVolDir       = "/configmaps"
-	PodDownwardApiVolDir     = "/downwardapis"
 	DefaultContainerRegistry = "docker://"
 )
 
@@ -86,14 +52,6 @@ const (
 	PodGlobalDirectoryPermissions = 0o777
 	PodSpecJsonFilePermissions    = 0o600
 	ContainerJobPermissions       = 0o777
-
-	SecretPodDataPermissions      = 0o760
-	PodSecretVolPermissions       = 0o755
-	PodSecretFilePermissions      = 0o644
-	PodConfigMapVolPermissions    = 0o755
-	PodConfigMapFilePermissions   = 0o644
-	PodDownwardApiVolPermissions  = 0o755
-	PodDownwardApiFilePermissions = 0o644
 )
 
 // ObjectKey identifies a Kubernetes Object.

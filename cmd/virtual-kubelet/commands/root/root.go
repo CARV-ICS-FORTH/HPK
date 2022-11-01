@@ -21,9 +21,10 @@ import (
 	"path"
 	"time"
 
+	"github.com/carv-ics-forth/hpk/cmd/virtual-kubelet/commands"
+	"github.com/carv-ics-forth/hpk/pkg/resourcemanager"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
-	"github.com/carv-ics-forth/hpk/pkg/manager"
 	"github.com/carv-ics-forth/hpk/provider"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -116,7 +117,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	serviceInformer := scmInformerFactory.Core().V1().Services()
 	serviceAccountInformer := scmInformerFactory.Core().V1().ServiceAccounts()
 
-	rm, err := manager.NewResourceManager(podInformer.Lister(),
+	rm, err := resourcemanager.NewResourceManager(podInformer.Lister(),
 		secretInformer.Lister(),
 		configMapInformer.Lister(),
 		serviceInformer.Lister(),
@@ -141,6 +142,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		InternalIP:      envOr("VKUBELET_POD_IP", "127.0.0.1"),
 		DaemonPort:      c.ListenPort,
 		ResourceManager: rm,
+		BuildVersion:    commands.BuildVersion,
 	})
 	if err != nil {
 		return err

@@ -15,36 +15,31 @@
 package slurm
 
 import (
-	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
-
-	"github.com/carv-ics-forth/hpk/pkg/manager"
-	"github.com/carv-ics-forth/hpk/pkg/fieldpath"
-	"github.com/go-logr/logr"
-	"github.com/hashicorp/go-multierror"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"text/template"
 
 	"github.com/carv-ics-forth/hpk/api"
+	"github.com/carv-ics-forth/hpk/pkg/fieldpath"
+	"github.com/carv-ics-forth/hpk/pkg/resourcemanager"
+	"github.com/go-logr/logr"
+	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/json"
 )
 
 var escapeScripts = regexp.MustCompile(`(--[A-Za-z0-9\-]+=)(\$[{\(][A-Za-z0-9_]+[\)\}])`)
 
-var defaultLogger = zap.New(zap.UseDevMode(true))
-
 type podHandler struct {
 	*corev1.Pod
 
-	ResourceManager   *manager.ResourceManager
 	ContainerRegistry string
 
 	PauseContainerPID int
@@ -54,7 +49,7 @@ type podHandler struct {
 	logger       logr.Logger
 }
 
-func GetPod(ctx context.Context, podRef api.ObjectKey) (*corev1.Pod, error) {
+func GetPod(podRef api.ObjectKey) (*corev1.Pod, error) {
 	encodedPodFilepath := PodSpecFilePath(podRef)
 
 	encodedPod, err := os.ReadFile(encodedPodFilepath)
@@ -75,7 +70,7 @@ func GetPod(ctx context.Context, podRef api.ObjectKey) (*corev1.Pod, error) {
 	return &pod, nil
 }
 
-func GetPods(ctx context.Context) ([]*corev1.Pod, error) {
+func GetPods() ([]*corev1.Pod, error) {
 	var pods []*corev1.Pod
 	var merr *multierror.Error
 
@@ -105,9 +100,9 @@ func GetPods(ctx context.Context) ([]*corev1.Pod, error) {
 	return pods, merr.ErrorOrNil()
 }
 
-func SavePod(ctx context.Context, pod *corev1.Pod) error {
+func SavePod(pod *corev1.Pod) error {
 	podKey := api.ObjectKeyFromObject(pod)
-	logger := defaultLogger.WithValues("pod", podKey)
+	logger := DefaultLogger.WithValues("pod", podKey)
 
 	encodedPod, err := json.Marshal(pod)
 	if err != nil {
@@ -120,7 +115,7 @@ func SavePod(ctx context.Context, pod *corev1.Pod) error {
 		return errors.Wrapf(err, "cannot write pod json file '%s'", encodedPodFile)
 	}
 
-	logger.Info("STATE <-- Event: Pod Status Renewed",
+	logger.Info("DISK <-- Event: Pod Status Renewed",
 		"version", pod.ResourceVersion,
 		"phase", pod.Status.Phase,
 	)
@@ -128,9 +123,9 @@ func SavePod(ctx context.Context, pod *corev1.Pod) error {
 	return nil
 }
 
-func DeletePod(ctx context.Context, pod *corev1.Pod) error {
+func DeletePod(pod *corev1.Pod) error {
 	podKey := api.ObjectKeyFromObject(pod)
-	logger := defaultLogger.WithValues("pod", podKey)
+	logger := DefaultLogger.WithValues("pod", podKey)
 
 	/*---------------------------------------------------
 	 * Cancel Slurm Jobs
@@ -139,14 +134,14 @@ func DeletePod(ctx context.Context, pod *corev1.Pod) error {
 		var merr *multierror.Error
 
 		for _, container := range pod.Status.InitContainerStatuses {
-			_, err := Executables.Scancel(container.ContainerID)
+			_, err := CancelJob(container.ContainerID)
 			if err != nil {
 				merr = multierror.Append(merr, errors.Wrapf(err, "failed to cancel job '%s'", container.ContainerID))
 			}
 		}
 
 		for _, container := range pod.Status.ContainerStatuses {
-			_, err := Executables.Scancel(container.ContainerID)
+			_, err := CancelJob(container.ContainerID)
 			if err != nil {
 				merr = multierror.Append(merr, errors.Wrapf(err, "failed to cancel job '%s'", container.ContainerID))
 			}
@@ -193,14 +188,14 @@ func DeletePod(ctx context.Context, pod *corev1.Pod) error {
 	return nil
 }
 
-func CreatePod(ctx context.Context, pod *corev1.Pod, rmanager *manager.ResourceManager, registry string) error {
+func CreatePod(pod *corev1.Pod, rmanager *resourcemanager.ResourceManager, registry string) error {
 	podKey := api.ObjectKeyFromObject(pod)
-	logger := defaultLogger.WithValues("pod", podKey)
+	logger := DefaultLogger.WithValues("pod", podKey)
 
 	/*---------------------------------------------------
-	 * Prepare Pod Environment & handler
+	 * Prepare Pod HPCBackend & handler
 	 *---------------------------------------------------*/
-	logger.Info("== Creating Pod ==")
+	logger.Info("== Pod Creation Request ==")
 
 	// create pod's top-level and internal sbatch directories
 	sbatchDir := SBatchDirectory(podKey)
@@ -228,13 +223,12 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, rmanager *manager.ResourceM
 	/*---------------------------------------------------
 	 * Kind of Journaling for Pod Creation on Slurm
 	 *---------------------------------------------------*/
-	if err := SavePod(ctx, pod); err != nil {
+	if err := SavePod(pod); err != nil {
 		return errors.Wrapf(err, "failed to save pod description")
 	}
 
 	h := podHandler{
 		Pod:               pod,
-		ResourceManager:   rmanager,
 		ContainerRegistry: registry,
 		PauseContainerPID: 0,
 		podKey:            podKey,
@@ -247,7 +241,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, rmanager *manager.ResourceM
 	 *---------------------------------------------------*/
 	logger.Info(" * Creating backend volumes for Pod")
 
-	if err := h.createBackendVolumes(); err != nil {
+	if err := h.createBackendVolumes(rmanager); err != nil {
 		return errors.Wrapf(err, "failed to prepare runtime dir for pod '%s'", h.podKey)
 	}
 
@@ -271,7 +265,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, rmanager *manager.ResourceM
 	logger.Info(" * Submit creation requests for init containers")
 
 	for i, initContainer := range pod.Spec.InitContainers {
-		if err := h.submitContainerCreationRequest(ctx, &pod.Spec.InitContainers[i], &lastInitContainerJobID); err != nil {
+		if err := h.submitContainerCreationRequest(&pod.Spec.InitContainers[i], &lastInitContainerJobID); err != nil {
 			return errors.Wrapf(err, "creation request failed for init-container '%s'", initContainer.Name)
 		}
 	}
@@ -279,7 +273,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, rmanager *manager.ResourceM
 	logger.Info(" * Submit creation requests for containers")
 
 	for i, container := range h.Pod.Spec.Containers {
-		if err := h.submitContainerCreationRequest(ctx, &pod.Spec.Containers[i], &lastContainerJobID); err != nil {
+		if err := h.submitContainerCreationRequest(&pod.Spec.Containers[i], &lastContainerJobID); err != nil {
 			return errors.Wrapf(err, "creation request failed for container '%s'", container.Name)
 		}
 	}
@@ -289,171 +283,158 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, rmanager *manager.ResourceM
 	return nil
 }
 
-func (h *podHandler) submitContainerCreationRequest(ctx context.Context, container *corev1.Container, prevJobID *int) error {
-	h.logger.Info("== New Container Creation Request  ===", "container", container.Name)
+func (h *podHandler) submitContainerCreationRequest(container *corev1.Container, prevJobID *int) error {
+	h.logger.Info("== Container Creation Request  ==", "container", container.Name)
 
 	/*---------------------------------------------------
-	 * Prepare flags and arguments for Singularity Command
+	 * Prepare fields for Apptainer Template
 	 *---------------------------------------------------*/
-	h.logger.Info(" * Set flags and args for singularity command")
+	h.logger.Info(" * Set flags and args for Apptainer command")
 
-	setEnvOptions := func(container *corev1.Container) []string {
-		envArgs := make([]string, 0, len(container.Env))
+	evaluationFields := ApptainerTemplateFields{
+		Image:   h.ContainerRegistry + container.Image,
+		Command: container.Command,
+		Args:    container.Args,
+		Env: func() []string {
+			envArgs := make([]string, 0, len(container.Env))
 
-		for _, envVar := range container.Env {
-			envArgs = append(envArgs, envVar.Name+"="+envVar.Value)
-		}
-
-		return []string{"--env", strings.Join(envArgs, ",")}
-	}
-
-	setBindOptions := func(container *corev1.Container) []string {
-		mountArgs := make([]string, 0, len(container.VolumeMounts))
-
-		for _, mountVar := range container.VolumeMounts {
-			mountArgs = append(mountArgs, MountPaths(h.podKey, mountVar))
-		}
-
-		return []string{"--bind", strings.Join(mountArgs, ",")}
-	}
-
-	setExec := func(flags []string) []string {
-		// TODO: @malvag, explain yourself.
-		cleanedFlagValues := make([]string, 0, len(flags))
-
-		for _, flag := range flags {
-			flagValurWithEvaluationPending := escapeScripts.FindStringSubmatch(flag)
-			if len(flagValurWithEvaluationPending) > 0 {
-				param := flagValurWithEvaluationPending[1]
-				value := flagValurWithEvaluationPending[2]
-				cleanedFlagValues = append(cleanedFlagValues, param+"'"+value+"'")
-			} else {
-				cleanedFlagValues = append(cleanedFlagValues, flag)
+			for _, envVar := range container.Env {
+				envArgs = append(envArgs, envVar.Name+"="+envVar.Value)
 			}
-		}
 
-		return cleanedFlagValues
+			return envArgs
+		}(),
+		Bind: func() []string {
+			mountArgs := make([]string, 0, len(container.VolumeMounts))
+
+			for _, mountVar := range container.VolumeMounts {
+				mountArgs = append(mountArgs, MountPaths(h.podKey, mountVar))
+			}
+
+			return mountArgs
+		}(),
 	}
 
 	/*---------------------------------------------------
-	 * Build the Singularity Command
+	 * Build the Apptainer Command
 	 *---------------------------------------------------*/
-	h.logger.Info(" * Finalize Singularity Command")
+	h.logger.Info(" * Finalize Apptainer Command")
 
-	var singularityCommand []string
-	{
-		if h.PauseContainerPID != 0 {
-			//nolint:lll    // panic(errors.Wrapf(nil, "Invalid pauseContainer's PID; can't proceed without an already established network namespace."))
-			singularityCommand = append(singularityCommand, []string{
-				"nsenter", "-t", string(rune(h.PauseContainerPID)), "-n",
-			}...)
-		}
-
-		singularityCommand = append(singularityCommand, Executables.SingularityPath(), "exec") // <---- singularity exec
-		singularityCommand = append(singularityCommand, setEnvOptions(container)...)           // <---- Options
-		singularityCommand = append(singularityCommand, setBindOptions(container)...)          // <---- ...
-		singularityCommand = append(singularityCommand, h.ContainerRegistry+container.Image)   // <---- Image
-		singularityCommand = append(singularityCommand, setExec(container.Command)...)         // <---- Execution
-		singularityCommand = append(singularityCommand, setExec(container.Args)...)            // <---- ...
-	}
-
-	/*---------------------------------------------------
-	 * Submit the singularity command to Slurm
-	 *---------------------------------------------------*/
-	jobID, err := h.submitSlurmJob(ctx, container, *prevJobID, singularityCommand)
+	submitTpl, err := template.New(h.Name).Option("missingkey=error").Parse(ApptainerTemplate)
 	if err != nil {
+		/*-- template errors should be expected from the custom fields where users can inject shitty input.	--*/
+		return errors.Wrapf(err, "Apptainer template error")
+	}
+
+	var apptainerCmd strings.Builder
+
+	if err := submitTpl.Execute(&apptainerCmd, evaluationFields); err != nil {
+		/*-- since both the template and fields are internal to the code, the evaluation should always succeed	--*/
+		panic(errors.Wrapf(err, "failed to evaluate Apptainer template"))
+	}
+
+	/*---------------------------------------------------
+	 * Submit the Apptainer command to Slurm
+	 *---------------------------------------------------*/
+	if err := h.runContainer(container, *prevJobID, apptainerCmd.String()); err != nil {
 		return errors.Wrap(err, "slurm error")
 	}
-
-	h.logger.Info(" * Job has been submitted to Slurm", "jobID", jobID)
 
 	return nil
 }
 
-func (h *podHandler) submitSlurmJob(ctx context.Context, container *corev1.Container, prevJobID int, singularityCommand []string) (int, error) {
+func (h *podHandler) runContainer(container *corev1.Container, prevJobID int, apptainerCmd string) error {
 	/*---------------------------------------------------
-	 * Generate SBatch script
+	 * Prepare fields for Sbatch Template
 	 *---------------------------------------------------*/
-	var sbatchFlagsAsString string
-	{
-		//  parse sbatch flags from Argo
-		if slurmFlags, ok := h.Pod.GetAnnotations()["slurm-job/flags"]; ok {
-			for _, slurmFlag := range strings.Split(slurmFlags, " ") {
-				sbatchFlagsAsString += "\n#SBATCH " + slurmFlag
-			}
-		}
+	evaluationFields := SBatchTemplateFields{
+		JobName:          h.Name,
+		ApptainerCommand: apptainerCmd,
+		StdLogsPath:      StdLogsPath(h.podKey, container.Name),
+		ExitCodePath:     ExitCodeFilePath(h.podKey, container.Name),
+	}
 
-		// SLURM_JOB_DEPENDENCY ensures sequential execution of init containers and main containers
-		if prevJobID != -1 {
-			sbatchFlagsAsString += "\n#SBATCH --dependency afterok:" + string(rune(prevJobID))
-		}
+	// SLURM_JOB_DEPENDENCY ensures sequential execution of init containers and main containers
+	if prevJobID != -1 {
+		evaluationFields.DependencyList = []string{string(rune(prevJobID))}
+	}
 
-		// append mpi-flags to singularity
+	//  parse sbatch flags from Argo
+	if slurmFlags, ok := h.Pod.GetAnnotations()["slurm-job/flags"]; ok {
+		for _, slurmFlag := range strings.Split(slurmFlags, " ") {
+			evaluationFields.CustomFlags = append(evaluationFields.CustomFlags, "\n#SBATCH "+slurmFlag)
+		}
+	}
+
+	// append mpi-flags to Apptainer
+	/*
 		if mpiFlags, ok := h.Pod.GetAnnotations()["slurm-job/mpi-flags"]; ok {
 			if mpiFlags != "true" {
 				mpi := append([]string{Executables.MpiexecPath(), "-np", "$SLURM_NTASKS"}, strings.Split(mpiFlags, " ")...)
 				singularityCommand = append(mpi, singularityCommand...)
 			}
 		}
-	}
+	*/
 
 	/*---------------------------------------------------
-	 * Prepare environment to receive SBatch results
+	 * Generate SBatch script from Sbatch SubmitTemplate + Fields
 	 *---------------------------------------------------*/
+	submitTpl, err := template.New(h.Name).Option("missingkey=error").Parse(SBatchTemplate)
+	if err != nil {
+		/*-- template errors should be expected from the custom fields where users can inject shitty input.	--*/
+		return errors.Wrapf(err, "sbatch template error")
+	}
+
+	var sbatchScript strings.Builder
+
+	if err := submitTpl.Execute(&sbatchScript, evaluationFields); err != nil {
+		/*-- since both the template and fields are internal to the code, the evaluation should always succeed	--*/
+		panic(errors.Wrapf(err, "failed to evaluate sbatch template"))
+	}
+
 	scriptFile := SBatchFilePath(h.podKey, container.Name)
-	stdoutPath := StdOutputFilePath(h.podKey, container.Name)
-	stderrPath := StdErrorFilePath(h.podKey, container.Name)
-	exitCodePath := ExitCodeFilePath(h.podKey, container.Name)
 
-	jobName := h.Pod.GetName() + "/" + container.Name
-
-	finalScriptData := Executables.SbatchMacros(jobName, sbatchFlagsAsString) + "\n" +
-		strings.Join(singularityCommand, " ") + " >> " + stdoutPath +
-		" 2>> " + stderrPath +
-		"\n echo $? > " + exitCodePath
-
-	/*---------------------------------------------------
-	 * Submit SBatch to Slurm
-	 *---------------------------------------------------*/
-	if err := os.WriteFile(scriptFile, []byte(finalScriptData), api.ContainerJobPermissions); err != nil {
-		return -1, errors.Wrapf(err, "unable to write sbatch script in file '%s'", scriptFile)
+	if err := os.WriteFile(scriptFile, []byte(sbatchScript.String()), api.ContainerJobPermissions); err != nil {
+		return errors.Wrapf(err, "unable to write sbatch script in file '%s'", scriptFile)
 	}
 
-	out, err := Executables.SBatchFromFile(ctx, scriptFile)
+	h.logger.Info(" * Generate sbatch script", "path", scriptFile)
+
+	/*---------------------------------------------------
+	 * Submit Sbatch to Slurm and get Submission Results
+	 *---------------------------------------------------*/
+	out, err := SubmitJob(scriptFile)
 	if err != nil {
 		h.logger.Error(err, "sbatch submission error", "out", out)
 
-		return -1, errors.Wrapf(err, "sbatch submission error")
+		panic(errors.Wrapf(err, "sbatch submission error"))
 	}
 
-	/*---------------------------------------------------
-	 * Parse Submission Results
-	 *---------------------------------------------------*/
-	r := regexp.MustCompile(`Submitted batch job (?P<jid>\d+)`)
-	jid := r.FindStringSubmatch(out)
+	expectedOutput := regexp.MustCompile(`Submitted batch job (?P<jid>\d+)`)
+	jid := expectedOutput.FindStringSubmatch(out)
 
 	intJobID, err := strconv.Atoi(jid[1])
 	if err != nil {
-		return -1, errors.Wrap(err, "Cant convert jid as integer. Parsed irregular output!")
+		return errors.Wrap(err, "Cant convert jid as integer. Parsed irregular output!")
 	}
 
 	// persist job id
 	jobIDPath := JobIDFilePath(h.podKey, container.Name)
 
 	if err := os.WriteFile(jobIDPath, []byte(jid[1]), api.ContainerJobPermissions); err != nil {
-		return -1, errors.Wrapf(err, "unable to persist Slurm Job ID")
+		return errors.Wrapf(err, "unable to persist Slurm Job ID")
 	}
 
-	return intJobID, nil
+	h.logger.Info(" * Job has been submitted to Slurm", "jobID", intJobID)
+
+	return nil
 }
 
-func (h *podHandler) createBackendVolumes() error {
-	pod := h.Pod
-
+func (h *podHandler) createBackendVolumes(rmanager *resourcemanager.ResourceManager) error {
 	/*---------------------------------------------------
-	 * Copy volumes from local Pod to remote Environment
+	 * Copy volumes from local Pod to remote HPCBackend
 	 *---------------------------------------------------*/
-	for _, vol := range pod.Spec.Volumes {
+	for _, vol := range h.Pod.Spec.Volumes {
 		switch {
 		case vol.VolumeSource.ConfigMap != nil:
 			/*---------------------------------------------------
@@ -466,15 +447,15 @@ func (h *podHandler) createBackendVolumes() error {
 			 *---------------------------------------------------*/
 			source := vol.VolumeSource.ConfigMap
 
-			configMap, err := h.ResourceManager.GetConfigMap(source.Name, pod.GetNamespace())
+			configMap, err := rmanager.GetConfigMap(source.Name, h.Pod.GetNamespace())
 			if k8serrors.IsNotFound(err) {
 				if source.Optional != nil && !*source.Optional {
-					return errors.Wrapf(err, "Configmap '%s' is required by Pod '%s' and does not exist", source.Name, pod.GetName())
+					return errors.Wrapf(err, "Configmap '%s' is required by Pod '%s' and does not exist", source.Name, h.Pod.GetName())
 				}
 			}
 
 			if err != nil {
-				return errors.Wrapf(err, "Error getting configmap '%s' from API server", pod.Name)
+				return errors.Wrapf(err, "Error getting configmap '%s' from API server", h.Pod.GetName())
 			}
 
 			// .hpk/namespace/podName/volName/*
@@ -498,15 +479,14 @@ func (h *podHandler) createBackendVolumes() error {
 			 *---------------------------------------------------*/
 			source := vol.VolumeSource.Secret
 
-			secret, err := h.ResourceManager.GetSecret(source.SecretName, pod.Namespace)
+			secret, err := rmanager.GetSecret(source.SecretName, h.Pod.GetNamespace())
 			if k8serrors.IsNotFound(err) {
 				if source.Optional != nil && !*source.Optional {
-					return errors.Wrapf(err, "Secret '%s' is required by Pod '%s' and does not exist", source.SecretName, pod.GetName())
+					return errors.Wrapf(err, "Secret '%s' not found in namespace '%s'", source.SecretName, h.Pod.GetNamespace())
 				}
 			}
-
 			if err != nil {
-				return errors.Wrapf(err, "Error getting secret '%s' from API server", pod.Name)
+				return errors.Wrapf(err, "Error getting secret '%s' from API server", source.SecretName)
 			}
 
 			// .hpk/namespace/podName/secretName/*
@@ -544,7 +524,7 @@ func (h *podHandler) createBackendVolumes() error {
 
 			for _, item := range vol.DownwardAPI.Items {
 				itemPath := filepath.Join(downApiDir, item.Path)
-				value, err := fieldpath.ExtractFieldPathAsString(pod, item.FieldRef.FieldPath)
+				value, err := fieldpath.ExtractFieldPathAsString(h.Pod, item.FieldRef.FieldPath)
 				if err != nil {
 					return err
 				}
@@ -630,7 +610,7 @@ func (h *podHandler) createBackendVolumes() error {
 					for _, item := range projectedSrc.DownwardAPI.Items {
 						itemPath := filepath.Join(projectedVolPath, item.Path)
 
-						value, err := fieldpath.ExtractFieldPathAsString(pod, item.FieldRef.FieldPath)
+						value, err := fieldpath.ExtractFieldPathAsString(h.Pod, item.FieldRef.FieldPath)
 						if err != nil {
 							return err
 						}
@@ -644,9 +624,9 @@ func (h *podHandler) createBackendVolumes() error {
 					/*---------------------------------------------------
 					 * Projected ServiceAccountToken
 					 *---------------------------------------------------*/
-					serviceAccount, err := h.ResourceManager.GetServiceAccount(pod.Spec.ServiceAccountName, pod.GetNamespace())
+					serviceAccount, err := rmanager.GetServiceAccount(h.Pod.Spec.ServiceAccountName, h.Pod.GetNamespace())
 					if err != nil {
-						return errors.Wrapf(err, "Error getting configmap '%s' from API server", pod.Name)
+						return errors.Wrapf(err, "Error getting service account '%s' from API server", h.Pod.Spec.ServiceAccountName)
 					}
 
 					if serviceAccount == nil {
@@ -655,7 +635,7 @@ func (h *podHandler) createBackendVolumes() error {
 
 					if serviceAccount.AutomountServiceAccountToken != nil && *serviceAccount.AutomountServiceAccountToken {
 						for _, secretRef := range serviceAccount.Secrets {
-							secret, err := h.ResourceManager.GetSecret(secretRef.Name, pod.GetNamespace())
+							secret, err := rmanager.GetSecret(secretRef.Name, h.Pod.GetNamespace())
 							if err != nil {
 								return errors.Wrapf(err, "get secret error")
 							}
@@ -673,14 +653,14 @@ func (h *podHandler) createBackendVolumes() error {
 					/*---------------------------------------------------
 					 * Projected ConfigMap
 					 *---------------------------------------------------*/
-					configMap, err := h.ResourceManager.GetConfigMap(projectedSrc.ConfigMap.Name, pod.GetNamespace())
+					configMap, err := rmanager.GetConfigMap(projectedSrc.ConfigMap.Name, h.Pod.GetNamespace())
 					{ // err check
 						if projectedSrc.ConfigMap.Optional != nil && !*projectedSrc.ConfigMap.Optional {
-							return errors.Wrapf(err, "Configmap '%s' is required by Pod '%s' and does not exist", projectedSrc.ConfigMap.Name, pod.GetName())
+							return errors.Wrapf(err, "Configmap '%s' is required by Pod '%s' and does not exist", projectedSrc.ConfigMap.Name, h.Pod.GetName())
 						}
 
 						if err != nil {
-							return errors.Wrapf(err, "Error getting configmap '%s' from API server", pod.Name)
+							return errors.Wrapf(err, "Error getting configmap '%s' from API server", h.Pod.Name)
 						}
 
 						if configMap == nil {
@@ -700,14 +680,14 @@ func (h *podHandler) createBackendVolumes() error {
 					/*---------------------------------------------------
 					 * Projected Secret
 					 *---------------------------------------------------*/
-					secret, err := h.ResourceManager.GetSecret(projectedSrc.Secret.Name, pod.GetNamespace())
+					secret, err := rmanager.GetSecret(projectedSrc.Secret.Name, h.Pod.GetNamespace())
 					{ // err check
 						if projectedSrc.Secret.Optional != nil && !*projectedSrc.Secret.Optional {
-							return errors.Wrapf(err, "Secret '%s' is required by Pod '%s' and does not exist", projectedSrc.Secret.Name, pod.GetName())
+							return errors.Wrapf(err, "Secret '%s' is required by Pod '%s' and does not exist", projectedSrc.Secret.Name, h.Pod.GetName())
 						}
 
 						if err != nil {
-							return errors.Wrapf(err, "Error getting secret '%s' from API server", pod.Name)
+							return errors.Wrapf(err, "Error getting secret '%s' from API server", h.Pod.Name)
 						}
 
 						if secret == nil {

@@ -21,7 +21,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/carv-ics-forth/hpk/api"
+	"github.com/carv-ics-forth/hpk/cmd/virtual-kubelet/commands"
 	"github.com/carv-ics-forth/hpk/cmd/virtual-kubelet/commands/providers"
 	"github.com/carv-ics-forth/hpk/cmd/virtual-kubelet/commands/root"
 	"github.com/carv-ics-forth/hpk/cmd/virtual-kubelet/commands/version"
@@ -44,7 +44,7 @@ func main() {
 	var opts root.Opts
 
 	rootCmd := root.NewCommand(ctx, filepath.Base(os.Args[0]), opts)
-	rootCmd.AddCommand(version.NewCommand(api.BuildVersion, api.BuildTime), providers.NewCommand())
+	rootCmd.AddCommand(version.NewCommand(commands.BuildVersion, commands.BuildTime), providers.NewCommand())
 	preRun := rootCmd.PreRunE
 
 	var logLevel string

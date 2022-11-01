@@ -46,13 +46,13 @@ scp -P 7777 /tmp/hpk.sif localhost:~/
 
 
 # Build locally and push to remote HPC
-docker build . -t icsforth/hpk &&  singularity build /tmp/hpk.sif docker-daemon://icsforth/hpk:latest && scp /tmp/hpk.sif eupex@amonra.oats.inaf.it:~/
+docker build . -t icsforth/hpk &&  apptainer build /tmp/hpk.sif docker-daemon://icsforth/hpk:latest && scp /tmp/hpk.sif eupex@amonra.oats.inaf.it:~/
 
 # On the HPC Cluster
-singularity run --bind /bin,/boot,/etc,/home,/lib,/lib32,/lib64,/libx32,/lost+found,/media,/mnt,/opt,/proc,/root,/run,/sbin,/snap,/srv,/swap.img,/sys,/tmp,/usr,/var  hpk.sif
+apptainer run --bind /bin,/boot,/etc,/home,/lib,/lib32,/lib64,/libx32,/lost+found,/media,/mnt,/opt,/proc,/root,/run,/sbin,/snap,/srv,/swap.img,/sys,/tmp,/usr,/var  hpk.sif
 
 # jedi
-singularity run --bind /bin,/boot,/etc,/home,/lib,/lib32,/lib64,/libx32,/lost+found,/media,/mnt,/opt,/proc,/root,/sbin,/snap,/srv,/swap.img,/sys,/tmp,/usr,/var  hpk.sif
+apptainer run --bind /bin,/boot,/etc,/home,/lib,/lib32,/lib64,/libx32,/lost+found,/media,/mnt,/opt,/proc,/root,/sbin,/snap,/srv,/swap.img,/sys,/tmp,/usr,/var  hpk.sif
 
 
 ## Enable Logs
@@ -70,10 +70,10 @@ change `/run/systemd/resolve/stub-resolv.conf`
 
 For example
 ```
-singularity pull docker://godlovedc/lolcow
+apptainer pull docker://godlovedc/lolcow
 ```
 
 ## Instantiate the Pod environment
 
-singularity shell --net --network=flannel --fakeroot --bind /bin,/etc,/home,/lib,/lib32,/lib64,/libx32,/opt,/proc,/root,/sbin,/run,/sys,/usr,/var --compat  docker://icsforth/scratch:latest
+apptainer shell --net --network=flannel --fakeroot --bind /bin,/etc,/home,/lib,/lib32,/lib64,/libx32,/opt,/proc,/root,/sbin,/run,/sys,/usr,/var --compat  docker://icsforth/scratch:latest
 

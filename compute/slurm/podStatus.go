@@ -16,7 +16,6 @@ package slurm
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"os"
 	"sort"
@@ -29,24 +28,32 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func renewPodStatus(ctx context.Context, podKey api.ObjectKey) error {
-	/*-- Load Pod from reference --*/
-	pod, err := GetPod(ctx, podKey)
-	if err != nil {
-		return errors.Wrapf(err, "unable to load pod")
+func PodWithExplicitlyUnsupportedFields(pod *corev1.Pod) bool {
+	var unsupportedFields []string
+
+	/*---------------------------------------------------
+	 * Unsupported Fields
+	 *---------------------------------------------------*/
+	if pod.GetNamespace() == "kube-system" {
+		unsupportedFields = append(unsupportedFields, "kube-system namespace")
 	}
 
-	/*-- Recalculate the Pod status from locally stored containers --*/
-	if err := resolvePodStatus(pod); err != nil {
-		return errors.Wrapf(err, "unable to update pod status")
+	if pod.Spec.Affinity != nil {
+		unsupportedFields = append(unsupportedFields, "affinity directives")
 	}
 
-	/*-- Update the top-level Pod description --*/
-	if err := SavePod(ctx, pod); err != nil {
-		return errors.Wrapf(err, "unable to store pod")
+	/*---------------------------------------------------
+	 * Summary of Unsupported Fields
+	 *---------------------------------------------------*/
+	if len(unsupportedFields) > 0 {
+		pod.Status.Phase = corev1.PodFailed
+		pod.Status.Reason = "UnsupportedFeatures"
+		pod.Status.Message = strings.Join(unsupportedFields, ",")
+
+		return true
 	}
 
-	return nil
+	return false
 }
 
 type test struct {
@@ -54,18 +61,14 @@ type test struct {
 	change     func(status *corev1.PodStatus)
 }
 
-func resolvePodStatus(pod *corev1.Pod) error {
+func podStateMapper(pod *corev1.Pod) error {
 	podKey := api.ObjectKeyFromObject(pod)
-	logger := defaultLogger.WithValues("pod", podKey)
+	logger := DefaultLogger.WithValues("pod", podKey)
 
 	/*---------------------------------------------------
 	 * Filter-out Pods with Unsupported Fields
 	 *---------------------------------------------------*/
-	if pod.GetNamespace() == "kube-system" {
-		pod.Status.Phase = corev1.PodFailed
-		pod.Status.Reason = "UnsupportedFeatures"
-		pod.Status.Message = "This version of HPK is not intended for kube-system jobs"
-
+	if PodWithExplicitlyUnsupportedFields(pod) {
 		return nil
 	}
 
@@ -80,7 +83,7 @@ func resolvePodStatus(pod *corev1.Pod) error {
 	 * Check status of Init Containers
 	 *---------------------------------------------------*/
 	if pod.Status.Phase == corev1.PodPending {
-		logger.Info(" O Checking for status of Init Containers")
+		logger.Info(" O Check Init Container Status")
 
 		for _, initContainer := range pod.Status.InitContainerStatuses {
 			if initContainer.State.Terminated != nil {
@@ -93,7 +96,7 @@ func resolvePodStatus(pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Classify container statuses
 	 *---------------------------------------------------*/
-	logger.Info(" O Checking for status of Containers")
+	logger.Info(" O Check Container Status")
 
 	var state Classifier
 	state.Reset()
@@ -281,7 +284,7 @@ func readStringFromFile(filepath string) (string, bool) {
 	}
 
 	if err != nil {
-		defaultLogger.Error(err, "cannot read file", "path", filepath)
+		DefaultLogger.Error(err, "cannot read file", "path", filepath)
 		return "", false
 	}
 
@@ -295,7 +298,7 @@ func readIntFromFile(filepath string) (int, bool) {
 	}
 
 	if err != nil {
-		defaultLogger.Error(err, "cannot read file", "path", filepath)
+		DefaultLogger.Error(err, "cannot read file", "path", filepath)
 		return -1, false
 	}
 

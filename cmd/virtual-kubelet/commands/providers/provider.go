@@ -34,7 +34,7 @@ func NewCommand() *cobra.Command {
 			case 0:
 				fmt.Fprintln(cmd.OutOrStdout(), "hpk")
 			case 1:
-				if args[0] != "kanoc" {
+				if args[0] != "hpk" {
 					fmt.Fprintln(cmd.OutOrStderr(), "no such provider", args[0])
 
 					// TODO(@cpuuy83): would be nice to not short-circuit the exit here

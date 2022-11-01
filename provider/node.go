@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/carv-ics-forth/hpk/api"
 	"github.com/matishsiao/goInfo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -174,7 +173,7 @@ func (p *Provider) NodeSystemInfo(_ context.Context) corev1.NodeSystemInfo {
 		KernelVersion:           kernelVersion,
 		OSImage:                 "hpk",
 		ContainerRuntimeVersion: "vkubelet://6.6.6.6",
-		KubeletVersion:          api.BuildVersion,
+		KubeletVersion:          p.InitConfig.BuildVersion,
 		KubeProxyVersion:        "",
 		OperatingSystem:         operatingSystem,
 		Architecture:            architecture,
