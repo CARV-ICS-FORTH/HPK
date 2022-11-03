@@ -1,0 +1,1 @@
+sudo socat -d -d  UDP4-RECVFROM:53,fork UDP4-SENDTO:10.152.183.10:53
