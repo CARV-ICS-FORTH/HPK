@@ -23,7 +23,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/carv-ics-forth/hpk/api"
+	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/pkg/fieldpath"
 	"github.com/carv-ics-forth/hpk/pkg/resourcemanager"
 	"github.com/go-logr/logr"
@@ -33,6 +33,7 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/json"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var escapeScripts = regexp.MustCompile(`(--[A-Za-z0-9\-]+=)(\$[{\(][A-Za-z0-9_]+[\)\}])`)
@@ -40,17 +41,13 @@ var escapeScripts = regexp.MustCompile(`(--[A-Za-z0-9\-]+=)(\$[{\(][A-Za-z0-9_]+
 type podHandler struct {
 	*corev1.Pod
 
-	ContainerRegistry string
-
-	PauseContainerPID int
-
-	podKey       api.ObjectKey
+	podKey       client.ObjectKey
 	podDirectory string
 	logger       logr.Logger
 }
 
-func GetPod(podRef api.ObjectKey) (*corev1.Pod, error) {
-	encodedPodFilepath := PodSpecFilePath(podRef)
+func GetPod(podRef client.ObjectKey) (*corev1.Pod, error) {
+	encodedPodFilepath := PodJSONFilepath(podRef)
 
 	encodedPod, err := os.ReadFile(encodedPodFilepath)
 	if err != nil {
@@ -77,7 +74,7 @@ func GetPods() ([]*corev1.Pod, error) {
 	/*---------------------------------------------------
 	 * Iterate the filesystem and extract local pods
 	 *---------------------------------------------------*/
-	filepath.Walk(api.RuntimeDir, func(path string, info os.FileInfo, err error) error {
+	filepath.Walk(RuntimeDir, func(path string, info os.FileInfo, err error) error {
 		encodedPod, err := os.ReadFile(path)
 		if err != nil {
 			merr = multierror.Append(merr, errors.Wrapf(err, "cannot read pod description file '%s'", path))
@@ -101,7 +98,7 @@ func GetPods() ([]*corev1.Pod, error) {
 }
 
 func SavePod(pod *corev1.Pod) error {
-	podKey := api.ObjectKeyFromObject(pod)
+	podKey := client.ObjectKeyFromObject(pod)
 	logger := DefaultLogger.WithValues("pod", podKey)
 
 	encodedPod, err := json.Marshal(pod)
@@ -109,9 +106,9 @@ func SavePod(pod *corev1.Pod) error {
 		return errors.Wrapf(err, "cannot marshall pod '%s' to json", podKey)
 	}
 
-	encodedPodFile := PodSpecFilePath(podKey)
+	encodedPodFile := PodJSONFilepath(podKey)
 
-	if err := os.WriteFile(encodedPodFile, encodedPod, api.PodSpecJsonFilePermissions); err != nil {
+	if err := os.WriteFile(encodedPodFile, encodedPod, PodSpecJsonFilePermissions); err != nil {
 		return errors.Wrapf(err, "cannot write pod json file '%s'", encodedPodFile)
 	}
 
@@ -124,26 +121,59 @@ func SavePod(pod *corev1.Pod) error {
 }
 
 func DeletePod(pod *corev1.Pod) error {
-	podKey := api.ObjectKeyFromObject(pod)
+	podKey := client.ObjectKeyFromObject(pod)
 	logger := DefaultLogger.WithValues("pod", podKey)
 
 	/*---------------------------------------------------
 	 * Cancel Slurm Jobs
 	 *---------------------------------------------------*/
+	/*
+		DeletePod takes a Kubernetes Pod and deletes it from the provider.
+		TODO: Once a pod is deleted, the provider is expected
+		to call the NotifyPods callback with a terminal pod status
+		where all the containers are in a terminal state, as well as the pod.
+		DeletePod may be called multiple times for the same pod
+	*/
 	{
 		var merr *multierror.Error
 
-		for _, container := range pod.Status.InitContainerStatuses {
-			_, err := CancelJob(container.ContainerID)
-			if err != nil {
-				merr = multierror.Append(merr, errors.Wrapf(err, "failed to cancel job '%s'", container.ContainerID))
+		for i, container := range pod.Status.InitContainerStatuses {
+			/*-- Cancel Container Job --*/
+			if container.ContainerID != "" {
+				/*-- Extract container_id from raw format '<type>://<container_id>'. --*/
+				containerID := strings.Split(container.ContainerID, slurmType)[1]
+
+				_, err := CancelJob(containerID)
+				if err != nil {
+					merr = multierror.Append(merr, errors.Wrapf(err, "failed to cancel job '%s'", container.ContainerID))
+				}
+			}
+
+			/*-- Mark the Container as Terminated --*/
+			pod.Status.InitContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
+				Reason:     "PodIsDeleted",
+				Message:    "Pod is being deleted",
+				FinishedAt: metav1.Now(),
 			}
 		}
 
-		for _, container := range pod.Status.ContainerStatuses {
-			_, err := CancelJob(container.ContainerID)
-			if err != nil {
-				merr = multierror.Append(merr, errors.Wrapf(err, "failed to cancel job '%s'", container.ContainerID))
+		for i, container := range pod.Status.ContainerStatuses {
+			/*-- Cancel Container Job --*/
+			if container.ContainerID != "" {
+				/*-- Extract container_id from raw format '<type>://<container_id>'. --*/
+				containerID := strings.Split(container.ContainerID, slurmType)[1]
+
+				_, err := CancelJob(containerID)
+				if err != nil {
+					merr = multierror.Append(merr, errors.Wrapf(err, "failed to cancel job '%s'", container.ContainerID))
+				}
+			}
+
+			/*-- Mark the Container as Terminated --*/
+			pod.Status.ContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
+				Reason:     "PodIsDeleted",
+				Message:    "Pod is being deleted",
+				FinishedAt: metav1.Now(),
 			}
 		}
 
@@ -155,31 +185,7 @@ func DeletePod(pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Remove Pod directory
 	 *---------------------------------------------------*/
-	/*
-		DeletePod takes a Kubernetes Pod and deletes it from the provider.
-		TODO: Once a pod is deleted, the provider is expected
-		to call the NotifyPods callback with a terminal pod status
-		where all the containers are in a terminal state, as well as the pod.
-		DeletePod may be called multiple times for the same pod
-	*/
-
-	for i := range pod.Status.InitContainerStatuses {
-		pod.Status.InitContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
-			Reason:     "PodIsDeleted",
-			Message:    "Pod is being deleted",
-			FinishedAt: metav1.Now(),
-		}
-	}
-
-	for i := range pod.Status.ContainerStatuses {
-		pod.Status.ContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
-			Reason:     "PodIsDeleted",
-			Message:    "Pod is being deleted",
-			FinishedAt: metav1.Now(),
-		}
-	}
-
-	podDir := RuntimeDir(api.ObjectKeyFromObject(pod))
+	podDir := PodRuntimeDir(podKey)
 
 	if err := os.RemoveAll(podDir); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return errors.Wrapf(err, "failed to delete pod directory %s'", podDir)
@@ -188,8 +194,8 @@ func DeletePod(pod *corev1.Pod) error {
 	return nil
 }
 
-func CreatePod(pod *corev1.Pod, rmanager *resourcemanager.ResourceManager, registry string) error {
-	podKey := api.ObjectKeyFromObject(pod)
+func CreatePod(pod *corev1.Pod, rmanager *resourcemanager.ResourceManager) error {
+	podKey := client.ObjectKeyFromObject(pod)
 	logger := DefaultLogger.WithValues("pod", podKey)
 
 	/*---------------------------------------------------
@@ -198,8 +204,8 @@ func CreatePod(pod *corev1.Pod, rmanager *resourcemanager.ResourceManager, regis
 	logger.Info("== Pod Creation Request ==")
 
 	// create pod's top-level and internal sbatch directories
-	sbatchDir := SBatchDirectory(podKey)
-	if err := os.MkdirAll(sbatchDir, api.PodGlobalDirectoryPermissions); err != nil {
+	sbatchDir := PodScriptsDir(podKey)
+	if err := os.MkdirAll(sbatchDir, PodGlobalDirectoryPermissions); err != nil {
 		return errors.Wrapf(err, "Cant create sbatch directory '%s'", sbatchDir)
 	}
 
@@ -217,7 +223,6 @@ func CreatePod(pod *corev1.Pod, rmanager *resourcemanager.ResourceManager, regis
 	for i := 0; i < len(pod.Spec.Containers); i++ {
 		pod.Status.ContainerStatuses[i].Name = pod.Spec.Containers[i].Name
 		pod.Status.ContainerStatuses[i].Image = pod.Spec.Containers[i].Image
-
 	}
 
 	/*---------------------------------------------------
@@ -228,12 +233,10 @@ func CreatePod(pod *corev1.Pod, rmanager *resourcemanager.ResourceManager, regis
 	}
 
 	h := podHandler{
-		Pod:               pod,
-		ContainerRegistry: registry,
-		PauseContainerPID: 0,
-		podKey:            podKey,
-		podDirectory:      RuntimeDir(podKey),
-		logger:            logger,
+		Pod:          pod,
+		podKey:       podKey,
+		podDirectory: PodRuntimeDir(podKey),
+		logger:       logger,
 	}
 
 	/*---------------------------------------------------
@@ -292,7 +295,7 @@ func (h *podHandler) submitContainerCreationRequest(container *corev1.Container,
 	h.logger.Info(" * Set flags and args for Apptainer command")
 
 	evaluationFields := ApptainerTemplateFields{
-		Image:   h.ContainerRegistry + container.Image,
+		Image:   compute.ContainerRegistry + container.Image,
 		Command: container.Command,
 		Args:    container.Args,
 		Env: func() []string {
@@ -308,7 +311,7 @@ func (h *podHandler) submitContainerCreationRequest(container *corev1.Container,
 			mountArgs := make([]string, 0, len(container.VolumeMounts))
 
 			for _, mountVar := range container.VolumeMounts {
-				mountArgs = append(mountArgs, MountPaths(h.podKey, mountVar))
+				mountArgs = append(mountArgs, PodMountpaths(h.podKey, mountVar))
 			}
 
 			return mountArgs
@@ -348,10 +351,14 @@ func (h *podHandler) runContainer(container *corev1.Container, prevJobID int, ap
 	 * Prepare fields for Sbatch Template
 	 *---------------------------------------------------*/
 	evaluationFields := SBatchTemplateFields{
-		JobName:          h.Name,
+		KubeDNSService:   compute.KubeDNSIPAddress,
+		Pod:              h.podKey,
 		ApptainerCommand: apptainerCmd,
-		StdLogsPath:      StdLogsPath(h.podKey, container.Name),
-		ExitCodePath:     ExitCodeFilePath(h.podKey, container.Name),
+		ScriptsDirectory: PodScriptsDir(h.podKey),
+		PodIPPath:        PodIPFilepath(h.podKey),
+		StdoutPath:       ContainerStdoutFilepath(h.podKey, container.Name),
+		StderrPath:       ContainerStderrFilepath(h.podKey, container.Name),
+		ExitCodePath:     ContainerExitCodeFilepath(h.podKey, container.Name),
 	}
 
 	// SLURM_JOB_DEPENDENCY ensures sequential execution of init containers and main containers
@@ -392,9 +399,9 @@ func (h *podHandler) runContainer(container *corev1.Container, prevJobID int, ap
 		panic(errors.Wrapf(err, "failed to evaluate sbatch template"))
 	}
 
-	scriptFile := SBatchFilePath(h.podKey, container.Name)
+	scriptFile := filepath.Join(PodScriptsDir(h.podKey), container.Name+"_sbatch.sh")
 
-	if err := os.WriteFile(scriptFile, []byte(sbatchScript.String()), api.ContainerJobPermissions); err != nil {
+	if err := os.WriteFile(scriptFile, []byte(sbatchScript.String()), ContainerJobPermissions); err != nil {
 		return errors.Wrapf(err, "unable to write sbatch script in file '%s'", scriptFile)
 	}
 
@@ -419,9 +426,9 @@ func (h *podHandler) runContainer(container *corev1.Container, prevJobID int, ap
 	}
 
 	// persist job id
-	jobIDPath := JobIDFilePath(h.podKey, container.Name)
+	jobIDPath := ContainerJobIDFilepath(h.podKey, container.Name)
 
-	if err := os.WriteFile(jobIDPath, []byte(jid[1]), api.ContainerJobPermissions); err != nil {
+	if err := os.WriteFile(jobIDPath, []byte(jid[1]), ContainerJobPermissions); err != nil {
 		return errors.Wrapf(err, "unable to persist Slurm Job ID")
 	}
 
@@ -544,7 +551,7 @@ func (h *podHandler) createBackendVolumes(rmanager *resourcemanager.ResourceMana
 			case corev1.HostPathUnset:
 				// For backwards compatible, leave it empty if unset
 				// .hpk/podName/volName/*
-				if err := os.MkdirAll(hostPathVolPath, api.PodGlobalDirectoryPermissions); err != nil {
+				if err := os.MkdirAll(hostPathVolPath, PodGlobalDirectoryPermissions); err != nil {
 					return errors.Wrapf(err, "cannot create '%s'", hostPathVolPath)
 				}
 			case corev1.HostPathDirectoryOrCreate:
@@ -552,13 +559,13 @@ func (h *podHandler) createBackendVolumes(rmanager *resourcemanager.ResourceMana
 				// as needed with file mode 0755, having the same group and ownership with Kubelet.
 
 				// .hpk/podName/volName/*
-				if err := os.MkdirAll(hostPathVolPath, api.PodGlobalDirectoryPermissions); err != nil {
+				if err := os.MkdirAll(hostPathVolPath, PodGlobalDirectoryPermissions); err != nil {
 					return errors.Wrapf(err, "cannot create '%s'", hostPathVolPath)
 				}
 			case corev1.HostPathDirectory:
 				// A directory must exist at the given path
 				// .hpk/podName/volName/*
-				if err := os.MkdirAll(hostPathVolPath, api.PodGlobalDirectoryPermissions); err != nil {
+				if err := os.MkdirAll(hostPathVolPath, PodGlobalDirectoryPermissions); err != nil {
 					return errors.Wrapf(err, "cannot create '%s'", hostPathVolPath)
 				}
 
@@ -671,7 +678,7 @@ func (h *podHandler) createBackendVolumes(rmanager *resourcemanager.ResourceMana
 					for k, item := range configMap.Data {
 						// TODO: Ensure that these files are deleted in failure cases
 						itemPath := filepath.Join(projectedVolPath, k)
-						if err := os.WriteFile(itemPath, []byte(item), api.PodGlobalDirectoryPermissions); err != nil {
+						if err := os.WriteFile(itemPath, []byte(item), PodGlobalDirectoryPermissions); err != nil {
 							return errors.Wrapf(err, "cannot write config map file '%s'", itemPath)
 						}
 					}
@@ -698,7 +705,7 @@ func (h *podHandler) createBackendVolumes(rmanager *resourcemanager.ResourceMana
 					for k, item := range secret.Data {
 						// TODO: Ensure that these files are deleted in failure cases
 						itemPath := filepath.Join(projectedVolPath, k)
-						if err := os.WriteFile(itemPath, item, api.PodGlobalDirectoryPermissions); err != nil {
+						if err := os.WriteFile(itemPath, item, PodGlobalDirectoryPermissions); err != nil {
 							return errors.Wrapf(err, "cannot write config map file '%s'", itemPath)
 						}
 					}

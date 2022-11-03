@@ -36,9 +36,9 @@ type Opts struct {
 	// Node name to use when creating a node in Kubernetes
 	NodeName string
 
-	ProviderConfigPath string
-
 	MetricsAddr string
+
+	ContainerRegistry string
 
 	// Number of workers to use to handle pod notifications
 	PodSyncWorkers       int
@@ -61,8 +61,9 @@ func installFlags(flags *pflag.FlagSet, c *Opts) {
 
 	flags.StringVar(&c.NodeName, "nodename", "virtual-kubelet", "kubernetes node name")
 
-	flags.StringVar(&c.ProviderConfigPath, "provider-config", "", "HPC provider configuration file")
 	flags.StringVar(&c.MetricsAddr, "metrics-addr", ":10255", "address to listen for metrics/stats requests")
+
+	flags.StringVar(&c.ContainerRegistry, "registry", "docker://", "container registry")
 
 	flags.IntVar(&c.PodSyncWorkers, "pod-sync-workers", 1, `set the number of pod synchronization workers`)
 	flags.BoolVar(&c.EnableNodeLease, "enable-node-lease", true, `use node leases (1.13) for node heartbeats`)

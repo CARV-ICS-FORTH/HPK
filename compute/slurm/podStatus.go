@@ -22,24 +22,62 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/carv-ics-forth/hpk/api"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+const (
+	slurmType = "slurm://"
 )
 
 func PodWithExplicitlyUnsupportedFields(pod *corev1.Pod) bool {
 	var unsupportedFields []string
 
 	/*---------------------------------------------------
-	 * Unsupported Fields
+	 * Unsupported Pod-Level Fields
 	 *---------------------------------------------------*/
 	if pod.GetNamespace() == "kube-system" {
-		unsupportedFields = append(unsupportedFields, "kube-system namespace")
+		unsupportedFields = append(unsupportedFields, ".Meta.Namespace == 'kube-system'")
 	}
 
 	if pod.Spec.Affinity != nil {
-		unsupportedFields = append(unsupportedFields, "affinity directives")
+		unsupportedFields = append(unsupportedFields, ".Spec.Affinity")
+	}
+
+	if pod.Spec.DNSConfig != nil {
+		unsupportedFields = append(unsupportedFields, ".Spec.DNSConfig")
+	}
+
+	if pod.Spec.SecurityContext != nil {
+		DefaultLogger.Info("Ignore .Spec.SecurityContext")
+		//	unsupportedFields = append(unsupportedFields, ".Spec.SecurityContext")
+	}
+
+	if pod.Spec.InitContainers != nil {
+		unsupportedFields = append(unsupportedFields, ".Spec.InitContainers")
+	}
+
+	/*---------------------------------------------------
+	 * Unsupported Container-Level Fields
+	 *---------------------------------------------------*/
+	for i, container := range pod.Spec.Containers {
+		if container.SecurityContext != nil {
+			unsupportedFields = append(unsupportedFields, fmt.Sprintf(".Spec.Containers[%d].SecurityContext", i))
+		}
+
+		if container.StartupProbe != nil {
+			unsupportedFields = append(unsupportedFields, fmt.Sprintf(".Spec.Containers[%d].StartupProbe", i))
+		}
+
+		if container.LivenessProbe != nil {
+			unsupportedFields = append(unsupportedFields, fmt.Sprintf(".Spec.Containers[%d].LivenessProbe", i))
+		}
+
+		if container.ReadinessProbe != nil {
+			unsupportedFields = append(unsupportedFields, fmt.Sprintf(".Spec.Containers[%d].ReadinessProbe", i))
+		}
 	}
 
 	/*---------------------------------------------------
@@ -47,8 +85,8 @@ func PodWithExplicitlyUnsupportedFields(pod *corev1.Pod) bool {
 	 *---------------------------------------------------*/
 	if len(unsupportedFields) > 0 {
 		pod.Status.Phase = corev1.PodFailed
-		pod.Status.Reason = "UnsupportedFeatures"
-		pod.Status.Message = strings.Join(unsupportedFields, ",")
+		pod.Status.Reason = "Rejected"
+		pod.Status.Message = "UnsupportedFeatures: " + strings.Join(unsupportedFields, ",")
 
 		return true
 	}
@@ -62,7 +100,7 @@ type test struct {
 }
 
 func podStateMapper(pod *corev1.Pod) error {
-	podKey := api.ObjectKeyFromObject(pod)
+	podKey := client.ObjectKeyFromObject(pod)
 	logger := DefaultLogger.WithValues("pod", podKey)
 
 	/*---------------------------------------------------
@@ -70,6 +108,18 @@ func podStateMapper(pod *corev1.Pod) error {
 	 *---------------------------------------------------*/
 	if PodWithExplicitlyUnsupportedFields(pod) {
 		return nil
+	}
+
+	/*---------------------------------------------------
+	 * Load runtime-dependent Pod Information (e.g, IP)
+	 *---------------------------------------------------*/
+	if pod.Status.PodIP == "" {
+		podIPPath := PodIPFilepath(podKey)
+		ip, ok := readStringFromFile(podIPPath)
+		if ok {
+			pod.Status.PodIP = ip
+			pod.Status.PodIPs = append(pod.Status.PodIPs, corev1.PodIP{IP: ip})
+		}
 	}
 
 	/*---------------------------------------------------
@@ -91,6 +141,16 @@ func podStateMapper(pod *corev1.Pod) error {
 				return nil
 			}
 		}
+
+		/*-- PodInitialized: all init containers have completed successfully --*/
+		pod.Status.Conditions = append(pod.Status.Conditions, corev1.PodCondition{
+			Type:               corev1.PodInitialized,
+			Status:             corev1.ConditionTrue,
+			LastProbeTime:      metav1.Time{},
+			LastTransitionTime: metav1.Time{},
+			Reason:             "Initialized",
+			Message:            "all init containers in the pod have started successfully",
+		})
 	}
 
 	/*---------------------------------------------------
@@ -131,6 +191,27 @@ func podStateMapper(pod *corev1.Pod) error {
 			expression: state.NumRunningJobs()+state.NumSuccessfulJobs() == totalJobs,
 			change: func(status *corev1.PodStatus) {
 				status.Phase = corev1.PodRunning
+
+				/*-- ContainersReady: all containers in the pod are ready. --*/
+				pod.Status.Conditions = append(pod.Status.Conditions, corev1.PodCondition{
+					Type:               corev1.ContainersReady,
+					Status:             corev1.ConditionTrue,
+					LastProbeTime:      metav1.Time{},
+					LastTransitionTime: metav1.Time{},
+					Reason:             "ContainersReady",
+					Message:            " all containers in the pod are ready.",
+				})
+
+				/*-- PodReady: the pod is able to service requests and should be added to the
+				  load balancing pools of all matching services. --*/
+				pod.Status.Conditions = append(pod.Status.Conditions, corev1.PodCondition{
+					Type:               corev1.PodReady,
+					Status:             corev1.ConditionTrue,
+					LastProbeTime:      metav1.Time{},
+					LastTransitionTime: metav1.Time{},
+					Reason:             "PodReady",
+					Message:            "the pod is able to service requests",
+				})
 			},
 		},
 
@@ -173,7 +254,7 @@ func podStateMapper(pod *corev1.Pod) error {
 *************************************************************/
 
 func LoadContainerStatuses(pod *corev1.Pod) error {
-	podKey := api.ObjectKeyFromObject(pod)
+	podKey := client.ObjectKeyFromObject(pod)
 
 	/*---------------------------------------------------
 	 * Generic Handler for ContainerStatus
@@ -183,31 +264,34 @@ func LoadContainerStatuses(pod *corev1.Pod) error {
 			panic("Restart is not yet supported")
 		}
 
-		jobIDPath := JobIDFilePath(podKey, containerStatus.Name)
+		jobIDPath := ContainerJobIDFilepath(podKey, containerStatus.Name)
 		jobID, jobIDExists := readStringFromFile(jobIDPath)
 
 		/*-- StateWaiting: no jobid, means that the job is still in the Slurm queue --*/
 		if !jobIDExists {
 			containerStatus.State.Waiting = &corev1.ContainerStateWaiting{
-				Reason:  "JobWaitingInSlurm",
+				Reason:  "InSlurmQueue",
 				Message: "Job waiting in the Slurm queue",
 			}
 		}
 
 		/*-- StateRunning: existing jobid, means that the job is running --*/
 		if jobIDExists && containerStatus.State.Running == nil {
-			/*-- fields driven by probes. --*/
+			containerStatus.State.Running = &corev1.ContainerStateRunning{
+				StartedAt: metav1.Now(), // fixme: we should get this info from the file's ctime
+			}
+
+			containerStatus.ContainerID = slurmType + jobID
+
+			/*-- todo: since we do not support probes, make everything to look ok --*/
 			started := true
 			containerStatus.Started = &started
 			containerStatus.Ready = true
 
-			containerStatus.State.Running = &corev1.ContainerStateRunning{
-				StartedAt: metav1.Now(), // fixme: we should get this info from the file's ctime
-			}
 		}
 
 		/*-- StateTerminated: existing exitcode, means that the job is complete --*/
-		exitCodePath := ExitCodeFilePath(podKey, containerStatus.Name)
+		exitCodePath := ContainerExitCodeFilepath(podKey, containerStatus.Name)
 		exitCode, exitCodeExists := readIntFromFile(exitCodePath)
 
 		if exitCodeExists {
@@ -226,7 +310,7 @@ func LoadContainerStatuses(pod *corev1.Pod) error {
 				Message:     trytoDecodeExitCode(exitCode),
 				StartedAt:   containerStatus.State.Running.StartedAt,
 				FinishedAt:  metav1.Now(), // fixme: get it from the file's ctime
-				ContainerID: jobID,
+				ContainerID: containerStatus.ContainerID,
 			}
 
 			containerStatus.LastTerminationState = containerStatus.State
@@ -288,7 +372,8 @@ func readStringFromFile(filepath string) (string, bool) {
 		return "", false
 	}
 
-	return string(out), true
+	// filter any new line on file
+	return strings.TrimSuffix(string(out), "\n"), true
 }
 
 func readIntFromFile(filepath string) (int, bool) {

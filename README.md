@@ -34,14 +34,16 @@ You can find all relative information
 in [Documentation](https://github.com/CARV-ICS-FORTH/KNoC/blob/master/doc/README.md)
 
 
-## Open tunnel to target infrastructure
+
+# Build
+
+## Open tunnel to target infrastructure (jedi1)
 ```shell
 ssh -L 0.0.0.0:30002:192.168.1.31:22 thegates
 
-192.168.1.31 is the IP of the head/login node.
-
-scp -P 7777 /tmp/hpk.sif localhost:~/
-```
+## From the project level,
+>> CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -race -a -o hpk ./cmd/virtual-kubelet
+>> scp -P 7777 ./hpk localhost:~
 
 
 
@@ -77,3 +79,7 @@ apptainer pull docker://godlovedc/lolcow
 
 apptainer shell --net --network=flannel --fakeroot --bind /bin,/etc,/home,/lib,/lib32,/lib64,/libx32,/opt,/proc,/root,/sbin,/run,/sys,/usr,/var --compat  docker://icsforth/scratch:latest
 
+
+# Forward DNS to remote Kubernetes (e.g, running on 139.91.92.82) for dev purposes
+sudo socat -dd udp4-listen:53,reuseaddr,fork,bind=139.91.92.82 UDP:10.1.128.55:53
+nslookup argo-server.default.svc.cluster.local 139.91.92.82

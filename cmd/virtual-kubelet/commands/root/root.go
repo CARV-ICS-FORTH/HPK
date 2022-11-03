@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/carv-ics-forth/hpk/cmd/virtual-kubelet/commands"
+	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/pkg/resourcemanager"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
@@ -132,12 +133,36 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	scmInformerFactory.Start(ctx.Done())
 
 	/*---------------------------------------------------
+	 * Discover Kubernetes DNS server
+	 *---------------------------------------------------*/
+	log.Info("Discover Kubernetes DNS server")
+
+	dnsEndpoint, err := client.CoreV1().Endpoints("kube-system").Get(ctx, "kube-dns", metav1.GetOptions{})
+	if err != nil {
+		return errors.Wrapf(err, "unable to discover dns server")
+	}
+
+	if len(dnsEndpoint.Subsets) == 0 {
+		return errors.Wrapf(err, "empty dns subsets")
+	}
+
+	if len(dnsEndpoint.Subsets[0].Addresses) == 0 {
+		return errors.Wrapf(err, "empty dns addresses")
+	}
+
+	dnsIP := dnsEndpoint.Subsets[0].Addresses[0]
+
+	log.Info("DNSServer Discovered", "ip", dnsIP)
+
+	/*---------------------------------------------------
 	 * Register the Provisioner of Virtual Nodes
 	 *---------------------------------------------------*/
 	log.Info("Register the Provisioner of Virtual Nodes")
 
+	compute.ContainerRegistry = c.ContainerRegistry
+	compute.KubeDNSIPAddress = dnsIP.IP
+
 	newProvider, err := provider.NewProvider(provider.InitConfig{
-		ConfigPath:      c.ProviderConfigPath,
 		NodeName:        c.NodeName,
 		InternalIP:      envOr("VKUBELET_POD_IP", "127.0.0.1"),
 		DaemonPort:      c.ListenPort,

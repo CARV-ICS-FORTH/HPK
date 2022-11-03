@@ -22,15 +22,113 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/carv-ics-forth/hpk/api"
 	"github.com/carv-ics-forth/hpk/pkg/process"
 	"github.com/fsnotify/fsnotify"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 var DefaultLogger = zap.New(zap.UseDevMode(true))
+
+/************************************************************
+
+			Set Shared Paths for Slurm runtime
+
+************************************************************/
+
+/*
++-----+---+--------------------------+
+| rwx | 7 | Read, write and execute  |
+| rw- | 6 | Read, write              |
+| r-x | 5 | Read, and execute        |
+| r-- | 4 | Read,                    |
+| -wx | 3 | Write and execute        |
+| -w- | 2 | Write                    |
+| --x | 1 | Execute                  |
+| --- | 0 | no permissions           |
++------------------------------------+
+
++------------+------+-------+
+| Permission | Octal| Field |
++------------+------+-------+
+| rwx------  | 0700 | User  |
+| ---rwx---  | 0070 | Group |
+| ------rwx  | 0007 | Other |
++------------+------+-------+
+*/
+
+const (
+	PodGlobalDirectoryPermissions = 0o777
+	PodSpecJsonFilePermissions    = 0o600
+	ContainerJobPermissions       = 0o777
+)
+
+const (
+	RuntimeDir = ".hpk"
+
+	PodIPExtension   = ".ip"
+	PodJSONExtension = ".crd"
+
+	ContainerExitCodeExtension = ".exitCode"
+	ContainerJobIdExtension    = ".jid"
+)
+
+// PodRuntimeDir .hpk/namespace/podName.
+func PodRuntimeDir(podRef client.ObjectKey) string {
+	return filepath.Join(RuntimeDir, podRef.Namespace, podRef.Name)
+}
+
+// PodIPFilepath .hpk/namespace/podName/pod.ip
+func PodIPFilepath(podRef client.ObjectKey) string {
+	return filepath.Join(PodRuntimeDir(podRef), PodIPExtension)
+}
+
+// PodJSONFilepath .hpk/namespace/podName/podspec.json.
+func PodJSONFilepath(podRef client.ObjectKey) string {
+	return filepath.Join(PodRuntimeDir(podRef), PodJSONExtension)
+}
+
+// PodMountpaths .hpk/namespace/podName/mountName:mountPath
+func PodMountpaths(podRef client.ObjectKey, mount corev1.VolumeMount) string {
+	return filepath.Join(PodRuntimeDir(podRef), mount.Name+":"+mount.MountPath)
+}
+
+// PodScriptsDir .hpk/namespace/podName/.sbatch
+func PodScriptsDir(podRef client.ObjectKey) string {
+	return filepath.Join(PodRuntimeDir(podRef), ".scripts")
+}
+
+// ContainerStdoutFilepath .hpk/namespace/podName/containerName.{stdout,stderr}.
+func ContainerStdoutFilepath(podRef client.ObjectKey, containerName string) string {
+	return filepath.Join(PodRuntimeDir(podRef), containerName+".stdout")
+}
+
+// ContainerStderrFilepath .hpk/namespace/podName/containerName.{stdout,stderr}.
+func ContainerStderrFilepath(podRef client.ObjectKey, containerName string) string {
+	return filepath.Join(PodRuntimeDir(podRef), containerName+".stderr")
+}
+
+// ContainerJobIDFilepath .hpk/namespace/podName/containerName.jid.
+func ContainerJobIDFilepath(podRef client.ObjectKey, containerName string) string {
+	return filepath.Join(PodRuntimeDir(podRef), containerName+ContainerJobIdExtension)
+}
+
+// ContainerExitCodeFilepath .hpk/namespace/podName/containerName.exitCode.
+func ContainerExitCodeFilepath(podRef client.ObjectKey, containerName string) string {
+	return filepath.Join(PodRuntimeDir(podRef), containerName+ContainerExitCodeExtension)
+}
+
+func createSubDirectory(parent, name string) (string, error) {
+	fullPath := filepath.Join(parent, name)
+
+	if err := os.MkdirAll(fullPath, PodGlobalDirectoryPermissions); err != nil {
+		return fullPath, errors.Wrapf(err, "cannot create dir '%s'", fullPath)
+	}
+
+	return fullPath, nil
+}
 
 /************************************************************
 
@@ -190,30 +288,39 @@ func (d *FSEventDispatcher) Run(ctx context.Context) {
 						dir, file := filepath.Split(event.Name)
 
 						fields := strings.Split(dir, "/")
-						podKey := api.ObjectKey{
+
+						podKey := client.ObjectKey{
 							Namespace: fields[1],
 							Name:      fields[2],
 						}
 
 						logger := DefaultLogger.WithValues("pod", podKey)
 
+						/*---------------------------------------------------
+						 * Declare events that warrant Pod reconciliation
+						 *---------------------------------------------------*/
 						switch filepath.Ext(file) {
-						case api.JobIdExtension: /* <---- Slurm Job Creation / Pod Scheduling */
-							logger.Info("SLURM --> Event: Job Started", "file", file)
+						case PodIPExtension:
+							/*-- Sbatch Started --*/
+							logger.Info("SLURM --> New Pod IP", "path", file)
 
-							if err := renewPodStatus(podKey); err != nil {
-								logger.Error(err, "failed to handle job creation event")
-							}
+						case ContainerJobIdExtension:
+							/*-- Container Started --*/
+							logger.Info("SLURM --> New Job ID", "path", file)
 
-						case api.ExitCodeExtension: /*-- Slurm Job Completion / Pod Termination --*/
-							logger.Info("SLURM --> Event: Job Completed", "file", file)
-
-							if err := renewPodStatus(podKey); err != nil {
-								logger.Error(err, "failed to handle job completion event")
-							}
+						case ContainerExitCodeExtension:
+							/*-- Container Terminated --*/
+							logger.Info("SLURM --> New Exit Code", "path", file)
 
 						default:
+							/*-- Anything else is ignored --*/
 							logger.V(7).Info("Ignore fsnotify event", "op", "write", "file", file)
+
+							continue
+						}
+
+						if err := reconcilePodStatus(podKey); err != nil {
+							logger.Error(err, "failed to reconcile pod status")
 						}
 					}
 				}
@@ -223,7 +330,7 @@ func (d *FSEventDispatcher) Run(ctx context.Context) {
 	}
 }
 
-func renewPodStatus(podKey api.ObjectKey) error {
+func reconcilePodStatus(podKey client.ObjectKey) error {
 	/*-- Load Pod from reference --*/
 	pod, err := GetPod(podKey)
 	if err != nil {
@@ -241,60 +348,4 @@ func renewPodStatus(podKey api.ObjectKey) error {
 	}
 
 	return nil
-}
-
-/************************************************************
-
-			Set Shared Paths for Slurm runtime
-
-************************************************************/
-
-// RuntimeDir .hpk/namespace/podName.
-func RuntimeDir(podRef api.ObjectKey) string {
-	return filepath.Join(api.RuntimeDir, podRef.Namespace, podRef.Name)
-}
-
-// MountPaths .hpk/namespace/podName/mountName:mountPath
-func MountPaths(podRef api.ObjectKey, mount corev1.VolumeMount) string {
-	return filepath.Join(RuntimeDir(podRef), mount.Name+":"+mount.MountPath)
-}
-
-// SBatchDirectory .hpk/namespace/podName/.sbatch
-func SBatchDirectory(podRef api.ObjectKey) string {
-	return filepath.Join(RuntimeDir(podRef), ".sbatch")
-}
-
-// SBatchFilePath .hpk/namespace/podName/.sbatch/containerName.sh.
-func SBatchFilePath(podRef api.ObjectKey, containerName string) string {
-	return filepath.Join(SBatchDirectory(podRef), containerName+".sh")
-}
-
-// StdLogsPath .hpk/namespace/podName/containerName.{stdout,stderr}.
-func StdLogsPath(podRef api.ObjectKey, containerName string) string {
-	return filepath.Join(RuntimeDir(podRef), containerName)
-}
-
-// ExitCodeFilePath .hpk/namespace/podName/containerName.exitCode.
-func ExitCodeFilePath(podRef api.ObjectKey, containerName string) string {
-	return filepath.Join(RuntimeDir(podRef), containerName+".exitCode")
-}
-
-// JobIDFilePath .hpk/namespace/podName/containerName.jid.
-func JobIDFilePath(podRef api.ObjectKey, containerName string) string {
-	return filepath.Join(RuntimeDir(podRef), containerName+".jid")
-}
-
-// PodSpecFilePath .hpk/namespace/podName/podspec.json.
-func PodSpecFilePath(podRef api.ObjectKey) string {
-	return filepath.Join(RuntimeDir(podRef), "podspec.json")
-}
-
-func createSubDirectory(parent, name string) (string, error) {
-	fullPath := filepath.Join(parent, name)
-
-	if err := os.MkdirAll(fullPath, api.PodGlobalDirectoryPermissions); err != nil {
-		return fullPath, errors.Wrapf(err, "cannot create dir '%s'", fullPath)
-	}
-
-	return fullPath, nil
 }

@@ -18,7 +18,6 @@ import (
 	"context"
 	"io"
 
-	"github.com/carv-ics-forth/hpk/api"
 	"github.com/carv-ics-forth/hpk/compute/slurm"
 	"github.com/carv-ics-forth/hpk/pkg/resourcemanager"
 	"github.com/go-logr/logr"
@@ -27,6 +26,7 @@ import (
 	vkapi "github.com/virtual-kubelet/virtual-kubelet/node/api"
 	"github.com/virtual-kubelet/virtual-kubelet/node/api/statsv1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
@@ -39,7 +39,6 @@ type Provider struct {
 
 // InitConfig is the config passed to initialize a registered provider.
 type InitConfig struct {
-	ConfigPath      string
 	NodeName        string
 	InternalIP      string
 	DaemonPort      int32
@@ -64,7 +63,7 @@ func NewProvider(config InitConfig) (*Provider, error) {
 
 // CreatePod accepts a Pod definition and stores it in memory.
 func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
-	podKey := api.ObjectKeyFromObject(pod)
+	podKey := client.ObjectKeyFromObject(pod)
 	logger := p.Logger.WithValues("obj", podKey)
 
 	/*---------------------------------------------------
@@ -77,7 +76,7 @@ func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	}()
 
 	/*---------------------------------------------------
-	 * Assign Virtual Kubelet podIP as the node's internalIP
+	 * Match the IPs between host and pod.
 	 *---------------------------------------------------*/
 
 	/*
@@ -85,12 +84,12 @@ func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 		will be handled by the Virtual Kubelet
 		https://ritazh.com/understanding-kubectl-logs-with-virtual-kubelet-a135e83ae0ee
 	*/
-	pod.Status.PodIP = p.InitConfig.InternalIP
+	pod.Status.HostIP = p.InitConfig.InternalIP
 
 	/*---------------------------------------------------
 	 * Pass the pod for creation to the backend
 	 *---------------------------------------------------*/
-	if err := slurm.CreatePod(pod, p.ResourceManager, api.DefaultContainerRegistry); err != nil {
+	if err := slurm.CreatePod(pod, p.ResourceManager); err != nil {
 		return errors.Wrapf(err, "unable to create pod")
 	}
 
@@ -99,7 +98,7 @@ func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 
 // UpdatePod accepts a Pod definition and updates its reference.
 func (p *Provider) UpdatePod(ctx context.Context, newPod *corev1.Pod) error {
-	podKey := api.ObjectKeyFromObject(newPod)
+	podKey := client.ObjectKeyFromObject(newPod)
 	logger := p.Logger.WithValues("obj", podKey)
 
 	/*---------------------------------------------------
@@ -154,7 +153,7 @@ func (p *Provider) UpdatePod(ctx context.Context, newPod *corev1.Pod) error {
 
 // DeletePod deletes the specified pod out of memory.
 func (p *Provider) DeletePod(ctx context.Context, pod *corev1.Pod) error {
-	podKey := api.ObjectKeyFromObject(pod)
+	podKey := client.ObjectKeyFromObject(pod)
 	logger := p.Logger.WithValues("obj", podKey)
 
 	/*---------------------------------------------------
@@ -179,7 +178,7 @@ func (p *Provider) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
 
 // GetPod returns a pod by name that is stored in memory.
 func (p *Provider) GetPod(ctx context.Context, namespace, name string) (*corev1.Pod, error) {
-	podKey := api.ObjectKey{Namespace: namespace, Name: name}
+	podKey := client.ObjectKey{Namespace: namespace, Name: name}
 	logger := p.Logger.WithValues("obj", podKey)
 
 	/*---------------------------------------------------
@@ -194,14 +193,14 @@ func (p *Provider) GetPod(ctx context.Context, namespace, name string) (*corev1.
 // GetPodStatus returns the status of a pod by name that is "running".
 // returns nil if a pod by that name is not found.
 func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*corev1.PodStatus, error) {
-	podKey := api.ObjectKey{Namespace: namespace, Name: name}
+	podKey := client.ObjectKey{Namespace: namespace, Name: name}
 	logger := p.Logger.WithValues("obj", podKey)
 
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
 	logger.Info("-> GetPodStatus")
-	
+
 	pod, err := slurm.GetPod(podKey)
 	if err != nil {
 		/*
@@ -225,7 +224,7 @@ func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*c
 
 // GetContainerLogs retrieves the logs of a container by name from the provider.
 func (p *Provider) GetContainerLogs(ctx context.Context, namespace, podName, containerName string, opts vkapi.ContainerLogOpts) (io.ReadCloser, error) {
-	podKey := api.ObjectKey{Namespace: namespace, Name: podName}
+	podKey := client.ObjectKey{Namespace: namespace, Name: podName}
 	logger := p.Logger.WithValues("obj", podKey)
 
 	/*---------------------------------------------------
@@ -240,7 +239,7 @@ func (p *Provider) GetContainerLogs(ctx context.Context, namespace, podName, con
 // RunInContainer executes a command in a container in the pod, copying data
 // between in/out/err and the container's stdin/stdout/stderr.
 func (p *Provider) RunInContainer(ctx context.Context, namespace, podName, containerName string, cmd []string, attach vkapi.AttachIO) error {
-	podKey := api.ObjectKey{Namespace: namespace, Name: podName}
+	podKey := client.ObjectKey{Namespace: namespace, Name: podName}
 	logger := p.Logger.WithValues("obj", podKey)
 
 	/*---------------------------------------------------

@@ -34,42 +34,39 @@ func TestApptainer(t *testing.T) {
 			name: "noenv",
 			fields: slurm.ApptainerTemplateFields{
 				Image:   "docker://alpine:3.7",
-				Command: []string{"echo", "pizza"},
-				Args:    []string{"hello", "world"},
+				Command: []string{"sh", "-c"},
+				Args:    []string{"echo", "hello world"},
 			},
-			expected: `
-apptainer exec \
-docker://alpine:3.7 echo pizza hello world
+			expected: slurm.ApptainerPreamble + `
+docker://alpine:3.7 "sh" "-c" "echo" "hello world"
 `,
 		},
 		{
 			name: "env",
 			fields: slurm.ApptainerTemplateFields{
 				Image:   "docker://alpine:3.7",
-				Command: []string{"echo", "pizza"},
-				Args:    []string{"hello", "world"},
+				Command: []string{"sh", "-c"},
+				Args:    []string{"echo", "hello world"},
 				Env:     []string{"VAR=val1", "VAR2=val2"},
 			},
-			expected: `
-apptainer exec \
+			expected: slurm.ApptainerPreamble + `
 --env VAR=val1,VAR2=val2 \
-docker://alpine:3.7 echo pizza hello world
+docker://alpine:3.7 "sh" "-c" "echo" "hello world"
 `,
 		},
 		{
 			name: "bind",
 			fields: slurm.ApptainerTemplateFields{
 				Image:   "docker://alpine:3.7",
-				Command: []string{"echo", "pizza"},
-				Args:    []string{"hello", "world"},
+				Command: []string{"sh", "-c"},
+				Args:    []string{"echo", "hello world"},
 				Env:     []string{"VAR=val1", "VAR2=val2"},
 				Bind:    []string{"/hostpath1:/containerpath1", "/hostpath2", "/hostpath3:/containerpath3"},
 			},
-			expected: `
-apptainer exec \
+			expected: slurm.ApptainerPreamble + `
 --env VAR=val1,VAR2=val2 \
 --bind /hostpath1:/containerpath1,/hostpath2,/hostpath3:/containerpath3 \
-docker://alpine:3.7 echo pizza hello world
+docker://alpine:3.7 "sh" "-c" "echo" "hello world"
 `,
 		},
 	}
