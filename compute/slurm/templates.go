@@ -26,10 +26,12 @@ import (
 ************************************************************/
 
 const (
-	ApptainerPreamble = "apptainer exec  --unsquash --compat --cleanenv --pid --no-mount tmp,home \\"
+	ApptainerWithoutCommand = "apptainer run  --unsquash --compat --cleanenv --pid --no-mount tmp,home \\"
+	ApptainerWithCommand    = "apptainer exec  --unsquash --compat --cleanenv --pid --no-mount tmp,home \\"
 )
 
-var ApptainerTemplate = ApptainerPreamble + ` 
+var ApptainerTemplate = ` 
+{{.Apptainer}}
 {{- if .Env}}
 --env {{ range $index, $variable := .Env}}{{if $index}},{{end}}{{$variable}}{{end}} \
 {{- end}}
@@ -46,6 +48,8 @@ type ApptainerTemplateFields struct {
 	/*--
 		Mandatory Fields
 	--*/
+	Apptainer string // Instruction on how to run apptainer
+
 	Image   string // format: REGISTRY://image:tag
 	Command []string
 	Args    []string // space separated args
@@ -151,7 +155,7 @@ cleanup() {
 }
 
 echo "Initialize the Pause Environment"
-apptainer exec --net --fakeroot --bind /bin,/etc/apptainer,/lib,/lib64,/usr,/var \
+apptainer exec --net --fakeroot --bind /bin,/etc/apptainer,/var/lib/apptainer,/lib,/lib64,/usr \
 docker://alpine	{{.ScriptsDirectory}}/pause.sh
 `
 

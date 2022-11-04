@@ -294,10 +294,17 @@ func (h *podHandler) submitContainerCreationRequest(container *corev1.Container,
 	 *---------------------------------------------------*/
 	h.logger.Info(" * Set flags and args for Apptainer command")
 
+	/*-- choose whether to run apptainer with "run" or with "exec" --*/
+	apptainer := ApptainerWithoutCommand
+	if container.Command != nil {
+		apptainer = ApptainerWithCommand
+	}
+
 	evaluationFields := ApptainerTemplateFields{
-		Image:   compute.ContainerRegistry + container.Image,
-		Command: container.Command,
-		Args:    container.Args,
+		Apptainer: apptainer,
+		Image:     compute.ContainerRegistry + container.Image,
+		Command:   container.Command,
+		Args:      container.Args,
 		Env: func() []string {
 			envArgs := make([]string, 0, len(container.Env))
 
