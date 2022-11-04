@@ -31,7 +31,6 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/json"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -122,65 +121,70 @@ func SavePod(pod *corev1.Pod) error {
 
 func DeletePod(pod *corev1.Pod) error {
 	podKey := client.ObjectKeyFromObject(pod)
-	logger := DefaultLogger.WithValues("pod", podKey)
+	// logger := DefaultLogger.WithValues("pod", podKey)
 
 	/*---------------------------------------------------
 	 * Cancel Slurm Jobs
 	 *---------------------------------------------------*/
 	/*
-		DeletePod takes a Kubernetes Pod and deletes it from the provider.
-		TODO: Once a pod is deleted, the provider is expected
-		to call the NotifyPods callback with a terminal pod status
-		where all the containers are in a terminal state, as well as the pod.
-		DeletePod may be called multiple times for the same pod
+			DeletePod takes a Kubernetes Pod and deletes it from the provider.
+			TODO: Once a pod is deleted, the provider is expected
+			to call the NotifyPods callback with a terminal pod status
+			where all the containers are in a terminal state, as well as the pod.
+			DeletePod may be called multiple times for the same pod
+
+		{
+			// Fail this condition because containers are no longer individual Slurm jobs,
+			// but they are processes within a pod/job.
+			// TODO: find a way to use the slurm identifier to cancel the job
+
+			var merr *multierror.Error
+
+			for i, container := range pod.Status.InitContainerStatuses {
+				/*-- Cancel Container Job --* /
+				if container.ContainerID != "" {
+					/*-- Extract container_id from raw format '<type>://<container_id>'. --* /
+					containerID := strings.Split(container.ContainerID, containerIDType)[1]
+
+					_, err := CancelJob(containerID)
+					if err != nil {
+						merr = multierror.Append(merr, errors.Wrapf(err, "failed to cancel job '%s'", container.ContainerID))
+					}
+				}
+
+				/*-- Mark the Container as Terminated --* /
+				pod.Status.InitContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
+					Reason:     "PodIsDeleted",
+					Message:    "Pod is being deleted",
+					FinishedAt: metav1.Now(),
+				}
+			}
+
+			for i, container := range pod.Status.ContainerStatuses {
+				/*-- Cancel Container Job --* /
+				if container.ContainerID != "" {
+					/*-- Extract container_id from raw format '<type>://<container_id>'. --* /
+					containerID := strings.Split(container.ContainerID, containerIDType)[1]
+
+					_, err := CancelJob(containerID)
+					if err != nil {
+						merr = multierror.Append(merr, errors.Wrapf(err, "failed to cancel job '%s'", container.ContainerID))
+					}
+				}
+
+				/*-- Mark the Container as Terminated --* /
+				pod.Status.ContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
+					Reason:     "PodIsDeleted",
+					Message:    "Pod is being deleted",
+					FinishedAt: metav1.Now(),
+				}
+			}
+
+			if merr.ErrorOrNil() != nil {
+				logger.Error(merr, "Pod termination error")
+			}
+		}
 	*/
-	{
-		var merr *multierror.Error
-
-		for i, container := range pod.Status.InitContainerStatuses {
-			/*-- Cancel Container Job --*/
-			if container.ContainerID != "" {
-				/*-- Extract container_id from raw format '<type>://<container_id>'. --*/
-				containerID := strings.Split(container.ContainerID, containerIDType)[1]
-
-				_, err := CancelJob(containerID)
-				if err != nil {
-					merr = multierror.Append(merr, errors.Wrapf(err, "failed to cancel job '%s'", container.ContainerID))
-				}
-			}
-
-			/*-- Mark the Container as Terminated --*/
-			pod.Status.InitContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
-				Reason:     "PodIsDeleted",
-				Message:    "Pod is being deleted",
-				FinishedAt: metav1.Now(),
-			}
-		}
-
-		for i, container := range pod.Status.ContainerStatuses {
-			/*-- Cancel Container Job --*/
-			if container.ContainerID != "" {
-				/*-- Extract container_id from raw format '<type>://<container_id>'. --*/
-				containerID := strings.Split(container.ContainerID, containerIDType)[1]
-
-				_, err := CancelJob(containerID)
-				if err != nil {
-					merr = multierror.Append(merr, errors.Wrapf(err, "failed to cancel job '%s'", container.ContainerID))
-				}
-			}
-
-			/*-- Mark the Container as Terminated --*/
-			pod.Status.ContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
-				Reason:     "PodIsDeleted",
-				Message:    "Pod is being deleted",
-				FinishedAt: metav1.Now(),
-			}
-		}
-
-		if merr.ErrorOrNil() != nil {
-			logger.Error(merr, "Pod termination error")
-		}
-	}
 
 	/*---------------------------------------------------
 	 * Remove Pod directory
@@ -367,12 +371,6 @@ func (h *podHandler) buildApptainerCommands(container *corev1.Container) (Contai
 	 * Prepare fields for Apptainer Template
 	 *---------------------------------------------------*/
 	h.logger.Info(" * Set flags and args")
-
-	/*-- choose whether to run apptainer with "run" or with "exec" --*/
-	apptainer := ApptainerWithoutCommand
-	if container.Command != nil {
-		apptainer = ApptainerWithCommand
-	}
 
 	/*-- choose whether to run apptainer with "run" or with "exec" --*/
 	apptainer := ApptainerWithoutCommand
