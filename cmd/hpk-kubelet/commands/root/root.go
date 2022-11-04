@@ -21,7 +21,7 @@ import (
 	"path"
 	"time"
 
-	"github.com/carv-ics-forth/hpk/cmd/virtual-kubelet/commands"
+	"github.com/carv-ics-forth/hpk/cmd/hpk-kubelet/commands"
 	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/pkg/resourcemanager"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"

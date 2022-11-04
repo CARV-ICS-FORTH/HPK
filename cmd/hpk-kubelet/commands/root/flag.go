@@ -59,7 +59,7 @@ type Opts struct {
 func installFlags(flags *pflag.FlagSet, c *Opts) {
 	flags.StringVar(&c.KubeNamespace, "namespace", corev1.NamespaceAll, "kubernetes namespace (default is 'all')")
 
-	flags.StringVar(&c.NodeName, "nodename", "virtual-kubelet", "kubernetes node name")
+	flags.StringVar(&c.NodeName, "nodename", "hpk-kubelet", "kubernetes node name")
 
 	flags.StringVar(&c.MetricsAddr, "metrics-addr", ":10255", "address to listen for metrics/stats requests")
 

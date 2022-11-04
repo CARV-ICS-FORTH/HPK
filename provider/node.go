@@ -44,7 +44,7 @@ func (p *Provider) CreateVirtualNode(ctx context.Context, name string, taint *co
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 			Labels: map[string]string{
-				"type":                   "virtual-kubelet",
+				"type":                   "hpk-kubelet",
 				"kubernetes.io/role":     "agent",
 				"kubernetes.io/os":       runtime.GOOS,
 				"kubernetes.io/hostname": name,

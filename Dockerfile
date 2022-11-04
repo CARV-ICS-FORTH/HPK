@@ -15,10 +15,10 @@ RUN go mod download
 COPY . .
 
 # Build release
-#RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build  -a -o /hpk ./cmd/virtual-kubelet
+#RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build  -a -o /hpk ./cmd/hpk-kubelet
 
 # Build dev
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -race -a -o /hpk ./cmd/virtual-kubelet
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -race -a -o /hpk ./cmd/hpk-kubelet
 
 
 # Super minimal image just to package the hpk binary. It does not include anything.
