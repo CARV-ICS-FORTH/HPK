@@ -155,7 +155,7 @@ cleanup() {
 }
 
 echo "Initialize the Pause Environment"
-apptainer exec --net --fakeroot --bind /bin,/etc/apptainer,/var/lib/apptainer,/lib,/lib64,/usr \
+apptainer exec --net --fakeroot --bind /bin,/etc/apptainer,/lib,/lib64,/usr,/var/lib/apptainer \
 docker://alpine	{{.ScriptsDirectory}}/pause.sh
 `
 
