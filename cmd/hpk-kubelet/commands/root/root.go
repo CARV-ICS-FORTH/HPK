@@ -15,6 +15,7 @@
 package root
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -24,11 +25,12 @@ import (
 	"github.com/carv-ics-forth/hpk/cmd/hpk-kubelet/commands"
 	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/pkg/resourcemanager"
+	"github.com/sirupsen/logrus"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	"github.com/carv-ics-forth/hpk/provider"
+	"github.com/dimiro1/banner"
 	"github.com/pkg/errors"
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/virtual-kubelet/virtual-kubelet/node"
 	corev1 "k8s.io/api/core/v1"
@@ -42,6 +44,19 @@ import (
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
+
+func logo() string {
+	buf := bytes.NewBuffer(nil)
+
+	templ := `
+{{ .AnsiColor.BrightRed }}
+{{ .Title "HPK" "" 4 }}
+{{ .AnsiColor.BrightGreen }}
+	`
+	banner.InitString(buf, true, true, templ)
+
+	return buf.String()
+}
 
 // NewCommand creates a new top-level command.
 // This command is used to start the virtual-kubelet daemon
@@ -65,16 +80,15 @@ This allows users to schedule kubernetes workloads on nodes that aren't running 
 	return cmd
 }
 
+var DefaultLogger = zap.New(zap.UseDevMode(true))
+
 func runRootCommand(ctx context.Context, c Opts) error {
-	log := zap.New(zap.UseDevMode(true)).WithValues(
-		"node", c.NodeName,
-		"watchedNamespace", c.KubeNamespace,
-	)
+	fmt.Println(logo())
 
 	/*---------------------------------------------------
 	 * Starting Kubernetes Client
 	 *---------------------------------------------------*/
-	log.Info(" Starting Kubernetes Client")
+	DefaultLogger.Info("* Starting Kubernetes Client ....")
 
 	// Config precedence
 	//
@@ -95,10 +109,16 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		return errors.Wrapf(err, "unable to start kubernetes client")
 	}
 
+	DefaultLogger.Info(" ... Done ...", "api-server", cfg.Host)
+
 	/*---------------------------------------------------
 	 * Load Kubernetes Informers
 	 *---------------------------------------------------*/
-	log.Info("Load Kubernetes Informers")
+	DefaultLogger.Info("* Starting Kubernetes Informers",
+		"namespace", c.KubeNamespace,
+		"crds", []string{
+			"secrets", "configMap", "service", "serviceAccount",
+		})
 
 	// Create a shared informer factory for Kubernetes pods in the current namespace (if specified) and scheduled to the current node.
 	podInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(
@@ -132,10 +152,12 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	podInformerFactory.Start(ctx.Done())
 	scmInformerFactory.Start(ctx.Done())
 
+	DefaultLogger.Info(" ... Done ...")
+
 	/*---------------------------------------------------
 	 * Discover Kubernetes DNS server
 	 *---------------------------------------------------*/
-	log.Info("Discover Kubernetes DNS server")
+	DefaultLogger.Info("* Discovering Kubernetes DNS Server")
 
 	dnsEndpoint, err := client.CoreV1().Endpoints("kube-system").Get(ctx, "kube-dns", metav1.GetOptions{})
 	if err != nil {
@@ -152,12 +174,12 @@ func runRootCommand(ctx context.Context, c Opts) error {
 
 	dnsIP := dnsEndpoint.Subsets[0].Addresses[0]
 
-	log.Info("DNSServer Discovered", "ip", dnsIP)
+	DefaultLogger.Info(" ... Done ...", "dnsIP", dnsIP)
 
 	/*---------------------------------------------------
 	 * Register the Provisioner of Virtual Nodes
 	 *---------------------------------------------------*/
-	log.Info("Register the Provisioner of Virtual Nodes")
+	DefaultLogger.Info("* Creating the Provisioner of Virtual Nodes")
 
 	compute.ContainerRegistry = c.ContainerRegistry
 	compute.KubeDNSIPAddress = dnsIP.IP
@@ -173,20 +195,30 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		return err
 	}
 
+	DefaultLogger.Info(" ... Done ...",
+		"nodeName", newProvider.NodeName,
+		"internalIP", newProvider.InternalIP,
+		"daemonPort", newProvider.DaemonPort,
+	)
+
 	/*---------------------------------------------------
 	 * Start an HTTPs server for serving metrics/logs
 	 *---------------------------------------------------*/
-	log.Info("Initialize HTTPS server")
+	DefaultLogger.Info("* Initializing HTTP(s) server")
 	{
-		cancelHTTP, err := setupHTTPServer(ctx, newProvider, &apiServerConfig{
+		serverConfig := &apiServerConfig{
 			CertPath:    os.Getenv("APISERVER_CERT_LOCATION"),
 			KeyPath:     os.Getenv("APISERVER_KEY_LOCATION"),
 			Addr:        fmt.Sprintf(":%d", c.ListenPort),
 			MetricsAddr: "",
-		})
+		}
+
+		cancelHTTP, err := setupHTTPServer(ctx, newProvider, serverConfig)
 		if err != nil {
 			return errors.Wrapf(err, "unable to start http server")
 		}
+
+		DefaultLogger.Info(" ... Done ...", "addr", serverConfig.Addr)
 
 		defer cancelHTTP()
 	}
@@ -194,7 +226,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	/*---------------------------------------------------
 	 * Register a new Virtual Node
 	 *---------------------------------------------------*/
-	log.Info("Register a new Virtual Node")
+	DefaultLogger.Info("* Creating a new Virtual Node")
 
 	var taint *corev1.Taint
 	if !c.DisableTaint {
@@ -204,7 +236,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		}
 	}
 
-	pNode := newProvider.CreateVirtualNode(ctx, c.NodeName, taint)
+	virtualNode := newProvider.CreateVirtualNode(ctx, c.NodeName, taint)
 
 	// activate fs notifier
 	nodeControllerOpts := []node.NodeControllerOpt{
@@ -213,15 +245,15 @@ func runRootCommand(ctx context.Context, c Opts) error {
 				return err
 			}
 
-			log.V(0).Info("node not found")
-			newNode := pNode.DeepCopy()
+			DefaultLogger.V(0).Info("node not found")
+			newNode := virtualNode.DeepCopy()
 			newNode.ResourceVersion = ""
 
 			if _, err := client.CoreV1().Nodes().Create(ctx, newNode, metav1.CreateOptions{}); err != nil {
 				return err
 			}
 
-			log.V(0).Info("created new node")
+			DefaultLogger.V(0).Info("created new node")
 			return nil
 		}),
 	}
@@ -233,7 +265,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 
 	nodeController, err := node.NewNodeController(
 		node.NaiveNodeProvider{},
-		pNode,
+		virtualNode,
 		client.CoreV1().Nodes(),
 		nodeControllerOpts...,
 	)
@@ -245,15 +277,19 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	eb.StartLogging(logrus.Infof)
 	eb.StartRecordingToSink(&corev1client.EventSinkImpl{Interface: client.CoreV1().Events(c.KubeNamespace)})
 
+	DefaultLogger.Info(" ... Done ...",
+		"nodeID", virtualNode.Spec.ProviderID,
+		"taints", virtualNode.Spec.Taints)
+
 	/*---------------------------------------------------
 	 * Start the controller for the Virtual Node
 	 *---------------------------------------------------*/
-	log.Info("Start the controller for the Virtual Node")
+	DefaultLogger.Info("* Starting Virtual Node Controller")
 
 	podController, err := node.NewPodController(node.PodControllerConfig{
 		PodClient:         client.CoreV1(),
 		PodInformer:       podInformer,
-		EventRecorder:     eb.NewRecorder(scheme.Scheme, corev1.EventSource{Component: path.Join(pNode.Name, "pod-controller")}),
+		EventRecorder:     eb.NewRecorder(scheme.Scheme, corev1.EventSource{Component: path.Join(virtualNode.Name, "pod-controller")}),
 		Provider:          newProvider,
 		SecretInformer:    secretInformer,
 		ConfigMapInformer: configMapInformer,
@@ -265,14 +301,14 @@ func runRootCommand(ctx context.Context, c Opts) error {
 
 	go func() {
 		if err := podController.Run(ctx, c.PodSyncWorkers); err != nil && errors.Cause(err) != context.Canceled {
-			log.Error(err, "pod controller failed")
+			DefaultLogger.Error(err, "pod controller failed")
 			os.Exit(-1)
 		}
 	}()
 
 	if c.StartupTimeout > 0 {
 		// If there is a startup timeout, it does two things:
-		// 1. It causes the VK to shut down if we haven't gotten into an operational state in a time period
+		// 1. It causes the VirtualKubelet to shut down if we haven't gotten into an operational state in a time period
 		// 2. It prevents node advertisement from happening until we're in an operational state
 		err = waitFor(ctx, c.StartupTimeout, podController.Ready())
 		if err != nil {
@@ -288,7 +324,7 @@ func waitFor(ctx context.Context, time time.Duration, ready <-chan struct{}) err
 	defer cancel()
 
 	// Wait for the VK / PC close the ready channel, or time out and return
-	logrus.Warn("Waiting for pod controller / VK to be ready")
+	DefaultLogger.Info("Waiting for pod controller / VK to be ready")
 
 	select {
 	case <-ready:

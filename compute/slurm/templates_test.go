@@ -37,7 +37,7 @@ func TestApptainer(t *testing.T) {
 				Command: []string{"sh", "-c"},
 				Args:    []string{"echo", "hello world"},
 			},
-			expected: slurm.ApptainerPreamble + `
+			expected: slurm.ApptainerWithoutCommand + `
 docker://alpine:3.7 "sh" "-c" "echo" "hello world"
 `,
 		},
@@ -49,7 +49,7 @@ docker://alpine:3.7 "sh" "-c" "echo" "hello world"
 				Args:    []string{"echo", "hello world"},
 				Env:     []string{"VAR=val1", "VAR2=val2"},
 			},
-			expected: slurm.ApptainerPreamble + `
+			expected: slurm.ApptainerWithoutCommand + `
 --env VAR=val1,VAR2=val2 \
 docker://alpine:3.7 "sh" "-c" "echo" "hello world"
 `,
@@ -63,7 +63,7 @@ docker://alpine:3.7 "sh" "-c" "echo" "hello world"
 				Env:     []string{"VAR=val1", "VAR2=val2"},
 				Bind:    []string{"/hostpath1:/containerpath1", "/hostpath2", "/hostpath3:/containerpath3"},
 			},
-			expected: slurm.ApptainerPreamble + `
+			expected: slurm.ApptainerWithoutCommand + `
 --env VAR=val1,VAR2=val2 \
 --bind /hostpath1:/containerpath1,/hostpath2,/hostpath3:/containerpath3 \
 docker://alpine:3.7 "sh" "-c" "echo" "hello world"
