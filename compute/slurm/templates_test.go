@@ -15,12 +15,14 @@
 package slurm_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"text/template"
 
 	"github.com/carv-ics-forth/hpk/compute/slurm"
 	"github.com/pkg/errors"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // Run with: go clean -testcache && go test ./ -v  -run TestApptainer
@@ -33,41 +35,41 @@ func TestApptainer(t *testing.T) {
 		{
 			name: "noenv",
 			fields: slurm.ApptainerTemplateFields{
-				Image:   "docker://alpine:3.7",
-				Command: []string{"sh", "-c"},
-				Args:    []string{"echo", "hello world"},
+				Apptainer: slurm.ApptainerWithCommand,
+				Image:     "docker://alpine:3.7",
+				Command:   []string{"sh", "-c"},
+				Args:      []string{"echo", "hello world"},
 			},
-			expected: slurm.ApptainerWithoutCommand + `
-docker://alpine:3.7 "sh" "-c" "echo" "hello world"
-`,
+			expected: slurm.ApptainerWithCommand + `
+docker://alpine:3.7 "sh" "-c" "echo" "hello world"`,
 		},
 		{
 			name: "env",
 			fields: slurm.ApptainerTemplateFields{
-				Image:   "docker://alpine:3.7",
-				Command: []string{"sh", "-c"},
-				Args:    []string{"echo", "hello world"},
-				Env:     []string{"VAR=val1", "VAR2=val2"},
+				Apptainer: slurm.ApptainerWithCommand,
+				Image:     "docker://alpine:3.7",
+				Command:   []string{"sh", "-c"},
+				Args:      []string{"echo", "hello world"},
+				Env:       []string{"VAR=val1", "VAR2=val2"},
 			},
-			expected: slurm.ApptainerWithoutCommand + `
+			expected: slurm.ApptainerWithCommand + `
 --env VAR=val1,VAR2=val2 \
-docker://alpine:3.7 "sh" "-c" "echo" "hello world"
-`,
+docker://alpine:3.7 "sh" "-c" "echo" "hello world"`,
 		},
 		{
 			name: "bind",
 			fields: slurm.ApptainerTemplateFields{
-				Image:   "docker://alpine:3.7",
-				Command: []string{"sh", "-c"},
-				Args:    []string{"echo", "hello world"},
-				Env:     []string{"VAR=val1", "VAR2=val2"},
-				Bind:    []string{"/hostpath1:/containerpath1", "/hostpath2", "/hostpath3:/containerpath3"},
+				Apptainer: slurm.ApptainerWithCommand,
+				Image:     "docker://alpine:3.7",
+				Command:   []string{"sh", "-c"},
+				Args:      []string{"echo", "hello world"},
+				Env:       []string{"VAR=val1", "VAR2=val2"},
+				Bind:      []string{"/hostpath1:/containerpath1", "/hostpath2", "/hostpath3:/containerpath3"},
 			},
-			expected: slurm.ApptainerWithoutCommand + `
+			expected: slurm.ApptainerWithCommand + `
 --env VAR=val1,VAR2=val2 \
 --bind /hostpath1:/containerpath1,/hostpath2,/hostpath3:/containerpath3 \
-docker://alpine:3.7 "sh" "-c" "echo" "hello world"
-`,
+docker://alpine:3.7 "sh" "-c" "echo" "hello world"`,
 		},
 	}
 
@@ -88,7 +90,80 @@ docker://alpine:3.7 "sh" "-c" "echo" "hello world"
 		expected := tt.expected         // strings.TrimSpace(tt.expected)
 
 		if strings.Compare(expected, actual) != 0 {
-			t.Fatalf("Expected '%s' but got '%s'", expected, actual)
+			t.Fatalf("Test[%s], Expected :\n'%s' but got: \n'%s'", tt.name, expected, actual)
 		}
+	}
+}
+
+// Run with: go clean -testcache && go test ./ -v  -run TestSBatch
+func TestSBatch(t *testing.T) {
+	tests := []struct {
+		name   string
+		fields slurm.SBatchTemplateFields
+	}{
+		{
+			name: "noenv",
+			fields: slurm.SBatchTemplateFields{
+				KubeDNSService: "0.0.0.0",
+				Pod: types.NamespacedName{
+					Namespace: "dummy",
+					Name:      "dummier",
+				},
+				PodIPPath:        ".podIP",
+				ScriptsDirectory: ".scripts",
+				Options:          slurm.SbatchOptions{},
+				InitContainers: func() (containers []slurm.Container) {
+					containerName := []string{"a", "b", "c", "d"}
+					delays := []string{"5", "10", "8", "5"}
+
+					for i, jobName := range containerName {
+						containers = append(containers, slurm.Container{
+							Command:      "sleep " + delays[i] + " && echo " + jobName,
+							JobIDPath:    jobName + ".jid",
+							StdoutPath:   jobName + ".stdout",
+							StderrPath:   jobName + ".stderr",
+							ExitCodePath: jobName + ".exitCode",
+						})
+					}
+
+					return containers
+				}(),
+
+				Containers: func() (containers []slurm.Container) {
+					containerName := []string{"server", "client"}
+					args := []string{"-s", "-c iperf-server \n \n"}
+
+					for i, jobName := range containerName {
+						containers = append(containers, slurm.Container{
+							Command:      "# Some random comment " + "\n" + "sleep 10; " + args[i],
+							JobIDPath:    jobName + ".jid",
+							StdoutPath:   jobName + ".stdout",
+							StderrPath:   jobName + ".stderr",
+							ExitCodePath: jobName + ".exitCode",
+						})
+					}
+
+					return containers
+				}(),
+			},
+		},
+	}
+
+	submitTpl, err := template.New("test").Option("missingkey=error").Parse(slurm.SBatchTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tt := range tests {
+		var sbatchScript strings.Builder
+
+		if err := submitTpl.Execute(&sbatchScript, tt.fields); err != nil {
+			/*-- since both the template and fields are internal to the code, the evaluation should always succeed	--*/
+			panic(errors.Wrapf(err, "failed to evaluate apptainer cmd"))
+		}
+
+		actual := sbatchScript.String() // strings.TrimSpace(sbatchScript.String())
+
+		fmt.Println(actual)
 	}
 }

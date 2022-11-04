@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	slurmType = "slurm://"
+	containerIDType = "pid://"
 )
 
 func PodWithExplicitlyUnsupportedFields(pod *corev1.Pod) bool {
@@ -269,25 +269,32 @@ func LoadContainerStatuses(pod *corev1.Pod) error {
 
 		/*-- StateWaiting: no jobid, means that the job is still in the Slurm queue --*/
 		if !jobIDExists {
-			containerStatus.State.Waiting = &corev1.ContainerStateWaiting{
-				Reason:  "InSlurmQueue",
-				Message: "Job waiting in the Slurm queue",
+			containerStatus.State = corev1.ContainerState{
+				Waiting: &corev1.ContainerStateWaiting{
+					Reason:  "InSlurmQueue",
+					Message: "Job waiting in the Slurm queue",
+				},
+				Running:    nil,
+				Terminated: nil,
 			}
 		}
 
 		/*-- StateRunning: existing jobid, means that the job is running --*/
 		if jobIDExists && containerStatus.State.Running == nil {
-			containerStatus.State.Running = &corev1.ContainerStateRunning{
-				StartedAt: metav1.Now(), // fixme: we should get this info from the file's ctime
-			}
-
-			containerStatus.ContainerID = slurmType + jobID
+			containerStatus.ContainerID = containerIDType + jobID
 
 			/*-- todo: since we do not support probes, make everything to look ok --*/
 			started := true
 			containerStatus.Started = &started
 			containerStatus.Ready = true
 
+			containerStatus.State = corev1.ContainerState{
+				Waiting: nil,
+				Running: &corev1.ContainerStateRunning{
+					StartedAt: metav1.Now(), // fixme: we should get this info from the file's ctime
+				},
+				Terminated: nil,
+			}
 		}
 
 		/*-- StateTerminated: existing exitcode, means that the job is complete --*/
@@ -303,14 +310,18 @@ func LoadContainerStatuses(pod *corev1.Pod) error {
 				reason = "Failed"
 			}
 
-			containerStatus.State.Terminated = &corev1.ContainerStateTerminated{
-				ExitCode:    int32(exitCode),
-				Signal:      0,
-				Reason:      reason,
-				Message:     trytoDecodeExitCode(exitCode),
-				StartedAt:   containerStatus.State.Running.StartedAt,
-				FinishedAt:  metav1.Now(), // fixme: get it from the file's ctime
-				ContainerID: containerStatus.ContainerID,
+			containerStatus.State = corev1.ContainerState{
+				Waiting: nil,
+				Running: nil,
+				Terminated: &corev1.ContainerStateTerminated{
+					ExitCode:    int32(exitCode),
+					Signal:      0,
+					Reason:      reason,
+					Message:     trytoDecodeExitCode(exitCode),
+					StartedAt:   containerStatus.State.Running.StartedAt,
+					FinishedAt:  metav1.Now(), // fixme: get it from the file's ctime
+					ContainerID: containerStatus.ContainerID,
+				},
 			}
 
 			containerStatus.LastTerminationState = containerStatus.State

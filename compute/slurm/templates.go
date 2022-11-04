@@ -15,7 +15,6 @@
 package slurm
 
 import (
-	v1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -26,12 +25,11 @@ import (
 ************************************************************/
 
 const (
-	ApptainerWithoutCommand = "apptainer run  --unsquash --compat --cleanenv --pid --no-mount tmp,home \\"
-	ApptainerWithCommand    = "apptainer exec  --unsquash --compat --cleanenv --pid --no-mount tmp,home \\"
+	ApptainerWithoutCommand = "apptainer run --unsquash --compat --cleanenv --pid --no-mount tmp,home \\"
+	ApptainerWithCommand    = "apptainer exec --unsquash --compat --cleanenv --pid --no-mount tmp,home \\"
 )
 
-var ApptainerTemplate = ` 
-{{.Apptainer}}
+var ApptainerTemplate = `{{.Apptainer}}
 {{- if .Env}}
 --env {{ range $index, $variable := .Env}}{{if $index}},{{end}}{{$variable}}{{end}} \
 {{- end}}
@@ -39,8 +37,8 @@ var ApptainerTemplate = `
 --bind {{ range $index, $path := .Bind}}{{if $index}},{{end}}{{$path}}{{end}} \
 {{- end}}
 {{.Image}} 
-{{- if .Command}}{{range $index, $cmd := .Command}} "{{$cmd}}"{{end}}{{end}}
-{{- if .Args}}{{range $index, $arg := .Args}} "{{$arg}}"{{end}}{{end}}
+{{- if .Command}}{{range $index, $cmd := .Command}} "{{$cmd}}"{{end}}{{end -}}
+{{- if .Args}}{{range $index, $arg := .Args}} "{{$arg}}"{{end}}{{end -}}
 `
 
 // ApptainerTemplateFields container the supported fields for the Apptainer template.
@@ -67,43 +65,32 @@ type ApptainerTemplateFields struct {
 
 ************************************************************/
 
-// SBatchTemplate provides the context for going from Apptainer jobs to slurm jobs
-// Single # are directives to SBATCH
-// Double ## are comments.
-var SBatchTemplate = `#!/bin/bash
+const (
+	SbatchPreamble = `#!/bin/bash
 #SBATCH --job-name={{.Pod.Name}}
-#SBATCH --output={{.StdoutPath}}
-#SBATCH --error={{.StderrPath}}
-{{- if .NTasksPerNode}}
-#SBATCH --ntasks-per-node={{.NTasksPerNode}}
+#SBATCH --output={{.ScriptsDirectory}}/stdout
+#SBATCH --error={{.ScriptsDirectory}}/stderr
+{{- if .Options.NTasksPerNode}}
+#SBATCH --ntasks-per-node={{.Options.NTasksPerNode}}
 {{end}}
-{{- if .CPUPerTask}}
-#SBATCH --cpus-per-task={{.CPUPerTask}}  # usually, obviously, in the range[1-10]
+{{- if .Options.CPUPerTask}}
+#SBATCH --cpus-per-task={{.Options.CPUPerTask}}  # usually, obviously, in the range[1-10]
 {{end}}
-{{- if .Nodes}}
-#SBATCH --nodes={{.Nodes}}
+{{- if .Options.Nodes}}
+#SBATCH --nodes={{.Options.Nodes}}
 {{end}}
-{{- if .MemoryPerNode}}
-#SBATCH --mem={{.MemoryPerNode}} # e.g 400GB
+{{- if .Options.MemoryPerNode}}
+#SBATCH --mem={{.Options.MemoryPerNode}} # e.g 400GB
 {{end}}
-{{- if .DependencyList}}
-#SBATCH --dependency afterok:{{.DependencyList}}
+{{- if .Options.CustomFlags}}
+{{.Options.CustomFlags}}
 {{end}}
-{{- if .CustomFlags}}
-{{.CustomFlags}}
-{{end}}
+`
 
-#
-# Pod (Nested Apptainer) Level
-#
-cat > {{.ScriptsDirectory}}/pause.sh << "PAUSE_EOF"
-echo "Starting Pod $(hostname -I)"
-
-#
-# Reset Singularity/Apptainer flags.
-# If not removed, they will be consumed by the nested singularity and overwrite paths.
-#
-echo "Reset Singularity/Apptainer Flags"
+	ResetFlags = `
+#### BEGIN SECTION: ResetFlags ####
+# Description
+# 	If not removed, Flags will be consumed by the nested singularity and overwrite paths.
 
 unset SINGULARITY_BIND
 unset SINGULARITY_CONTAINER
@@ -115,49 +102,98 @@ unset APPTAINER_CONTAINER
 unset APPTAINER_ENVIRONMENT
 unset APPTAINER_NAME
 
-#
-# Rewire /etc/resolv.conf to point to KubeDNSService
-#
-echo "Rewrite /etc/resolv.conf"
+#### END SECTION: ResetFlags ####`
+
+	FixDNS = `
+#### BEGIN SECTION: DNS ####
+# Description
+# 	Rewire /etc/resolv.conf to point to KubeDNSService
+
 cat > /etc/resolv.conf << DNS_EOF
 nameserver {{.KubeDNSService}}
 search {{.Pod.Namespace}}.svc.cluster.local svc.cluster.local cluster.local
 options ndots:5
 DNS_EOF
 
-#
-# Add some tracing info
-#
-echo $(hostname -I) > {{.PodIPPath}}
+#### END SECTION: DNS ####`
+
+	DebugInfo = `
+#### BEGIN SECTION: DebugInfo ####
+# Description
+# 	Prints some debugging info
 
 echo "Path:" $(pwd)
 echo "Hostname:" $(hostname)
 echo "HostIPs:" $(hostname -I)
 echo "Date:" $(date)
 
-#
-# Start the containers (as processes) within the Pause Context
-#
-{{.ApptainerCommand}}
+#### END SECTION: DebugInfo ####`
+
+	RunAndWaitInitContainers = `
+#### BEGIN SECTION: InitContainers ####
+# Description
+# 	Execute the Init containers and wait for completion
+
+{{- if .InitContainers}}
+{{ range $index, $container := .InitContainers}}
+$({{$container.Command}} 2>> {{$container.StderrPath}} 1>> {{$container.StdoutPath}}; echo $? > {{$container.ExitCodePath}}) &
+echo $! > {{$container.JobIDPath}}
+{{end}}
+
+wait
+{{- end}}
+#### END SECTION: InitContainers ####`
+
+	RunAndWaitContainers = `
+#### BEGIN SECTION: Containers ####
+# Description
+# 	Execute the containers
+
+{{- if .Containers}}
+{{ range $index, $container := .Containers}}
+$({{$container.Command}} 2>> {{$container.StderrPath}} 1>> {{$container.StdoutPath}}; echo $? > {{$container.ExitCodePath}}) &
+echo $! > {{$container.JobIDPath}}
+{{end}}
+
+wait
+{{- end}}
+#### END SECTION: Containers ####`
+)
+
+// SBatchTemplate provides the context for going from Apptainer jobs to slurm jobs
+// Single # are directives to SBATCH
+// Double ## are comments.
+var SBatchTemplate = SbatchPreamble + `
+
+#### BEGIN SECTION: NestedEnvironment ####
+# Description
+# 	... Explain what I do ...
+
+cat > {{.ScriptsDirectory}}/virtual-env.sh << "PAUSE_EOF"
+echo "Starting Pod $(hostname -I)"
+echo $(hostname -I) > {{.PodIPPath}}
+` + ResetFlags + FixDNS + DebugInfo + RunAndWaitInitContainers + RunAndWaitContainers + `
 PAUSE_EOF
 
-chmod +x  {{.ScriptsDirectory}}/pause.sh 
+chmod +x  {{.ScriptsDirectory}}/virtual-env.sh 
+#### END SECTION: NestedEnvironment ####
 
-#
-# Host Level
-#
+#### BEGIN SECTION: Host ####
+# Description:
+# 	... Explain what I do ...
 set -eum pipeline
 
 trap cleanup EXIT
 cleanup() {
    exit_code=$?
-   echo $exit_code > {{.ExitCodePath}}
+   echo $exit_code > {{.ScriptsDirectory}}/exitCode
 }
 
 echo "Initialize the Pause Environment"
-apptainer exec --net --fakeroot --bind /bin,/etc/apptainer,/lib,/lib64,/usr,/var/lib/apptainer \
-docker://alpine	{{.ScriptsDirectory}}/pause.sh
-`
+apptainer exec --net --fakeroot --bind /bin,/etc/apptainer,/var/lib/apptainer,/lib,/lib64,/usr \
+docker://alpine	{{.ScriptsDirectory}}/virtual-env.sh
+
+#### END SECTION: Host ####`
 
 // SBatchTemplateFields container the supported fields for the submission template.
 type SBatchTemplateFields struct {
@@ -171,11 +207,25 @@ type SBatchTemplateFields struct {
 	// PodIPPath is where we store the internal Pod's ip.
 	PodIPPath string
 
-	// ScriptsDirectory is where we maintain intenral scripts
+	// ScriptsDirectory is where we maintain internal scripts
 	ScriptsDirectory string
 
-	// ApptainerCommand is the evaluated Apptainer command to be executed within sbatch.
-	ApptainerCommand string
+	Options SbatchOptions
+
+	// InitContainers is a list of init container requests to be executed.
+	InitContainers []Container
+
+	// Containers is a list of container requests to be executed.
+	Containers []Container
+}
+
+type Container struct {
+	// Command is the evaluated Apptainer command to be executed within sbatch.
+	Command string
+
+	// JobIDPath points to the file where the process id of the container is stored.
+	// This is used to know when the container has started
+	JobIDPath string
 
 	// StdoutPath instruct Slurm to write stdout into the specified path.
 	StdoutPath string
@@ -185,11 +235,11 @@ type SBatchTemplateFields struct {
 
 	// ExitCodePath is the path where the embedded Apptainer command will write its exit code
 	ExitCodePath string
+}
 
-	/*--
-		Optional Fields (marked by a pointer)
-	--*/
-
+// SbatchOptions are optional directives to sbatch.
+// Optional Fields (marked by a pointer)
+type SbatchOptions struct {
 	// Nodes request that a minimum of number nodes are allocated to this job.
 	Nodes *int
 
@@ -203,12 +253,6 @@ type SBatchTemplateFields struct {
 	// MemoryPerNode Specify the real memory required per node.
 	MemoryPerNode *string
 
-	// DependencyList defer the start of this job until the specified dependencies have been
-	// satisfied completed.
-	DependencyList []string
-
 	// CustomFlags are sbatch that are directly given by the end-user.
 	CustomFlags []string
-
-	v1.Ingress
 }

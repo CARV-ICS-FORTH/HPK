@@ -50,7 +50,7 @@ func logo() string {
 
 	templ := `
 {{ .AnsiColor.BrightRed }}
-{{ .Title "HPK" "" 4 }}
+{{ .Title "HaPaKi" "" 4 }}
 {{ .AnsiColor.BrightGreen }}
 	`
 	banner.InitString(buf, true, true, templ)

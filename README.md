@@ -20,9 +20,9 @@ mkdir -p .k8sfs
 apptainer run --net --dns 8.8.8.8 --fakeroot --cleanenv --pid --containall --no-init --no-umask --no-eval --no-mount tmp,home --unsquash --writable --env K8SFS_MOCK_KUBELET=0 --bind .k8sfs:/usr/local/etc docker://chazapis/kubernetes-from-scratch:20221101
 
 # Run hpk-kubelet
-export KUBECONFIG=$PWD/.k8sfs/kubernetes/admin.kubeconfig
-export APISERVER_KEY_LOCATION=$PWD/.k8sfs/kubernetes/ssl/admin-key.pem
-export APISERVER_CERT_LOCATION=$PWD/.k8sfs/kubernetes/ssl/admin.pem
+export KUBECONFIG=$HOME/.k8sfs/kubernetes/admin.kubeconfig
+export APISERVER_KEY_LOCATION=$HOME/.k8sfs/kubernetes/ssl/admin-key.pem
+export APISERVER_CERT_LOCATION=$HOME/.k8sfs/kubernetes/ssl/admin.pem
 ./bin/hpk-kubelet
 ```
 
