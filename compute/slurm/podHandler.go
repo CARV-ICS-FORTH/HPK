@@ -141,7 +141,7 @@ func DeletePod(pod *corev1.Pod) error {
 			/*-- Cancel Container Job --*/
 			if container.ContainerID != "" {
 				/*-- Extract container_id from raw format '<type>://<container_id>'. --*/
-				containerID := strings.Split(container.ContainerID, slurmType)[1]
+				containerID := strings.Split(container.ContainerID, containerIDType)[1]
 
 				_, err := CancelJob(containerID)
 				if err != nil {
@@ -161,7 +161,7 @@ func DeletePod(pod *corev1.Pod) error {
 			/*-- Cancel Container Job --*/
 			if container.ContainerID != "" {
 				/*-- Extract container_id from raw format '<type>://<container_id>'. --*/
-				containerID := strings.Split(container.ContainerID, slurmType)[1]
+				containerID := strings.Split(container.ContainerID, containerIDType)[1]
 
 				_, err := CancelJob(containerID)
 				if err != nil {
@@ -260,39 +260,113 @@ func CreatePod(pod *corev1.Pod, rmanager *resourcemanager.ResourceManager) error
 	}
 
 	/*---------------------------------------------------
-	 * Submit Container Creation Requests
+	 * Build Apptainer Commands for Init Containers
 	 *---------------------------------------------------*/
-	lastInitContainerJobID := -1
-	lastContainerJobID := -1
+	logger.Info(" * Building apptainer commands for init containers")
 
-	logger.Info(" * Submit creation requests for init containers")
+	var initContainers []Container
 
-	for i, initContainer := range pod.Spec.InitContainers {
-		if err := h.submitContainerCreationRequest(&pod.Spec.InitContainers[i], &lastInitContainerJobID); err != nil {
-			return errors.Wrapf(err, "creation request failed for init-container '%s'", initContainer.Name)
-		}
-	}
-
-	logger.Info(" * Submit creation requests for containers")
-
-	for i, container := range h.Pod.Spec.Containers {
-		if err := h.submitContainerCreationRequest(&pod.Spec.Containers[i], &lastContainerJobID); err != nil {
+	for i, container := range pod.Spec.InitContainers {
+		job, err := h.buildApptainerCommands(&pod.Spec.InitContainers[i])
+		if err != nil {
 			return errors.Wrapf(err, "creation request failed for container '%s'", container.Name)
 		}
+
+		initContainers = append(initContainers, job)
 	}
 
-	logger.Info(" * All container requests have been successfully submitted")
+	/*---------------------------------------------------
+	 * Build Apptainer Commands for Containers
+	 *---------------------------------------------------*/
+	logger.Info(" * Building apptainer commands for containers")
+
+	var containers []Container
+
+	for i, container := range pod.Spec.Containers {
+		job, err := h.buildApptainerCommands(&pod.Spec.Containers[i])
+		if err != nil {
+			return errors.Wrapf(err, "creation request failed for container '%s'", container.Name)
+		}
+
+		containers = append(containers, job)
+	}
+
+	/*---------------------------------------------------
+	 * Prepare Fields for Sbatch Templates
+	 *---------------------------------------------------*/
+	logger.Info(" * Prepare Fields for Sbatch Templates")
+
+	/*-- Set HPK-defined fields for Sbatch Template --*/
+	podExecutionFields := SBatchTemplateFields{
+		KubeDNSService:   compute.KubeDNSIPAddress,
+		Pod:              h.podKey,
+		PodIPPath:        PodIPFilepath(h.podKey),
+		ScriptsDirectory: PodScriptsDir(h.podKey),
+		Options:          SbatchOptions{},
+		InitContainers:   initContainers,
+		Containers:       containers,
+	}
+
+	/*-- Set user-defined sbatch flags (e.g, From Argo) --*/
+	if slurmFlags, ok := h.Pod.GetAnnotations()["slurm-job/flags"]; ok {
+		for _, slurmFlag := range strings.Split(slurmFlags, " ") {
+			podExecutionFields.Options.CustomFlags = append(podExecutionFields.Options.CustomFlags,
+				"\n#SBATCH "+slurmFlag)
+		}
+	}
+
+	// append mpi-flags to Apptainer
+	/*
+		if mpiFlags, ok := h.Pod.GetAnnotations()["slurm-job/mpi-flags"]; ok {
+			if mpiFlags != "true" {
+				mpi := append([]string{Executables.MpiexecPath(), "-np", "$SLURM_NTASKS"}, strings.Split(mpiFlags, " ")...)
+				singularityCommand = append(mpi, singularityCommand...)
+			}
+		}
+	*/
+
+	sbatchTemplate, err := template.New(h.Name).Option("missingkey=error").Parse(SBatchTemplate)
+	if err != nil {
+		/*-- template errors should be expected from the custom fields where users can inject shitty input.	--*/
+		return errors.Wrapf(err, "sbatch template error")
+	}
+
+	/*---------------------------------------------------
+	 * Generate SBatch sbatchScript from Sbatch SubmitTemplate + Fields
+	 *---------------------------------------------------*/
+	logger.Info(" * Generate Sbatch sbatchScript")
+
+	sbatchScript := strings.Builder{}
+	sbatchScriptPath := filepath.Join(PodScriptsDir(h.podKey), "sbatch.sh")
+
+	if err := sbatchTemplate.Execute(&sbatchScript, podExecutionFields); err != nil {
+		/*-- since both the template and fields are internal to the code, the evaluation should always succeed	--*/
+		panic(errors.Wrapf(err, "failed to evaluate sbatch template"))
+	}
+
+	if err := os.WriteFile(sbatchScriptPath, []byte(sbatchScript.String()), ContainerJobPermissions); err != nil {
+		return errors.Wrapf(err, "unable to write sbatch sbatchScript in file '%s'", sbatchScriptPath)
+	}
+
+	/*---------------------------------------------------
+	 * Submit Sbatch to Slurm and get Submission Results
+	 *---------------------------------------------------*/
+	logger.Info(" * Submit sbatch sbatchScript to Slurm", "sbatchScript", sbatchScriptPath)
+
+	if err := h.submitJob(sbatchScriptPath); err != nil {
+		return errors.Wrapf(err, "sbatch submission error")
+	}
 
 	return nil
 }
 
-func (h *podHandler) submitContainerCreationRequest(container *corev1.Container, prevJobID *int) error {
-	h.logger.Info("== Container Creation Request  ==", "container", container.Name)
+func (h *podHandler) buildApptainerCommands(container *corev1.Container) (Container, error) {
+	h.logger.Info("== Build Apptainer Command  ==", "container", container.Name)
 
 	/*---------------------------------------------------
 	 * Prepare fields for Apptainer Template
 	 *---------------------------------------------------*/
-	h.logger.Info(" * Set flags and args for Apptainer command")
+	h.logger.Info(" * Set flags and args")
 
 	/*-- choose whether to run apptainer with "run" or with "exec" --*/
 	apptainer := ApptainerWithoutCommand
@@ -333,7 +407,7 @@ func (h *podHandler) submitContainerCreationRequest(container *corev1.Container,
 	submitTpl, err := template.New(h.Name).Option("missingkey=error").Parse(ApptainerTemplate)
 	if err != nil {
 		/*-- template errors should be expected from the custom fields where users can inject shitty input.	--*/
-		return errors.Wrapf(err, "Apptainer template error")
+		return Container{}, errors.Wrapf(err, "Apptainer template error")
 	}
 
 	var apptainerCmd strings.Builder
@@ -343,81 +417,17 @@ func (h *podHandler) submitContainerCreationRequest(container *corev1.Container,
 		panic(errors.Wrapf(err, "failed to evaluate Apptainer template"))
 	}
 
-	/*---------------------------------------------------
-	 * Submit the Apptainer command to Slurm
-	 *---------------------------------------------------*/
-	if err := h.runContainer(container, *prevJobID, apptainerCmd.String()); err != nil {
-		return errors.Wrap(err, "slurm error")
-	}
-
-	return nil
+	return Container{
+		Command:      apptainerCmd.String(),
+		JobIDPath:    ContainerJobIDFilepath(h.podKey, container.Name),
+		StdoutPath:   ContainerStdoutFilepath(h.podKey, container.Name),
+		StderrPath:   ContainerStderrFilepath(h.podKey, container.Name),
+		ExitCodePath: ContainerExitCodeFilepath(h.podKey, container.Name),
+	}, nil
 }
 
-func (h *podHandler) runContainer(container *corev1.Container, prevJobID int, apptainerCmd string) error {
-	/*---------------------------------------------------
-	 * Prepare fields for Sbatch Template
-	 *---------------------------------------------------*/
-	evaluationFields := SBatchTemplateFields{
-		KubeDNSService:   compute.KubeDNSIPAddress,
-		Pod:              h.podKey,
-		ApptainerCommand: apptainerCmd,
-		ScriptsDirectory: PodScriptsDir(h.podKey),
-		PodIPPath:        PodIPFilepath(h.podKey),
-		StdoutPath:       ContainerStdoutFilepath(h.podKey, container.Name),
-		StderrPath:       ContainerStderrFilepath(h.podKey, container.Name),
-		ExitCodePath:     ContainerExitCodeFilepath(h.podKey, container.Name),
-	}
-
-	// SLURM_JOB_DEPENDENCY ensures sequential execution of init containers and main containers
-	if prevJobID != -1 {
-		evaluationFields.DependencyList = []string{string(rune(prevJobID))}
-	}
-
-	//  parse sbatch flags from Argo
-	if slurmFlags, ok := h.Pod.GetAnnotations()["slurm-job/flags"]; ok {
-		for _, slurmFlag := range strings.Split(slurmFlags, " ") {
-			evaluationFields.CustomFlags = append(evaluationFields.CustomFlags, "\n#SBATCH "+slurmFlag)
-		}
-	}
-
-	// append mpi-flags to Apptainer
-	/*
-		if mpiFlags, ok := h.Pod.GetAnnotations()["slurm-job/mpi-flags"]; ok {
-			if mpiFlags != "true" {
-				mpi := append([]string{Executables.MpiexecPath(), "-np", "$SLURM_NTASKS"}, strings.Split(mpiFlags, " ")...)
-				singularityCommand = append(mpi, singularityCommand...)
-			}
-		}
-	*/
-
-	/*---------------------------------------------------
-	 * Generate SBatch script from Sbatch SubmitTemplate + Fields
-	 *---------------------------------------------------*/
-	submitTpl, err := template.New(h.Name).Option("missingkey=error").Parse(SBatchTemplate)
-	if err != nil {
-		/*-- template errors should be expected from the custom fields where users can inject shitty input.	--*/
-		return errors.Wrapf(err, "sbatch template error")
-	}
-
-	var sbatchScript strings.Builder
-
-	if err := submitTpl.Execute(&sbatchScript, evaluationFields); err != nil {
-		/*-- since both the template and fields are internal to the code, the evaluation should always succeed	--*/
-		panic(errors.Wrapf(err, "failed to evaluate sbatch template"))
-	}
-
-	scriptFile := filepath.Join(PodScriptsDir(h.podKey), container.Name+"_sbatch.sh")
-
-	if err := os.WriteFile(scriptFile, []byte(sbatchScript.String()), ContainerJobPermissions); err != nil {
-		return errors.Wrapf(err, "unable to write sbatch script in file '%s'", scriptFile)
-	}
-
-	h.logger.Info(" * Generate sbatch script", "path", scriptFile)
-
-	/*---------------------------------------------------
-	 * Submit Sbatch to Slurm and get Submission Results
-	 *---------------------------------------------------*/
-	out, err := SubmitJob(scriptFile)
+func (h *podHandler) submitJob(scriptFilePath string) error {
+	out, err := SubmitJob(scriptFilePath)
 	if err != nil {
 		h.logger.Error(err, "sbatch submission error", "out", out)
 
@@ -430,13 +440,6 @@ func (h *podHandler) runContainer(container *corev1.Container, prevJobID int, ap
 	intJobID, err := strconv.Atoi(jid[1])
 	if err != nil {
 		return errors.Wrap(err, "Cant convert jid as integer. Parsed irregular output!")
-	}
-
-	// persist job id
-	jobIDPath := ContainerJobIDFilepath(h.podKey, container.Name)
-
-	if err := os.WriteFile(jobIDPath, []byte(jid[1]), ContainerJobPermissions); err != nil {
-		return errors.Wrapf(err, "unable to persist Slurm Job ID")
 	}
 
 	h.logger.Info(" * Job has been submitted to Slurm", "jobID", intJobID)
