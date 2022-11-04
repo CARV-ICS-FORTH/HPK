@@ -374,6 +374,12 @@ func (h *podHandler) buildApptainerCommands(container *corev1.Container) (Contai
 		apptainer = ApptainerWithCommand
 	}
 
+	/*-- choose whether to run apptainer with "run" or with "exec" --*/
+	apptainer := ApptainerWithoutCommand
+	if container.Command != nil {
+		apptainer = ApptainerWithCommand
+	}
+
 	evaluationFields := ApptainerTemplateFields{
 		Apptainer: apptainer,
 		Image:     compute.ContainerRegistry + container.Image,

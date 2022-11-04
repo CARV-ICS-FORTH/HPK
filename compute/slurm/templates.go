@@ -193,8 +193,7 @@ echo "Initialize the Pause Environment"
 apptainer exec --net --fakeroot --bind /bin,/etc/apptainer,/var/lib/apptainer,/lib,/lib64,/usr \
 docker://alpine	{{.ScriptsDirectory}}/virtual-env.sh
 
-#### END SECTION: Host ####
-`
+#### END SECTION: Host ####`
 
 // SBatchTemplateFields container the supported fields for the submission template.
 type SBatchTemplateFields struct {
