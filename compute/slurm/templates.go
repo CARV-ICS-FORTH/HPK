@@ -15,23 +15,31 @@
 package slurm
 
 import (
+	"github.com/carv-ics-forth/hpk/compute"
 	"k8s.io/apimachinery/pkg/types"
 )
 
 /************************************************************
 
-		Apptainer Execution Templates
+		Process Execution Templates
 
 ************************************************************/
 
 const (
-	ApptainerWithoutCommand = "apptainer run --unsquash --compat --cleanenv --pid --no-mount tmp,home \\"
-	ApptainerWithCommand    = "apptainer exec --unsquash --compat --cleanenv --pid --no-mount tmp,home \\"
+	ApptainerBin = "apptainer"
+
+	// ApptainerExec launch the container, run the command that you passed in, and then back out of the container.
+	// example: apptainer exec first.sif /bin/bash
+	ApptainerExec = ApptainerBin + " exec --unsquash --compat --cleanenv --pid --no-mount tmp,home \\"
+
+	// ApptainerRun launch the container, perform the runscript within the container, and then back out of the container.
+	// example: apptainer run first.sif
+	ApptainerRun = ApptainerBin + " run --unsquash --compat --cleanenv --pid --no-mount tmp,home \\"
 )
 
 var ApptainerTemplate = `{{.Apptainer}}
-{{- if .Env}}
---env {{ range $index, $variable := .Env}}{{if $index}},{{end}}{{$variable}}{{end}} \
+{{- if .Environment}}
+--env {{ range $index, $variable := .Environment}}{{if $index}},{{end}}{{$variable}}{{end}} \
 {{- end}}
 {{- if .Bind}}
 --bind {{ range $index, $path := .Bind}}{{if $index}},{{end}}{{$path}}{{end}} \
@@ -41,7 +49,7 @@ var ApptainerTemplate = `{{.Apptainer}}
 {{- if .Args}}{{range $index, $arg := .Args}} "{{$arg}}"{{end}}{{end -}}
 `
 
-// ApptainerTemplateFields container the supported fields for the Apptainer template.
+// ApptainerTemplateFields container the supported fields for the Process template.
 type ApptainerTemplateFields struct {
 	/*--
 		Mandatory Fields
@@ -55,8 +63,9 @@ type ApptainerTemplateFields struct {
 	/*--
 		Optional Fields (marked by a pointer)
 	--*/
-	Env  []string // format: VAR=VALUE
-	Bind []string // format: /hostpath:/containerpath or /hostpath
+
+	Environment []string // format: VAR=VALUE
+	Bind        []string // format: /hostpath:/containerpath or /hostpath
 }
 
 /************************************************************
@@ -68,8 +77,8 @@ type ApptainerTemplateFields struct {
 const (
 	SbatchPreamble = `#!/bin/bash
 #SBATCH --job-name={{.Pod.Name}}
-#SBATCH --output={{.ScriptsDirectory}}/stdout
-#SBATCH --error={{.ScriptsDirectory}}/stderr
+#SBATCH --output={{.VirtualEnv.StdoutPath}}
+#SBATCH --error={{.VirtualEnv.StderrPath}}
 {{- if .Options.NTasksPerNode}}
 #SBATCH --ntasks-per-node={{.Options.NTasksPerNode}}
 {{end}}
@@ -87,30 +96,35 @@ const (
 {{end}}
 `
 
-	ResetFlags = `
-#### BEGIN SECTION: ResetFlags ####
+	SetEnv = `
+#### BEGIN SECTION: SetEnv ####
 # Description
 # 	If not removed, Flags will be consumed by the nested singularity and overwrite paths.
+# Source
+# 	https://apptainer.org/user-docs/master/environment_and_metadata.html#environment-from-the-singularity-runtime
 
-unset SINGULARITY_BIND
+unset SINGULARITY_COMMAND
 unset SINGULARITY_CONTAINER
 unset SINGULARITY_ENVIRONMENT
 unset SINGULARITY_NAME
+unset SINGULARITY_BIND
+
 unset APPTAINER_APPNAME
-unset APPTAINER_BIND
+unset APPTAINER_COMMAND
 unset APPTAINER_CONTAINER
 unset APPTAINER_ENVIRONMENT
 unset APPTAINER_NAME
+unset APPTAINER_BIND
 
-#### END SECTION: ResetFlags ####`
+#### END SECTION: SetEnv ####`
 
 	FixDNS = `
 #### BEGIN SECTION: DNS ####
 # Description
-# 	Rewire /etc/resolv.conf to point to KubeDNSService
+# 	Rewire /etc/resolv.conf to point to KubeDNS
 
 cat > /etc/resolv.conf << DNS_EOF
-nameserver {{.KubeDNSService}}
+nameserver {{.ComputeEnv.KubeDNS}}
 search {{.Pod.Namespace}}.svc.cluster.local svc.cluster.local cluster.local
 options ndots:5
 DNS_EOF
@@ -137,7 +151,7 @@ echo "Date:" $(date)
 {{- if .InitContainers}}
 {{ range $index, $container := .InitContainers}}
 $({{$container.Command}} 2>> {{$container.StderrPath}} 1>> {{$container.StdoutPath}}; echo $? > {{$container.ExitCodePath}}) &
-echo $! > {{$container.JobIDPath}}
+echo $! > {{$container.IDPath}}
 {{end}}
 
 wait
@@ -152,7 +166,7 @@ wait
 {{- if .Containers}}
 {{ range $index, $container := .Containers}}
 $({{$container.Command}} 2>> {{$container.StderrPath}} 1>> {{$container.StdoutPath}}; echo $? > {{$container.ExitCodePath}}) &
-echo $! > {{$container.JobIDPath}}
+echo $! > {{$container.IDPath}}
 {{end}}
 
 wait
@@ -160,7 +174,7 @@ wait
 #### END SECTION: Containers ####`
 )
 
-// SBatchTemplate provides the context for going from Apptainer jobs to slurm jobs
+// SBatchTemplate provides the context for going from Process jobs to slurm jobs
 // Single # are directives to SBATCH
 // Double ## are comments.
 var SBatchTemplate = SbatchPreamble + `
@@ -169,13 +183,13 @@ var SBatchTemplate = SbatchPreamble + `
 # Description
 # 	... Explain what I do ...
 
-cat > {{.ScriptsDirectory}}/virtual-env.sh << "PAUSE_EOF"
-echo "Starting Pod $(hostname -I)"
-echo $(hostname -I) > {{.PodIPPath}}
-` + ResetFlags + FixDNS + DebugInfo + RunAndWaitInitContainers + RunAndWaitContainers + `
+cat > {{.VirtualEnv.ConstructorPath}} << "PAUSE_EOF"
+echo "Starting VirtualEnvironment $(hostname -I)"
+echo $(hostname -I) > {{.VirtualEnv.IPAddressPath}}
+` + SetEnv + FixDNS + DebugInfo + RunAndWaitInitContainers + RunAndWaitContainers + `
 PAUSE_EOF
 
-chmod +x  {{.ScriptsDirectory}}/virtual-env.sh 
+chmod +x  {{.VirtualEnv.ConstructorPath}} 
 #### END SECTION: NestedEnvironment ####
 
 #### BEGIN SECTION: Host ####
@@ -186,12 +200,12 @@ set -eum pipeline
 trap cleanup EXIT
 cleanup() {
    exit_code=$?
-   echo $exit_code > {{.ScriptsDirectory}}/exitCode
+   echo $exit_code > {{.VirtualEnv.ExitCodePath}}
 }
 
-echo "Initialize the Pause Environment"
-apptainer exec --net --fakeroot --bind /bin,/etc/apptainer,/var/lib/apptainer,/lib,/lib64,/usr \
-docker://alpine	{{.ScriptsDirectory}}/virtual-env.sh
+echo "Initializing the Pause Environment ..."
+apptainer exec --net --fakeroot --bind /bin,/etc/apptainer,/var/lib/apptainer,/lib,/lib64,/usr,/etc/passwd,$HOME \
+docker://alpine	 {{.VirtualEnv.ConstructorPath}}
 
 #### END SECTION: Host ####`
 
@@ -200,32 +214,33 @@ type SBatchTemplateFields struct {
 	/*--
 		Mandatory Fields
 	--*/
-	KubeDNSService string
-
 	Pod types.NamespacedName
 
-	// PodIPPath is where we store the internal Pod's ip.
-	PodIPPath string
+	ComputeEnv compute.HPCEnvironment
 
-	// ScriptsDirectory is where we maintain internal scripts
-	ScriptsDirectory string
-
-	Options SbatchOptions
+	// VirtualEnv is the equivalent of a Pod.
+	VirtualEnv VirtualEnvironment
 
 	// InitContainers is a list of init container requests to be executed.
-	InitContainers []Container
+	InitContainers []Process
 
 	// Containers is a list of container requests to be executed.
-	Containers []Container
+	Containers []Process
+
+	Options SbatchOptions
 }
 
-type Container struct {
-	// Command is the evaluated Apptainer command to be executed within sbatch.
-	Command string
+// The VirtualEnvironment create lightweight "virtual environments" that resemble "Pods" semantics.
+type VirtualEnvironment struct {
+	// ConstructorPath points to the script for creating the virtual environment for VirtualEnvironment.
+	ConstructorPath string
 
-	// JobIDPath points to the file where the process id of the container is stored.
-	// This is used to know when the container has started
-	JobIDPath string
+	// IPAddressPath is where we store the internal VirtualEnvironment's ip.
+	IPAddressPath string
+
+	// IDPath points to the file where Slurm Job ID is written.
+	// This is used to know when the job has been started.
+	IDPath string
 
 	// StdoutPath instruct Slurm to write stdout into the specified path.
 	StdoutPath string
@@ -233,7 +248,27 @@ type Container struct {
 	// StdoutPath instruct Slurm to write stderr into the specified path.
 	StderrPath string
 
-	// ExitCodePath is the path where the embedded Apptainer command will write its exit code
+	// ExitCodePath points to the file where Slurm Job Exit Codeis written.
+	// This is used to know when the job has been completed.
+	ExitCodePath string
+}
+
+// The Process creates new within the VirtualEnvironment and resemble the "Process" semantics.
+type Process struct {
+	// Command is the evaluated Process command to be executed within sbatch.
+	Command string
+
+	// IDPath points to the file where the process id of the container is stored.
+	// This is used to know when the container has started.
+	IDPath string
+
+	// StdoutPath instruct Slurm to write stdout into the specified path.
+	StdoutPath string
+
+	// StdoutPath instruct Slurm to write stderr into the specified path.
+	StderrPath string
+
+	// ExitCodePath is the path where the embedded Process command will write its exit code
 	ExitCodePath string
 }
 

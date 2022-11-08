@@ -14,7 +14,18 @@
 
 package compute
 
-var (
-	KubeDNSIPAddress  string
-	ContainerRegistry string
+import (
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+type HPCEnvironment struct {
+	KubeServiceHost string
+	KubeServicePort string
+
+	KubeDNS           string
+	ContainerRegistry string
+}
+
+var Environment HPCEnvironment
+
+var K8SClient client.Client

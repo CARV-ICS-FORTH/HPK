@@ -15,6 +15,7 @@
 package slurm
 
 import (
+	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -24,13 +25,16 @@ import (
 	"text/template"
 
 	"github.com/carv-ics-forth/hpk/compute"
+	"github.com/carv-ics-forth/hpk/pkg/envvars"
 	"github.com/carv-ics-forth/hpk/pkg/fieldpath"
 	"github.com/carv-ics-forth/hpk/pkg/resourcemanager"
 	"github.com/go-logr/logr"
 	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	k8errors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/json"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -40,17 +44,20 @@ var escapeScripts = regexp.MustCompile(`(--[A-Za-z0-9\-]+=)(\$[{\(][A-Za-z0-9_]+
 type podHandler struct {
 	*corev1.Pod
 
-	podKey       client.ObjectKey
-	podDirectory string
-	logger       logr.Logger
+	podKey client.ObjectKey
+
+	podEnvVariables []corev1.EnvVar
+	podDirectory    PodPath
+
+	logger logr.Logger
 }
 
 func GetPod(podRef client.ObjectKey) (*corev1.Pod, error) {
-	encodedPodFilepath := PodJSONFilepath(podRef)
+	encodedPodFilepath := PodRuntimeDir(podRef).EncodedJSONPath()
 
 	encodedPod, err := os.ReadFile(encodedPodFilepath)
 	if err != nil {
-		// if not found, it means that Pod that:
+		// if not found, it means that VirtualEnvironment that:
 		// 1) the pod is  not scheduled on this node (user's problem).
 		// 2) someone removed the file (administrator's problem).
 		// 3) we have a race condition (our problem).
@@ -105,13 +112,13 @@ func SavePod(pod *corev1.Pod) error {
 		return errors.Wrapf(err, "cannot marshall pod '%s' to json", podKey)
 	}
 
-	encodedPodFile := PodJSONFilepath(podKey)
+	encodedPodFile := PodRuntimeDir(podKey).EncodedJSONPath()
 
 	if err := os.WriteFile(encodedPodFile, encodedPod, PodSpecJsonFilePermissions); err != nil {
 		return errors.Wrapf(err, "cannot write pod json file '%s'", encodedPodFile)
 	}
 
-	logger.Info("DISK <-- Event: Pod Status Renewed",
+	logger.Info("DISK <-- Event: VirtualEnvironment Status Renewed",
 		"version", pod.ResourceVersion,
 		"phase", pod.Status.Phase,
 	)
@@ -127,7 +134,7 @@ func DeletePod(pod *corev1.Pod) error {
 	 * Cancel Slurm Jobs
 	 *---------------------------------------------------*/
 	/*
-			DeletePod takes a Kubernetes Pod and deletes it from the provider.
+			DeletePod takes a Kubernetes VirtualEnvironment and deletes it from the provider.
 			TODO: Once a pod is deleted, the provider is expected
 			to call the NotifyPods callback with a terminal pod status
 			where all the containers are in a terminal state, as well as the pod.
@@ -141,7 +148,7 @@ func DeletePod(pod *corev1.Pod) error {
 			var merr *multierror.Error
 
 			for i, container := range pod.Status.InitContainerStatuses {
-				/*-- Cancel Container Job --* /
+				/*-- Cancel Process Job --* /
 				if container.ContainerID != "" {
 					/*-- Extract container_id from raw format '<type>://<container_id>'. --* /
 					containerID := strings.Split(container.ContainerID, containerIDType)[1]
@@ -152,16 +159,16 @@ func DeletePod(pod *corev1.Pod) error {
 					}
 				}
 
-				/*-- Mark the Container as Terminated --* /
+				/*-- Mark the Process as Terminated --* /
 				pod.Status.InitContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
 					Reason:     "PodIsDeleted",
-					Message:    "Pod is being deleted",
+					Message:    "VirtualEnvironment is being deleted",
 					FinishedAt: metav1.Now(),
 				}
 			}
 
 			for i, container := range pod.Status.ContainerStatuses {
-				/*-- Cancel Container Job --* /
+				/*-- Cancel Process Job --* /
 				if container.ContainerID != "" {
 					/*-- Extract container_id from raw format '<type>://<container_id>'. --* /
 					containerID := strings.Split(container.ContainerID, containerIDType)[1]
@@ -172,49 +179,38 @@ func DeletePod(pod *corev1.Pod) error {
 					}
 				}
 
-				/*-- Mark the Container as Terminated --* /
+				/*-- Mark the Process as Terminated --* /
 				pod.Status.ContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
 					Reason:     "PodIsDeleted",
-					Message:    "Pod is being deleted",
+					Message:    "VirtualEnvironment is being deleted",
 					FinishedAt: metav1.Now(),
 				}
 			}
 
 			if merr.ErrorOrNil() != nil {
-				logger.Error(merr, "Pod termination error")
+				logger.Error(merr, "VirtualEnvironment termination error")
 			}
 		}
 	*/
 
 	/*---------------------------------------------------
-	 * Remove Pod directory
+	 * Remove VirtualEnvironment directory
 	 *---------------------------------------------------*/
 	podDir := PodRuntimeDir(podKey)
 
-	if err := os.RemoveAll(podDir); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := os.RemoveAll(string(podDir)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return errors.Wrapf(err, "failed to delete pod directory %s'", podDir)
 	}
 
 	return nil
 }
 
-func CreatePod(pod *corev1.Pod, rmanager *resourcemanager.ResourceManager) error {
+func CreatePod(ctx context.Context, pod *corev1.Pod, rmanager *resourcemanager.ResourceManager) error {
 	podKey := client.ObjectKeyFromObject(pod)
 	logger := DefaultLogger.WithValues("pod", podKey)
 
 	/*---------------------------------------------------
-	 * Prepare Pod HPCBackend & handler
-	 *---------------------------------------------------*/
-	logger.Info("== Pod Creation Request ==")
-
-	// create pod's top-level and internal sbatch directories
-	sbatchDir := PodScriptsDir(podKey)
-	if err := os.MkdirAll(sbatchDir, PodGlobalDirectoryPermissions); err != nil {
-		return errors.Wrapf(err, "Cant create sbatch directory '%s'", sbatchDir)
-	}
-
-	/*---------------------------------------------------
-	 * Pre-Populate Container.Status from Container.Spec
+	 * Pre-Populate Process.Status from Process.Spec
 	 *---------------------------------------------------*/
 	pod.Status.InitContainerStatuses = make([]corev1.ContainerStatus, len(pod.Spec.InitContainers))
 	for i := 0; i < len(pod.Spec.InitContainers); i++ {
@@ -230,45 +226,63 @@ func CreatePod(pod *corev1.Pod, rmanager *resourcemanager.ResourceManager) error
 	}
 
 	/*---------------------------------------------------
-	 * Kind of Journaling for Pod Creation on Slurm
+	 * Prepare VirtualEnvironment for execution on Slurm
 	 *---------------------------------------------------*/
+	logger.Info("* Creating Virtual Environment ==")
+
+	/*-- Create the directory for virtual environment --*/
+	virtualEnvironmentDir := PodRuntimeDir(podKey).VirtualEnvironmentDir()
+
+	if err := os.MkdirAll(string(virtualEnvironmentDir), PodGlobalDirectoryPermissions); err != nil {
+		return errors.Wrapf(err, "Cant create sbatch directory '%s'", virtualEnvironmentDir)
+	}
+
+	/*-- Setting a list of services the pod in a namespace should see --*/
+	podEnvVariables, err := getServiceEnvVarMap(ctx, pod.GetNamespace())
+	if err != nil {
+		return errors.Wrapf(err, "failed to prepare environment variables")
+	}
+
+	/*-- Create the pod handler --*/
+	h := podHandler{
+		Pod:             pod,
+		podKey:          podKey,
+		podDirectory:    PodRuntimeDir(podKey),
+		podEnvVariables: podEnvVariables,
+		logger:          logger,
+	}
+
+	/*-- Kind of Journalling --*/
 	if err := SavePod(pod); err != nil {
 		return errors.Wrapf(err, "failed to save pod description")
 	}
 
-	h := podHandler{
-		Pod:          pod,
-		podKey:       podKey,
-		podDirectory: PodRuntimeDir(podKey),
-		logger:       logger,
-	}
-
 	/*---------------------------------------------------
-	 * Prepare Pod Volumes
+	 * Prepare Volumes on the VirtualEnvironment
 	 *---------------------------------------------------*/
-	logger.Info(" * Creating backend volumes for Pod")
+	logger.Info(" * Creating Backend Volumes")
 
-	if err := h.createBackendVolumes(rmanager); err != nil {
+	if err := h.makeMounts(rmanager); err != nil {
 		return errors.Wrapf(err, "failed to prepare runtime dir for pod '%s'", h.podKey)
 	}
 
 	/*---------------------------------------------------
-	 * Watch Pod Directory for Changes
+	 * Set listeners for async changes on the VirtualEnvironment
 	 *---------------------------------------------------*/
-	logger.Info(" * Start watching Pod directory", "path", h.podDirectory)
+	logger.Info(" * Setting Filesystem Notifiers", "watchPath", h.podDirectory)
 
 	// because fswatch does not work recursively, we cannot have the container directories nested within the pod.
 	// instead, we use a flat directory in the format "podir/containername.{jid,stdout,stdour,...}"
-	if err := fswatcher.Add(h.podDirectory); err != nil {
+	if err := fswatcher.Add(string(h.podDirectory)); err != nil {
 		return errors.Wrapf(err, "register to fsnotify has failed for path '%s'", h.podDirectory)
 	}
 
 	/*---------------------------------------------------
-	 * Build Apptainer Commands for Init Containers
+	 * Build Process Commands for Init Containers
 	 *---------------------------------------------------*/
-	logger.Info(" * Building apptainer commands for init containers")
+	logger.Info(" * Setting apptainer for init containers")
 
-	var initContainers []Container
+	var initContainers []Process
 
 	for i, container := range pod.Spec.InitContainers {
 		job, err := h.buildApptainerCommands(&pod.Spec.InitContainers[i])
@@ -280,11 +294,11 @@ func CreatePod(pod *corev1.Pod, rmanager *resourcemanager.ResourceManager) error
 	}
 
 	/*---------------------------------------------------
-	 * Build Apptainer Commands for Containers
+	 * Build Process Commands for Containers
 	 *---------------------------------------------------*/
-	logger.Info(" * Building apptainer commands for containers")
+	logger.Info(" * Setting apptainer for containers")
 
-	var containers []Container
+	var containers []Process
 
 	for i, container := range pod.Spec.Containers {
 		job, err := h.buildApptainerCommands(&pod.Spec.Containers[i])
@@ -298,30 +312,36 @@ func CreatePod(pod *corev1.Pod, rmanager *resourcemanager.ResourceManager) error
 	/*---------------------------------------------------
 	 * Prepare Fields for Sbatch Templates
 	 *---------------------------------------------------*/
-	logger.Info(" * Prepare Fields for Sbatch Templates")
+	logger.Info(" * Preparing Fields for Sbatch")
 
 	/*-- Set HPK-defined fields for Sbatch Template --*/
-	podExecutionFields := SBatchTemplateFields{
-		KubeDNSService:   compute.KubeDNSIPAddress,
-		Pod:              h.podKey,
-		PodIPPath:        PodIPFilepath(h.podKey),
-		ScriptsDirectory: PodScriptsDir(h.podKey),
-		Options:          SbatchOptions{},
-		InitContainers:   initContainers,
-		Containers:       containers,
+	job := SBatchTemplateFields{
+		ComputeEnv: compute.Environment,
+		Pod:        h.podKey,
+		VirtualEnv: VirtualEnvironment{
+			ConstructorPath: h.podDirectory.ConstructorPath(),
+			IDPath:          h.podDirectory.IDPath(),
+			IPAddressPath:   h.podDirectory.IPAddressPath(),
+			StdoutPath:      h.podDirectory.StdoutPath(),
+			StderrPath:      h.podDirectory.StderrPath(),
+			ExitCodePath:    h.podDirectory.ExitCodePath(),
+		},
+		InitContainers: initContainers,
+		Containers:     containers,
+		Options:        SbatchOptions{},
 	}
 
 	/*-- Set user-defined sbatch flags (e.g, From Argo) --*/
 	if slurmFlags, ok := h.Pod.GetAnnotations()["slurm-job/flags"]; ok {
 		for _, slurmFlag := range strings.Split(slurmFlags, " ") {
-			podExecutionFields.Options.CustomFlags = append(podExecutionFields.Options.CustomFlags,
+			job.Options.CustomFlags = append(job.Options.CustomFlags,
 				"\n#SBATCH "+slurmFlag)
 		}
 	}
 
-	// append mpi-flags to Apptainer
+	// append mpi-flags to Process
 	/*
-		if mpiFlags, ok := h.Pod.GetAnnotations()["slurm-job/mpi-flags"]; ok {
+		if mpiFlags, ok := h.VirtualEnvironment.GetAnnotations()["slurm-job/mpi-flags"]; ok {
 			if mpiFlags != "true" {
 				mpi := append([]string{Executables.MpiexecPath(), "-np", "$SLURM_NTASKS"}, strings.Split(mpiFlags, " ")...)
 				singularityCommand = append(mpi, singularityCommand...)
@@ -336,26 +356,26 @@ func CreatePod(pod *corev1.Pod, rmanager *resourcemanager.ResourceManager) error
 	}
 
 	/*---------------------------------------------------
-	 * Generate SBatch sbatchScript from Sbatch SubmitTemplate + Fields
+	 * Generate VirtualEnvironment sbatchScript from Sbatch SubmitTemplate + Fields
 	 *---------------------------------------------------*/
-	logger.Info(" * Generate Sbatch sbatchScript")
+	logger.Info(" * Generating Sbatch script")
 
 	sbatchScript := strings.Builder{}
-	sbatchScriptPath := filepath.Join(PodScriptsDir(h.podKey), "sbatch.sh")
+	sbatchScriptPath := h.podDirectory.SubmitJobPath()
 
-	if err := sbatchTemplate.Execute(&sbatchScript, podExecutionFields); err != nil {
+	if err := sbatchTemplate.Execute(&sbatchScript, job); err != nil {
 		/*-- since both the template and fields are internal to the code, the evaluation should always succeed	--*/
 		panic(errors.Wrapf(err, "failed to evaluate sbatch template"))
 	}
 
 	if err := os.WriteFile(sbatchScriptPath, []byte(sbatchScript.String()), ContainerJobPermissions); err != nil {
-		return errors.Wrapf(err, "unable to write sbatch sbatchScript in file '%s'", sbatchScriptPath)
+		return errors.Wrapf(err, "unable to write sbatch sbatchScript in file '%s'", job.VirtualEnv.ConstructorPath)
 	}
 
 	/*---------------------------------------------------
 	 * Submit Sbatch to Slurm and get Submission Results
 	 *---------------------------------------------------*/
-	logger.Info(" * Submit sbatch sbatchScript to Slurm", "sbatchScript", sbatchScriptPath)
+	logger.Info(" * Submit sbatch to Slurm", "scriptPath", job.VirtualEnv.ConstructorPath)
 
 	if err := h.submitJob(sbatchScriptPath); err != nil {
 		return errors.Wrapf(err, "sbatch submission error")
@@ -364,28 +384,34 @@ func CreatePod(pod *corev1.Pod, rmanager *resourcemanager.ResourceManager) error
 	return nil
 }
 
-func (h *podHandler) buildApptainerCommands(container *corev1.Container) (Container, error) {
-	h.logger.Info("== Build Apptainer Command  ==", "container", container.Name)
+func (h *podHandler) buildApptainerCommands(container *corev1.Container) (Process, error) {
+	h.logger.Info("== Build Process Command  ==", "container", container.Name)
 
 	/*---------------------------------------------------
-	 * Prepare fields for Apptainer Template
+	 * Prepare fields for Process Template
 	 *---------------------------------------------------*/
 	h.logger.Info(" * Set flags and args")
 
-	/*-- choose whether to run apptainer with "run" or with "exec" --*/
-	apptainer := ApptainerWithoutCommand
-	if container.Command != nil {
-		apptainer = ApptainerWithCommand
-	}
+	tFields := ApptainerTemplateFields{
+		Apptainer: func() string {
+			if container.Command == nil {
+				return ApptainerRun
+			} else {
+				return ApptainerExec
+			}
+		}(),
+		Image:   compute.Environment.ContainerRegistry + container.Image,
+		Command: container.Command,
+		Args:    container.Args,
+		Environment: func() []string {
+			var envArgs []string
 
-	evaluationFields := ApptainerTemplateFields{
-		Apptainer: apptainer,
-		Image:     compute.ContainerRegistry + container.Image,
-		Command:   container.Command,
-		Args:      container.Args,
-		Env: func() []string {
-			envArgs := make([]string, 0, len(container.Env))
+			/*-- Set pod-wide variables --*/
+			for _, envVar := range h.podEnvVariables {
+				envArgs = append(envArgs, envVar.Name+"="+envVar.Value)
+			}
 
+			/*-- Set container-specific variables --*/
 			for _, envVar := range container.Env {
 				envArgs = append(envArgs, envVar.Name+"="+envVar.Value)
 			}
@@ -396,7 +422,7 @@ func (h *podHandler) buildApptainerCommands(container *corev1.Container) (Contai
 			mountArgs := make([]string, 0, len(container.VolumeMounts))
 
 			for _, mountVar := range container.VolumeMounts {
-				mountArgs = append(mountArgs, PodMountpaths(h.podKey, mountVar))
+				mountArgs = append(mountArgs, h.podDirectory.Mountpaths(mountVar))
 			}
 
 			return mountArgs
@@ -404,29 +430,31 @@ func (h *podHandler) buildApptainerCommands(container *corev1.Container) (Contai
 	}
 
 	/*---------------------------------------------------
-	 * Build the Apptainer Command
+	 * Build the Process Command
 	 *---------------------------------------------------*/
-	h.logger.Info(" * Finalize Apptainer Command")
+	h.logger.Info(" * Finalize Process Command")
 
 	submitTpl, err := template.New(h.Name).Option("missingkey=error").Parse(ApptainerTemplate)
 	if err != nil {
 		/*-- template errors should be expected from the custom fields where users can inject shitty input.	--*/
-		return Container{}, errors.Wrapf(err, "Apptainer template error")
+		return Process{}, errors.Wrapf(err, "Process template error")
 	}
 
 	var apptainerCmd strings.Builder
 
-	if err := submitTpl.Execute(&apptainerCmd, evaluationFields); err != nil {
+	if err := submitTpl.Execute(&apptainerCmd, tFields); err != nil {
 		/*-- since both the template and fields are internal to the code, the evaluation should always succeed	--*/
-		panic(errors.Wrapf(err, "failed to evaluate Apptainer template"))
+		panic(errors.Wrapf(err, "failed to evaluate Process template"))
 	}
 
-	return Container{
+	containerPath := h.podDirectory.Container(container.Name)
+
+	return Process{
 		Command:      apptainerCmd.String(),
-		JobIDPath:    ContainerJobIDFilepath(h.podKey, container.Name),
-		StdoutPath:   ContainerStdoutFilepath(h.podKey, container.Name),
-		StderrPath:   ContainerStderrFilepath(h.podKey, container.Name),
-		ExitCodePath: ContainerExitCodeFilepath(h.podKey, container.Name),
+		IDPath:       containerPath.IDPath(),
+		StdoutPath:   containerPath.StdoutPath(),
+		StderrPath:   containerPath.StderrPath(),
+		ExitCodePath: containerPath.ExitCodePath(),
 	}, nil
 }
 
@@ -451,9 +479,9 @@ func (h *podHandler) submitJob(scriptFilePath string) error {
 	return nil
 }
 
-func (h *podHandler) createBackendVolumes(rmanager *resourcemanager.ResourceManager) error {
+func (h *podHandler) makeMounts(rmanager *resourcemanager.ResourceManager) error {
 	/*---------------------------------------------------
-	 * Copy volumes from local Pod to remote HPCBackend
+	 * Copy volumes from local VirtualEnvironment to remote HPCBackend
 	 *---------------------------------------------------*/
 	for _, vol := range h.Pod.Spec.Volumes {
 		switch {
@@ -469,9 +497,9 @@ func (h *podHandler) createBackendVolumes(rmanager *resourcemanager.ResourceMana
 			source := vol.VolumeSource.ConfigMap
 
 			configMap, err := rmanager.GetConfigMap(source.Name, h.Pod.GetNamespace())
-			if k8serrors.IsNotFound(err) {
+			if k8errors.IsNotFound(err) {
 				if source.Optional != nil && !*source.Optional {
-					return errors.Wrapf(err, "Configmap '%s' is required by Pod '%s' and does not exist", source.Name, h.Pod.GetName())
+					return errors.Wrapf(err, "Configmap '%s' is required by VirtualEnvironment '%s' and does not exist", source.Name, h.Pod.GetName())
 				}
 			}
 
@@ -480,7 +508,7 @@ func (h *podHandler) createBackendVolumes(rmanager *resourcemanager.ResourceMana
 			}
 
 			// .hpk/namespace/podName/volName/*
-			podConfigMapDir, err := createSubDirectory(h.podDirectory, vol.Name)
+			podConfigMapDir, err := h.podDirectory.CreateSubDirectory(vol.Name)
 			if err != nil {
 				return errors.Wrapf(err, "cannot create dir '%s' for configMap", podConfigMapDir)
 			}
@@ -501,7 +529,7 @@ func (h *podHandler) createBackendVolumes(rmanager *resourcemanager.ResourceMana
 			source := vol.VolumeSource.Secret
 
 			secret, err := rmanager.GetSecret(source.SecretName, h.Pod.GetNamespace())
-			if k8serrors.IsNotFound(err) {
+			if k8errors.IsNotFound(err) {
 				if source.Optional != nil && !*source.Optional {
 					return errors.Wrapf(err, "Secret '%s' not found in namespace '%s'", source.SecretName, h.Pod.GetNamespace())
 				}
@@ -511,7 +539,7 @@ func (h *podHandler) createBackendVolumes(rmanager *resourcemanager.ResourceMana
 			}
 
 			// .hpk/namespace/podName/secretName/*
-			podSecretDir, err := createSubDirectory(h.podDirectory, vol.Name)
+			podSecretDir, err := h.podDirectory.CreateSubDirectory(vol.Name)
 			if err != nil {
 				return errors.Wrapf(err, "cannot create dir '%s' for secrets", podSecretDir)
 			}
@@ -528,7 +556,7 @@ func (h *podHandler) createBackendVolumes(rmanager *resourcemanager.ResourceMana
 			/*---------------------------------------------------
 			 * EmptyDir
 			 *---------------------------------------------------*/
-			emptyDir, err := createSubDirectory(h.podDirectory, vol.Name)
+			emptyDir, err := h.podDirectory.CreateSubDirectory(vol.Name)
 			if err != nil {
 				return errors.Wrapf(err, "cannot create dir '%s' for emptyDir", emptyDir)
 			}
@@ -538,7 +566,7 @@ func (h *podHandler) createBackendVolumes(rmanager *resourcemanager.ResourceMana
 			/*---------------------------------------------------
 			 * Downward API
 			 *---------------------------------------------------*/
-			downApiDir, err := createSubDirectory(h.podDirectory, vol.Name)
+			downApiDir, err := h.podDirectory.CreateSubDirectory(vol.Name)
 			if err != nil {
 				return errors.Wrapf(err, "cannot create dir '%s' for downwardApi", downApiDir)
 			}
@@ -559,52 +587,47 @@ func (h *podHandler) createBackendVolumes(rmanager *resourcemanager.ResourceMana
 			/*---------------------------------------------------
 			 * HostPath
 			 *---------------------------------------------------*/
-			hostPathVolPath := filepath.Join(h.podDirectory, vol.Name)
-
 			switch *vol.VolumeSource.HostPath.Type {
 			case corev1.HostPathUnset:
 				// For backwards compatible, leave it empty if unset
-				// .hpk/podName/volName/*
-				if err := os.MkdirAll(hostPathVolPath, PodGlobalDirectoryPermissions); err != nil {
-					return errors.Wrapf(err, "cannot create '%s'", hostPathVolPath)
+				if path, err := h.podDirectory.CreateSubDirectory(vol.Name); err != nil {
+					return errors.Wrapf(err, "cannot create HostPathUnset at path '%s'", path)
 				}
+
 			case corev1.HostPathDirectoryOrCreate:
 				// If nothing exists at the given path, an empty directory will be created there
 				// as needed with file mode 0755, having the same group and ownership with Kubelet.
-
-				// .hpk/podName/volName/*
-				if err := os.MkdirAll(hostPathVolPath, PodGlobalDirectoryPermissions); err != nil {
-					return errors.Wrapf(err, "cannot create '%s'", hostPathVolPath)
+				if path, err := h.podDirectory.CreateSubDirectory(vol.Name); err != nil {
+					return errors.Wrapf(err, "cannot create HostPathDirectoryOrCreate at path '%s'", path)
 				}
 			case corev1.HostPathDirectory:
 				// A directory must exist at the given path
-				// .hpk/podName/volName/*
-				if err := os.MkdirAll(hostPathVolPath, PodGlobalDirectoryPermissions); err != nil {
-					return errors.Wrapf(err, "cannot create '%s'", hostPathVolPath)
+				if path, err := h.podDirectory.CreateSubDirectory(vol.Name); err != nil {
+					return errors.Wrapf(err, "cannot create HostPathDirectory at path '%s'", path)
 				}
 
 			case corev1.HostPathFileOrCreate:
 				// If nothing exists at the given path, an empty file will be created there
 				// as needed with file mode 0644, having the same group and ownership with Kubelet.
 				// .hpk/podName/volName/*
-				f, err := os.Create(hostPathVolPath)
+				f, err := os.Create(string(h.podDirectory))
 				if err != nil {
-					return errors.Wrapf(err, "cannot create '%s'", hostPathVolPath)
+					return errors.Wrapf(err, "cannot create '%s'", string(h.podDirectory))
 				}
 
 				if err := f.Close(); err != nil {
-					return errors.Wrapf(err, "cannot close file '%s'", hostPathVolPath)
+					return errors.Wrapf(err, "cannot close file '%s'", string(h.podDirectory))
 				}
 			case corev1.HostPathFile:
 				// A file must exist at the given path
 				// .hpk/podName/volName/*
-				f, err := os.Create(hostPathVolPath)
+				f, err := os.Create(string(h.podDirectory))
 				if err != nil {
-					return errors.Wrapf(err, "cannot create '%s'", hostPathVolPath)
+					return errors.Wrapf(err, "cannot create '%s'", string(h.podDirectory))
 				}
 
 				if err := f.Close(); err != nil {
-					return errors.Wrapf(err, "cannot close file '%s'", hostPathVolPath)
+					return errors.Wrapf(err, "cannot close file '%s'", string(h.podDirectory))
 				}
 			case corev1.HostPathSocket, corev1.HostPathCharDev, corev1.HostPathBlockDev:
 				// A UNIX socket/char device/ block device must exist at the given path
@@ -617,7 +640,7 @@ func (h *podHandler) createBackendVolumes(rmanager *resourcemanager.ResourceMana
 			/*---------------------------------------------------
 			 * Projected
 			 *---------------------------------------------------*/
-			projectedVolPath, err := createSubDirectory(h.podDirectory, vol.Name)
+			projectedVolPath, err := h.podDirectory.CreateSubDirectory(vol.Name)
 			if err != nil {
 				return errors.Wrapf(err, "cannot create dir '%s' for projected volume", projectedVolPath)
 			}
@@ -677,7 +700,7 @@ func (h *podHandler) createBackendVolumes(rmanager *resourcemanager.ResourceMana
 					configMap, err := rmanager.GetConfigMap(projectedSrc.ConfigMap.Name, h.Pod.GetNamespace())
 					{ // err check
 						if projectedSrc.ConfigMap.Optional != nil && !*projectedSrc.ConfigMap.Optional {
-							return errors.Wrapf(err, "Configmap '%s' is required by Pod '%s' and does not exist", projectedSrc.ConfigMap.Name, h.Pod.GetName())
+							return errors.Wrapf(err, "Configmap '%s' is required by VirtualEnvironment '%s' and does not exist", projectedSrc.ConfigMap.Name, h.Pod.GetName())
 						}
 
 						if err != nil {
@@ -704,7 +727,7 @@ func (h *podHandler) createBackendVolumes(rmanager *resourcemanager.ResourceMana
 					secret, err := rmanager.GetSecret(projectedSrc.Secret.Name, h.Pod.GetNamespace())
 					{ // err check
 						if projectedSrc.Secret.Optional != nil && !*projectedSrc.Secret.Optional {
-							return errors.Wrapf(err, "Secret '%s' is required by Pod '%s' and does not exist", projectedSrc.Secret.Name, h.Pod.GetName())
+							return errors.Wrapf(err, "Secret '%s' is required by VirtualEnvironment '%s' and does not exist", projectedSrc.Secret.Name, h.Pod.GetName())
 						}
 
 						if err != nil {
@@ -729,4 +752,47 @@ func (h *podHandler) createBackendVolumes(rmanager *resourcemanager.ResourceMana
 	}
 
 	return nil
+}
+
+// getServiceEnvVarMap makes a map[string]string of env vars for services a  pod in namespace ns should see.
+// However, the kubelet implementation works on for Services with ClusterIPs.
+// In our case, the Services point directly to Pod IP's, and the implementation does not work.
+// The solution is to retrieve services from Endpoints.
+//
+// Original:
+// https://github.com/kubernetes/kubernetes/blob/1139bb177b2b35611c5ca16cc82f0e41a8bb107e/pkg/kubelet/kubelet_pods.go#L575
+func getServiceEnvVarMap(ctx context.Context, namespace string) ([]corev1.EnvVar, error) {
+	/*---------------------------------------------------
+	 * Get all service resources from master
+	 *---------------------------------------------------*/
+	var endpointsList corev1.EndpointsList
+
+	if err := compute.K8SClient.List(ctx, &endpointsList, &client.ListOptions{
+		LabelSelector: labels.Everything(),
+	}); err != nil {
+		return nil, errors.Wrap(err, "failed to list services when setting up env vars")
+	}
+
+	/*---------------------------------------------------
+	 * Populate services into service environment variables.
+	 *---------------------------------------------------*/
+	var mappedEndpoints []*corev1.Endpoints
+
+	for i, endpoint := range endpointsList.Items {
+		// ignore endpoints without IPs
+		if len(endpoint.Subsets) == 0 {
+			continue
+		}
+
+		// We always want to add environment variabled for master services
+		// from the master service namespace, even if enableServiceLinks is false.
+		// We also add environment variables for other services in the same
+		// namespace, if enableServiceLinks is true.
+		if endpoint.GetNamespace() == namespace ||
+			endpoint.GetNamespace() == metav1.NamespaceDefault {
+			mappedEndpoints = append(mappedEndpoints, &endpointsList.Items[i])
+		}
+	}
+
+	return envvars.FromEndpoints(mappedEndpoints), nil
 }

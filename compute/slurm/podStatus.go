@@ -36,7 +36,7 @@ func PodWithExplicitlyUnsupportedFields(pod *corev1.Pod) bool {
 	var unsupportedFields []string
 
 	/*---------------------------------------------------
-	 * Unsupported Pod-Level Fields
+	 * Unsupported VirtualEnvironment-Level Fields
 	 *---------------------------------------------------*/
 	if pod.GetNamespace() == "kube-system" {
 		unsupportedFields = append(unsupportedFields, ".Meta.Namespace == 'kube-system'")
@@ -55,28 +55,28 @@ func PodWithExplicitlyUnsupportedFields(pod *corev1.Pod) bool {
 		//	unsupportedFields = append(unsupportedFields, ".Spec.SecurityContext")
 	}
 
-	if pod.Spec.InitContainers != nil {
-		unsupportedFields = append(unsupportedFields, ".Spec.InitContainers")
-	}
-
 	/*---------------------------------------------------
-	 * Unsupported Container-Level Fields
+	 * Unsupported Process-Level Fields
 	 *---------------------------------------------------*/
 	for i, container := range pod.Spec.Containers {
 		if container.SecurityContext != nil {
-			unsupportedFields = append(unsupportedFields, fmt.Sprintf(".Spec.Containers[%d].SecurityContext", i))
+			DefaultLogger.Info(fmt.Sprintf("Ignore .Spec.Containers[%d].SecurityContext", i))
+			// unsupportedFields = append(unsupportedFields, fmt.Sprintf(".Spec.Containers[%d].SecurityContext", i))
 		}
 
 		if container.StartupProbe != nil {
-			unsupportedFields = append(unsupportedFields, fmt.Sprintf(".Spec.Containers[%d].StartupProbe", i))
+			DefaultLogger.Info(fmt.Sprintf("Ignore .Spec.Containers[%d].StartupProbe", i))
+			// unsupportedFields = append(unsupportedFields, fmt.Sprintf(".Spec.Containers[%d].StartupProbe", i))
 		}
 
 		if container.LivenessProbe != nil {
-			unsupportedFields = append(unsupportedFields, fmt.Sprintf(".Spec.Containers[%d].LivenessProbe", i))
+			DefaultLogger.Info(fmt.Sprintf("Ignore .Spec.Containers[%d].LivenessProbe", i))
+			// unsupportedFields = append(unsupportedFields, fmt.Sprintf(".Spec.Containers[%d].LivenessProbe", i))
 		}
 
 		if container.ReadinessProbe != nil {
-			unsupportedFields = append(unsupportedFields, fmt.Sprintf(".Spec.Containers[%d].ReadinessProbe", i))
+			DefaultLogger.Info(fmt.Sprintf("Ignore .Spec.Containers[%d].ReadinessProbe", i))
+			// unsupportedFields = append(unsupportedFields, fmt.Sprintf(".Spec.Containers[%d].ReadinessProbe", i))
 		}
 	}
 
@@ -101,6 +101,7 @@ type test struct {
 
 func podStateMapper(pod *corev1.Pod) error {
 	podKey := client.ObjectKeyFromObject(pod)
+	podDir := PodRuntimeDir(podKey)
 	logger := DefaultLogger.WithValues("pod", podKey)
 
 	/*---------------------------------------------------
@@ -111,10 +112,22 @@ func podStateMapper(pod *corev1.Pod) error {
 	}
 
 	/*---------------------------------------------------
-	 * Load runtime-dependent Pod Information (e.g, IP)
+	 * Load Job-related Information (e.g, sbatch code, IP)
 	 *---------------------------------------------------*/
+	/*-- Get Exit Code of the Virtual Environment --*/
+	exitCodePath := podDir.ExitCodePath()
+	exitCode, exitCodeExists := readIntFromFile(exitCodePath)
+	if exitCodeExists && exitCode != 0 {
+		pod.Status.Phase = corev1.PodFailed
+		pod.Status.Reason = "PodExecutionError"
+		pod.Status.Message = "More info at:" + podDir.StderrPath()
+
+		return nil
+	}
+
+	/*-- Get IP of the Virtual Environment --*/
 	if pod.Status.PodIP == "" {
-		podIPPath := PodIPFilepath(podKey)
+		podIPPath := podDir.IPAddressPath()
 		ip, ok := readStringFromFile(podIPPath)
 		if ok {
 			pod.Status.PodIP = ip
@@ -126,18 +139,18 @@ func podStateMapper(pod *corev1.Pod) error {
 	 * Load Container Statuses
 	 *---------------------------------------------------*/
 	if err := LoadContainerStatuses(pod); err != nil {
-		return errors.Wrapf(err, "Cannot update container status for Pod '%s'", podKey)
+		return errors.Wrapf(err, "Cannot update container status for VirtualEnvironment '%s'", podKey)
 	}
 
 	/*---------------------------------------------------
 	 * Check status of Init Containers
 	 *---------------------------------------------------*/
 	if pod.Status.Phase == corev1.PodPending {
-		logger.Info(" O Check Init Container Status")
+		logger.Info(" O Check Init Process Status")
 
 		for _, initContainer := range pod.Status.InitContainerStatuses {
 			if initContainer.State.Terminated != nil {
-				// the Pod is pending is at least one InitContainer is still running
+				// the VirtualEnvironment is pending is at least one InitContainer is still running
 				return nil
 			}
 		}
@@ -156,7 +169,7 @@ func podStateMapper(pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Classify container statuses
 	 *---------------------------------------------------*/
-	logger.Info(" O Check Container Status")
+	logger.Info(" O Check Process Status")
 
 	var state Classifier
 	state.Reset()
@@ -249,12 +262,13 @@ func podStateMapper(pod *corev1.Pod) error {
 
 /*************************************************************
 
-		Load Container status from the FS
+		Load Process status from the FS
 
 *************************************************************/
 
 func LoadContainerStatuses(pod *corev1.Pod) error {
 	podKey := client.ObjectKeyFromObject(pod)
+	podDir := PodRuntimeDir(podKey)
 
 	/*---------------------------------------------------
 	 * Generic Handler for ContainerStatus
@@ -264,7 +278,7 @@ func LoadContainerStatuses(pod *corev1.Pod) error {
 			panic("Restart is not yet supported")
 		}
 
-		jobIDPath := ContainerJobIDFilepath(podKey, containerStatus.Name)
+		jobIDPath := podDir.Container(containerStatus.Name).IDPath()
 		jobID, jobIDExists := readStringFromFile(jobIDPath)
 
 		/*-- StateWaiting: no jobid, means that the job is still in the Slurm queue --*/
@@ -298,7 +312,7 @@ func LoadContainerStatuses(pod *corev1.Pod) error {
 		}
 
 		/*-- StateTerminated: existing exitcode, means that the job is complete --*/
-		exitCodePath := ContainerExitCodeFilepath(podKey, containerStatus.Name)
+		exitCodePath := podDir.Container(containerStatus.Name).ExitCodePath()
 		exitCode, exitCodeExists := readIntFromFile(exitCodePath)
 
 		if exitCodeExists {
@@ -350,7 +364,7 @@ func trytoDecodeExitCode(code int) string {
 	case 1:
 		return "Application error"
 	case 125:
-		return "Container failed to run error"
+		return "Process failed to run error"
 	case 126:
 		return "Command invoke error"
 	case 127:
@@ -415,7 +429,7 @@ func readIntFromFile(filepath string) (int, bool) {
 
 /*************************************************************
 
-				Pod Lifecycle
+				VirtualEnvironment Lifecycle
 
 *************************************************************/
 
