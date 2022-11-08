@@ -61,7 +61,7 @@ func NewProvider(config InitConfig) (*Provider, error) {
 
 ************************************************************/
 
-// CreatePod accepts a Pod definition and stores it in memory.
+// CreatePod accepts a VirtualEnvironment definition and stores it in memory.
 func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	podKey := client.ObjectKeyFromObject(pod)
 	logger := p.Logger.WithValues("obj", podKey)
@@ -89,14 +89,14 @@ func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Pass the pod for creation to the backend
 	 *---------------------------------------------------*/
-	if err := slurm.CreatePod(pod, p.ResourceManager); err != nil {
+	if err := slurm.CreatePod(ctx, pod, p.ResourceManager); err != nil {
 		return errors.Wrapf(err, "unable to create pod")
 	}
 
 	return nil
 }
 
-// UpdatePod accepts a Pod definition and updates its reference.
+// UpdatePod accepts a VirtualEnvironment definition and updates its reference.
 func (p *Provider) UpdatePod(ctx context.Context, newPod *corev1.Pod) error {
 	podKey := client.ObjectKeyFromObject(newPod)
 	logger := p.Logger.WithValues("obj", podKey)

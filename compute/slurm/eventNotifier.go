@@ -68,66 +68,103 @@ const (
 const (
 	RuntimeDir = ".hpk"
 
-	PodIPExtension   = ".ip"
-	PodJSONExtension = ".crd"
+	ExtensionIP  = ".ip"
+	ExtensionCRD = ".crd"
 
-	ContainerExitCodeExtension = ".exitCode"
-	ContainerJobIdExtension    = ".jid"
+	ExtensionExitCode = ".exitCode"
+	ExtensionJobID    = ".jid"
+
+	ExtensionStdout = ".stdout"
+	ExtensionStderr = ".stderr"
 )
 
-// PodRuntimeDir .hpk/namespace/podName.
-func PodRuntimeDir(podRef client.ObjectKey) string {
-	return filepath.Join(RuntimeDir, podRef.Namespace, podRef.Name)
+type PodPath string
+
+func PodRuntimeDir(podRef client.ObjectKey) PodPath {
+	path := filepath.Join(RuntimeDir, podRef.Namespace, podRef.Name)
+
+	return PodPath(path)
 }
 
-// PodIPFilepath .hpk/namespace/podName/pod.ip
-func PodIPFilepath(podRef client.ObjectKey) string {
-	return filepath.Join(PodRuntimeDir(podRef), PodIPExtension)
+func (p PodPath) EncodedJSONPath() string {
+	return filepath.Join(string(p), ExtensionCRD)
 }
 
-// PodJSONFilepath .hpk/namespace/podName/podspec.json.
-func PodJSONFilepath(podRef client.ObjectKey) string {
-	return filepath.Join(PodRuntimeDir(podRef), PodJSONExtension)
+// Mountpaths returns .hpk/namespace/podName/mountName:mountPath
+func (p PodPath) Mountpaths(mount corev1.VolumeMount) string {
+	return filepath.Join(string(p), mount.Name+":"+mount.MountPath)
 }
 
-// PodMountpaths .hpk/namespace/podName/mountName:mountPath
-func PodMountpaths(podRef client.ObjectKey, mount corev1.VolumeMount) string {
-	return filepath.Join(PodRuntimeDir(podRef), mount.Name+":"+mount.MountPath)
+// IDPath .hpk/namespace/podName/.jid
+func (p PodPath) IDPath() string {
+	return filepath.Join(string(p), ExtensionJobID)
 }
 
-// PodScriptsDir .hpk/namespace/podName/.sbatch
-func PodScriptsDir(podRef client.ObjectKey) string {
-	return filepath.Join(PodRuntimeDir(podRef), ".scripts")
+// ExitCodePath .hpk/namespace/podName/.exitCode
+func (p PodPath) ExitCodePath() string {
+	return filepath.Join(string(p), ExtensionExitCode)
 }
 
-// ContainerStdoutFilepath .hpk/namespace/podName/containerName.{stdout,stderr}.
-func ContainerStdoutFilepath(podRef client.ObjectKey, containerName string) string {
-	return filepath.Join(PodRuntimeDir(podRef), containerName+".stdout")
+// VirtualEnvironmentDir .hpk/namespace/podName/.venv
+func (p PodPath) VirtualEnvironmentDir() PodPath {
+	return PodPath(filepath.Join(string(p), ".venv"))
 }
 
-// ContainerStderrFilepath .hpk/namespace/podName/containerName.{stdout,stderr}.
-func ContainerStderrFilepath(podRef client.ObjectKey, containerName string) string {
-	return filepath.Join(PodRuntimeDir(podRef), containerName+".stderr")
+// ConstructorPath .hpk/namespace/podName/.venv/create.sh
+func (p PodPath) ConstructorPath() string {
+	return filepath.Join(string(p.VirtualEnvironmentDir()), "create.sh")
 }
 
-// ContainerJobIDFilepath .hpk/namespace/podName/containerName.jid.
-func ContainerJobIDFilepath(podRef client.ObjectKey, containerName string) string {
-	return filepath.Join(PodRuntimeDir(podRef), containerName+ContainerJobIdExtension)
+// SubmitJobPath .hpk/namespace/podName/.venv/sbatch.sh
+func (p PodPath) SubmitJobPath() string {
+	return filepath.Join(string(p.VirtualEnvironmentDir()), "sbatch.sh")
 }
 
-// ContainerExitCodeFilepath .hpk/namespace/podName/containerName.exitCode.
-func ContainerExitCodeFilepath(podRef client.ObjectKey, containerName string) string {
-	return filepath.Join(PodRuntimeDir(podRef), containerName+ContainerExitCodeExtension)
+// IPAddressPath .hpk/namespace/podName/.venv/pod.ip
+func (p PodPath) IPAddressPath() string {
+	return filepath.Join(string(p.VirtualEnvironmentDir()), "pod"+ExtensionIP)
 }
 
-func createSubDirectory(parent, name string) (string, error) {
-	fullPath := filepath.Join(parent, name)
+// StdoutPath .hpk/namespace/podName/.venv/pod.stdout
+func (p PodPath) StdoutPath() string {
+	return filepath.Join(string(p.VirtualEnvironmentDir()), "pod"+ExtensionStdout)
+}
+
+// StderrPath .hpk/namespace/podName/.venv/pod.stderr
+func (p PodPath) StderrPath() string {
+	return filepath.Join(string(p.VirtualEnvironmentDir()), "pod"+ExtensionStderr)
+}
+
+func (p PodPath) CreateSubDirectory(name string) (string, error) {
+	fullPath := filepath.Join(string(p), name)
 
 	if err := os.MkdirAll(fullPath, PodGlobalDirectoryPermissions); err != nil {
 		return fullPath, errors.Wrapf(err, "cannot create dir '%s'", fullPath)
 	}
 
 	return fullPath, nil
+}
+
+func (p PodPath) Container(containerName string) ContainerPath {
+	return ContainerPath(filepath.Join(string(p), containerName))
+}
+
+type ContainerPath string
+
+func (c ContainerPath) StdoutPath() string {
+	return filepath.Join(string(c) + ExtensionStdout)
+}
+
+func (c ContainerPath) StderrPath() string {
+	return filepath.Join(string(c) + ExtensionStderr)
+}
+
+func (c ContainerPath) IDPath() string {
+	return filepath.Join(string(c) + ExtensionJobID)
+}
+
+func (c ContainerPath) ExitCodePath() string {
+	return filepath.Join(string(c) + ExtensionExitCode)
 }
 
 /************************************************************
@@ -297,19 +334,19 @@ func (d *FSEventDispatcher) Run(ctx context.Context) {
 						logger := DefaultLogger.WithValues("pod", podKey)
 
 						/*---------------------------------------------------
-						 * Declare events that warrant Pod reconciliation
+						 * Declare events that warrant VirtualEnvironment reconciliation
 						 *---------------------------------------------------*/
 						switch filepath.Ext(file) {
-						case PodIPExtension:
+						case ExtensionIP:
 							/*-- Sbatch Started --*/
-							logger.Info("SLURM --> New Pod IP", "path", file)
+							logger.Info("SLURM --> New VirtualEnvironment IP", "path", file)
 
-						case ContainerJobIdExtension:
-							/*-- Container Started --*/
-							logger.Info("SLURM --> New Job ID", "path", file)
+						case ExtensionJobID:
+							/*-- Process Started --*/
+							logger.Info("SLURM --> New Job IDPath", "path", file)
 
-						case ContainerExitCodeExtension:
-							/*-- Container Terminated --*/
+						case ExtensionExitCode:
+							/*-- Process Terminated --*/
 							logger.Info("SLURM --> New Exit Code", "path", file)
 
 						default:
@@ -331,18 +368,18 @@ func (d *FSEventDispatcher) Run(ctx context.Context) {
 }
 
 func reconcilePodStatus(podKey client.ObjectKey) error {
-	/*-- Load Pod from reference --*/
+	/*-- Load VirtualEnvironment from reference --*/
 	pod, err := GetPod(podKey)
 	if err != nil {
 		return errors.Wrapf(err, "unable to load pod")
 	}
 
-	/*-- Recalculate the Pod status from locally stored containers --*/
+	/*-- Recalculate the VirtualEnvironment status from locally stored containers --*/
 	if err := podStateMapper(pod); err != nil {
 		return errors.Wrapf(err, "unable to update pod status")
 	}
 
-	/*-- Update the top-level Pod description --*/
+	/*-- Update the top-level VirtualEnvironment description --*/
 	if err := SavePod(pod); err != nil {
 		return errors.Wrapf(err, "unable to store pod")
 	}

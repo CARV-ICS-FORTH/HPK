@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/pkg/resourcemanager"
 	"github.com/sirupsen/logrus"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	"github.com/carv-ics-forth/hpk/provider"
@@ -40,7 +42,6 @@ import (
 	kubeinformers "k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
-	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
@@ -48,12 +49,11 @@ import (
 func logo() string {
 	buf := bytes.NewBuffer(nil)
 
-	templ := `
+	banner.InitString(buf, true, true, `
 {{ .AnsiColor.BrightRed }}
 {{ .Title "HaPaKi" "" 4 }}
 {{ .AnsiColor.BrightGreen }}
-	`
-	banner.InitString(buf, true, true, templ)
+	`)
 
 	return buf.String()
 }
@@ -104,12 +104,55 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		return errors.Wrapf(err, "unable to get kubeconfig")
 	}
 
-	client, err := kubernetes.NewForConfig(cfg)
+	/*-- fixme: replace the clientset with the most modern client --*/
+	clientSet, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return errors.Wrapf(err, "unable to start kubernetes clientset")
+	}
+
+	modernClient, err := client.New(cfg, client.Options{})
 	if err != nil {
 		return errors.Wrapf(err, "unable to start kubernetes client")
 	}
 
-	DefaultLogger.Info(" ... Done ...", "api-server", cfg.Host)
+	u, err := url.Parse(cfg.Host)
+	if err != nil {
+		return errors.Wrapf(err, "failed to parse KUBERNETES_MASTER url")
+	}
+
+	compute.K8SClient = modernClient
+	compute.Environment.ContainerRegistry = c.ContainerRegistry
+
+	compute.Environment.KubeServiceHost = u.Hostname()
+	compute.Environment.KubeServicePort = u.Port()
+
+	DefaultLogger.Info(" ... Done ...",
+		"host", compute.Environment.KubeServiceHost,
+		"port", compute.Environment.KubeServicePort,
+		"registry", compute.Environment.ContainerRegistry,
+	)
+
+	/*---------------------------------------------------
+	 * Discover Kubernetes DNS server
+	 *---------------------------------------------------*/
+	DefaultLogger.Info("* Discovering Kubernetes DNS Server")
+
+	dnsEndpoint, err := clientSet.CoreV1().Endpoints("kube-system").Get(ctx, "kube-dns", metav1.GetOptions{})
+	if err != nil {
+		return errors.Wrapf(err, "unable to discover dns server")
+	}
+
+	if len(dnsEndpoint.Subsets) == 0 {
+		return errors.Wrapf(err, "empty dns subsets")
+	}
+
+	if len(dnsEndpoint.Subsets[0].Addresses) == 0 {
+		return errors.Wrapf(err, "empty dns addresses")
+	}
+
+	compute.Environment.KubeDNS = dnsEndpoint.Subsets[0].Addresses[0].IP
+
+	DefaultLogger.Info(" ... Done ...", "dnsIP", compute.Environment.KubeDNS)
 
 	/*---------------------------------------------------
 	 * Load Kubernetes Informers
@@ -122,7 +165,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 
 	// Create a shared informer factory for Kubernetes pods in the current namespace (if specified) and scheduled to the current node.
 	podInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(
-		client,
+		clientSet,
 		c.InformerResyncPeriod,
 		kubeinformers.WithNamespace(c.KubeNamespace),
 		kubeinformers.WithTweakListOptions(func(options *metav1.ListOptions) {
@@ -132,7 +175,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	// Create another shared informer factory for Kubernetes secrets and configmaps (not subject to any selectors).
 	podInformer := podInformerFactory.Core().V1().Pods()
 
-	scmInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(client, c.InformerResyncPeriod)
+	scmInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(clientSet, c.InformerResyncPeriod)
 	secretInformer := scmInformerFactory.Core().V1().Secrets()
 	configMapInformer := scmInformerFactory.Core().V1().ConfigMaps()
 	serviceInformer := scmInformerFactory.Core().V1().Services()
@@ -155,34 +198,9 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	DefaultLogger.Info(" ... Done ...")
 
 	/*---------------------------------------------------
-	 * Discover Kubernetes DNS server
-	 *---------------------------------------------------*/
-	DefaultLogger.Info("* Discovering Kubernetes DNS Server")
-
-	dnsEndpoint, err := client.CoreV1().Endpoints("kube-system").Get(ctx, "kube-dns", metav1.GetOptions{})
-	if err != nil {
-		return errors.Wrapf(err, "unable to discover dns server")
-	}
-
-	if len(dnsEndpoint.Subsets) == 0 {
-		return errors.Wrapf(err, "empty dns subsets")
-	}
-
-	if len(dnsEndpoint.Subsets[0].Addresses) == 0 {
-		return errors.Wrapf(err, "empty dns addresses")
-	}
-
-	dnsIP := dnsEndpoint.Subsets[0].Addresses[0]
-
-	DefaultLogger.Info(" ... Done ...", "dnsIP", dnsIP)
-
-	/*---------------------------------------------------
 	 * Register the Provisioner of Virtual Nodes
 	 *---------------------------------------------------*/
 	DefaultLogger.Info("* Creating the Provisioner of Virtual Nodes")
-
-	compute.ContainerRegistry = c.ContainerRegistry
-	compute.KubeDNSIPAddress = dnsIP.IP
 
 	newProvider, err := provider.NewProvider(provider.InitConfig{
 		NodeName:        c.NodeName,
@@ -249,7 +267,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 			newNode := virtualNode.DeepCopy()
 			newNode.ResourceVersion = ""
 
-			if _, err := client.CoreV1().Nodes().Create(ctx, newNode, metav1.CreateOptions{}); err != nil {
+			if _, err := clientSet.CoreV1().Nodes().Create(ctx, newNode, metav1.CreateOptions{}); err != nil {
 				return err
 			}
 
@@ -259,14 +277,14 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	}
 
 	if c.EnableNodeLease {
-		leaseClient := client.CoordinationV1().Leases(corev1.NamespaceNodeLease)
+		leaseClient := clientSet.CoordinationV1().Leases(corev1.NamespaceNodeLease)
 		nodeControllerOpts = append(nodeControllerOpts, node.WithNodeEnableLeaseV1(leaseClient, 0))
 	}
 
 	nodeController, err := node.NewNodeController(
 		node.NaiveNodeProvider{},
 		virtualNode,
-		client.CoreV1().Nodes(),
+		clientSet.CoreV1().Nodes(),
 		nodeControllerOpts...,
 	)
 	if err != nil {
@@ -275,7 +293,6 @@ func runRootCommand(ctx context.Context, c Opts) error {
 
 	eb := record.NewBroadcaster()
 	eb.StartLogging(logrus.Infof)
-	eb.StartRecordingToSink(&corev1client.EventSinkImpl{Interface: client.CoreV1().Events(c.KubeNamespace)})
 
 	DefaultLogger.Info(" ... Done ...",
 		"nodeID", virtualNode.Spec.ProviderID,
@@ -287,7 +304,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	DefaultLogger.Info("* Starting Virtual Node Controller")
 
 	podController, err := node.NewPodController(node.PodControllerConfig{
-		PodClient:         client.CoreV1(),
+		PodClient:         clientSet.CoreV1(),
 		PodInformer:       podInformer,
 		EventRecorder:     eb.NewRecorder(scheme.Scheme, corev1.EventSource{Component: path.Join(virtualNode.Name, "pod-controller")}),
 		Provider:          newProvider,

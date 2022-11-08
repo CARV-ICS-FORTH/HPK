@@ -20,6 +20,7 @@ import (
 	"testing"
 	"text/template"
 
+	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/compute/slurm"
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -35,38 +36,38 @@ func TestApptainer(t *testing.T) {
 		{
 			name: "noenv",
 			fields: slurm.ApptainerTemplateFields{
-				Apptainer: slurm.ApptainerWithCommand,
+				Apptainer: slurm.ApptainerExec,
 				Image:     "docker://alpine:3.7",
 				Command:   []string{"sh", "-c"},
 				Args:      []string{"echo", "hello world"},
 			},
-			expected: slurm.ApptainerWithCommand + `
+			expected: slurm.ApptainerExec + `
 docker://alpine:3.7 "sh" "-c" "echo" "hello world"`,
 		},
 		{
 			name: "env",
 			fields: slurm.ApptainerTemplateFields{
-				Apptainer: slurm.ApptainerWithCommand,
-				Image:     "docker://alpine:3.7",
-				Command:   []string{"sh", "-c"},
-				Args:      []string{"echo", "hello world"},
-				Env:       []string{"VAR=val1", "VAR2=val2"},
+				Apptainer:   slurm.ApptainerExec,
+				Image:       "docker://alpine:3.7",
+				Command:     []string{"sh", "-c"},
+				Args:        []string{"echo", "hello world"},
+				Environment: []string{"VAR=val1", "VAR2=val2"},
 			},
-			expected: slurm.ApptainerWithCommand + `
+			expected: slurm.ApptainerExec + `
 --env VAR=val1,VAR2=val2 \
 docker://alpine:3.7 "sh" "-c" "echo" "hello world"`,
 		},
 		{
 			name: "bind",
 			fields: slurm.ApptainerTemplateFields{
-				Apptainer: slurm.ApptainerWithCommand,
-				Image:     "docker://alpine:3.7",
-				Command:   []string{"sh", "-c"},
-				Args:      []string{"echo", "hello world"},
-				Env:       []string{"VAR=val1", "VAR2=val2"},
-				Bind:      []string{"/hostpath1:/containerpath1", "/hostpath2", "/hostpath3:/containerpath3"},
+				Apptainer:   slurm.ApptainerExec,
+				Image:       "docker://alpine:3.7",
+				Command:     []string{"sh", "-c"},
+				Args:        []string{"echo", "hello world"},
+				Environment: []string{"VAR=val1", "VAR2=val2"},
+				Bind:        []string{"/hostpath1:/containerpath1", "/hostpath2", "/hostpath3:/containerpath3"},
 			},
-			expected: slurm.ApptainerWithCommand + `
+			expected: slurm.ApptainerExec + `
 --env VAR=val1,VAR2=val2 \
 --bind /hostpath1:/containerpath1,/hostpath2,/hostpath3:/containerpath3 \
 docker://alpine:3.7 "sh" "-c" "echo" "hello world"`,
@@ -97,6 +98,13 @@ docker://alpine:3.7 "sh" "-c" "echo" "hello world"`,
 
 // Run with: go clean -testcache && go test ./ -v  -run TestSBatch
 func TestSBatch(t *testing.T) {
+	podKey := types.NamespacedName{
+		Namespace: "dummy",
+		Name:      "dummier",
+	}
+
+	podDir := slurm.PodRuntimeDir(podKey)
+
 	tests := []struct {
 		name   string
 		fields slurm.SBatchTemplateFields
@@ -104,42 +112,49 @@ func TestSBatch(t *testing.T) {
 		{
 			name: "noenv",
 			fields: slurm.SBatchTemplateFields{
-				KubeDNSService: "0.0.0.0",
-				Pod: types.NamespacedName{
-					Namespace: "dummy",
-					Name:      "dummier",
+				ComputeEnv: compute.HPCEnvironment{
+					KubeMaster:        "6.6.6.6",
+					KubeDNS:           "6.6.6.6",
+					ContainerRegistry: "none",
 				},
-				PodIPPath:        ".podIP",
-				ScriptsDirectory: ".scripts",
-				Options:          slurm.SbatchOptions{},
-				InitContainers: func() (containers []slurm.Container) {
+				Pod: podKey,
+				VirtualEnv: slurm.VirtualEnvironment{
+					ConstructorPath: podDir.ConstructorPath(),
+					IPAddressPath:   podDir.IPAddressPath(),
+					IDPath:          podDir.IDPath(),
+					StdoutPath:      podDir.StdoutPath(),
+					StderrPath:      podDir.StderrPath(),
+					ExitCodePath:    podDir.ExitCodePath(),
+				},
+				Options: slurm.SbatchOptions{},
+				InitContainers: func() (containers []slurm.Process) {
 					containerName := []string{"a", "b", "c", "d"}
 					delays := []string{"5", "10", "8", "5"}
 
-					for i, jobName := range containerName {
-						containers = append(containers, slurm.Container{
-							Command:      "sleep " + delays[i] + " && echo " + jobName,
-							JobIDPath:    jobName + ".jid",
-							StdoutPath:   jobName + ".stdout",
-							StderrPath:   jobName + ".stderr",
-							ExitCodePath: jobName + ".exitCode",
+					for i, cname := range containerName {
+						containers = append(containers, slurm.Process{
+							Command:      "sleep " + delays[i] + " && echo " + cname,
+							IDPath:       podDir.Container(cname).IDPath(),
+							StdoutPath:   podDir.Container(cname).StdoutPath(),
+							StderrPath:   podDir.Container(cname).StderrPath(),
+							ExitCodePath: podDir.Container(cname).ExitCodePath(),
 						})
 					}
 
 					return containers
 				}(),
 
-				Containers: func() (containers []slurm.Container) {
+				Containers: func() (containers []slurm.Process) {
 					containerName := []string{"server", "client"}
 					args := []string{"-s", "-c iperf-server \n \n"}
 
-					for i, jobName := range containerName {
-						containers = append(containers, slurm.Container{
+					for i, cname := range containerName {
+						containers = append(containers, slurm.Process{
 							Command:      "# Some random comment " + "\n" + "sleep 10; " + args[i],
-							JobIDPath:    jobName + ".jid",
-							StdoutPath:   jobName + ".stdout",
-							StderrPath:   jobName + ".stderr",
-							ExitCodePath: jobName + ".exitCode",
+							IDPath:       podDir.Container(cname).IDPath(),
+							StdoutPath:   podDir.Container(cname).StdoutPath(),
+							StderrPath:   podDir.Container(cname).StderrPath(),
+							ExitCodePath: podDir.Container(cname).ExitCodePath(),
 						})
 					}
 
