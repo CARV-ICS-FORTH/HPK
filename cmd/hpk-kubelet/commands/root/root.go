@@ -120,6 +120,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		return errors.Wrapf(err, "failed to parse KUBERNETES_MASTER url")
 	}
 
+	compute.ClientSet = clientSet
 	compute.K8SClient = modernClient
 	compute.Environment.ContainerRegistry = c.ContainerRegistry
 
@@ -181,18 +182,19 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	serviceInformer := scmInformerFactory.Core().V1().Services()
 	serviceAccountInformer := scmInformerFactory.Core().V1().ServiceAccounts()
 
-	rm, err := resourcemanager.NewResourceManager(podInformer.Lister(),
+	if _, err := resourcemanager.NewResourceManager(
+		podInformer.Lister(),
 		secretInformer.Lister(),
 		configMapInformer.Lister(),
 		serviceInformer.Lister(),
 		serviceAccountInformer.Lister(),
-	)
-	if err != nil {
+	); err != nil {
 		return errors.Wrap(err, "could not create resource manager")
 	}
 
 	// Start the informers now, so the provider will get a functional resource manager.
 	podInformerFactory.Start(ctx.Done())
+
 	scmInformerFactory.Start(ctx.Done())
 
 	DefaultLogger.Info(" ... Done ...")
@@ -203,11 +205,10 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	DefaultLogger.Info("* Creating the Provisioner of Virtual Nodes")
 
 	newProvider, err := provider.NewProvider(provider.InitConfig{
-		NodeName:        c.NodeName,
-		InternalIP:      envOr("VKUBELET_POD_IP", "127.0.0.1"),
-		DaemonPort:      c.ListenPort,
-		ResourceManager: rm,
-		BuildVersion:    commands.BuildVersion,
+		NodeName:     c.NodeName,
+		InternalIP:   envOr("VKUBELET_POD_IP", "127.0.0.1"),
+		DaemonPort:   c.ListenPort,
+		BuildVersion: commands.BuildVersion,
 	})
 	if err != nil {
 		return err

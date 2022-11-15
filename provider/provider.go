@@ -19,7 +19,6 @@ import (
 	"io"
 
 	"github.com/carv-ics-forth/hpk/compute/slurm"
-	"github.com/carv-ics-forth/hpk/pkg/resourcemanager"
 	"github.com/go-logr/logr"
 	"github.com/niemeyer/pretty"
 	"github.com/pkg/errors"
@@ -30,6 +29,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
+func Abort(pod *corev1.Pod, abortErr error) error {
+	pod.Status.Phase = corev1.PodFailed
+	pod.Status.Reason = "ProviderError"
+	pod.Status.Message = abortErr.Error()
+
+	if err := slurm.SavePod(pod); err != nil {
+		panic(errors.Wrapf(err, "this should not happeen"))
+	}
+
+	return abortErr
+}
+
 // Provider implements the virtual-kubelet provider interface and stores pods in memory.
 type Provider struct {
 	InitConfig
@@ -39,10 +50,9 @@ type Provider struct {
 
 // InitConfig is the config passed to initialize a registered provider.
 type InitConfig struct {
-	NodeName        string
-	InternalIP      string
-	DaemonPort      int32
-	ResourceManager *resourcemanager.ResourceManager
+	NodeName   string
+	InternalIP string
+	DaemonPort int32
 
 	BuildVersion string
 }
@@ -89,25 +99,25 @@ func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Pass the pod for creation to the backend
 	 *---------------------------------------------------*/
-	if err := slurm.CreatePod(ctx, pod, p.ResourceManager); err != nil {
-		return errors.Wrapf(err, "unable to create pod")
+	if err := slurm.CreatePod(ctx, pod); err != nil {
+		return Abort(pod, errors.Wrapf(err, "unable to create pod"))
 	}
 
 	return nil
 }
 
 // UpdatePod accepts a VirtualEnvironment definition and updates its reference.
-func (p *Provider) UpdatePod(ctx context.Context, newPod *corev1.Pod) error {
-	podKey := client.ObjectKeyFromObject(newPod)
+func (p *Provider) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
+	podKey := client.ObjectKeyFromObject(pod)
 	logger := p.Logger.WithValues("obj", podKey)
 
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	logger.Info("-> UpdatePod", "phase", newPod.Status.Phase)
+	logger.Info("-> UpdatePod", "phase", pod.Status.Phase)
 
 	defer func() {
-		logger.Info("<- UpdatePod", "phase", newPod.Status.Phase)
+		logger.Info("<- UpdatePod", "phase", pod.Status.Phase)
 	}()
 
 	/*---------------------------------------------------
@@ -115,10 +125,10 @@ func (p *Provider) UpdatePod(ctx context.Context, newPod *corev1.Pod) error {
 	 *---------------------------------------------------*/
 	oldPod, err := slurm.GetPod(podKey)
 	if err != nil {
-		return errors.Wrapf(err, "unable to load local pod")
+		return Abort(pod, errors.Wrapf(err, "unable to load local pod"))
 	}
 
-	if oldPod.ResourceVersion >= newPod.ResourceVersion {
+	if oldPod.ResourceVersion >= pod.ResourceVersion {
 		/*-- The received pod is old, so we can safely discard it --*/
 		logger.Info("Discard update since its ResourceVersion is older than the local")
 
@@ -128,15 +138,15 @@ func (p *Provider) UpdatePod(ctx context.Context, newPod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Identify any intermediate actions that must taken
 	 *---------------------------------------------------*/
-	if metaDiff := pretty.Diff(oldPod.ObjectMeta, newPod.ObjectMeta); len(metaDiff) > 0 {
+	if metaDiff := pretty.Diff(oldPod.ObjectMeta, pod.ObjectMeta); len(metaDiff) > 0 {
 		/* ... */
 	}
 
-	if specDiff := pretty.Diff(oldPod.Spec, newPod.Spec); len(specDiff) > 0 {
+	if specDiff := pretty.Diff(oldPod.Spec, pod.Spec); len(specDiff) > 0 {
 		/* ... */
 	}
 
-	if statusDiff := pretty.Diff(oldPod.Status, newPod.Status); len(statusDiff) > 0 {
+	if statusDiff := pretty.Diff(oldPod.Status, pod.Status); len(statusDiff) > 0 {
 		/* ... */
 	}
 

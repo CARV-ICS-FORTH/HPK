@@ -27,14 +27,16 @@ import (
 	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/pkg/envvars"
 	"github.com/carv-ics-forth/hpk/pkg/fieldpath"
-	"github.com/carv-ics-forth/hpk/pkg/resourcemanager"
 	"github.com/go-logr/logr"
 	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
+	authv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	k8errors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/json"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -205,7 +207,7 @@ func DeletePod(pod *corev1.Pod) error {
 	return nil
 }
 
-func CreatePod(ctx context.Context, pod *corev1.Pod, rmanager *resourcemanager.ResourceManager) error {
+func CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	podKey := client.ObjectKeyFromObject(pod)
 	logger := DefaultLogger.WithValues("pod", podKey)
 
@@ -262,8 +264,8 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, rmanager *resourcemanager.R
 	 *---------------------------------------------------*/
 	logger.Info(" * Creating Backend Volumes")
 
-	if err := h.makeMounts(rmanager); err != nil {
-		return errors.Wrapf(err, "failed to prepare runtime dir for pod '%s'", h.podKey)
+	if err := h.makeMounts(ctx); err != nil {
+		return errors.Wrapf(err, "volume preparation error")
 	}
 
 	/*---------------------------------------------------
@@ -285,7 +287,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, rmanager *resourcemanager.R
 	var initContainers []Process
 
 	for i, container := range pod.Spec.InitContainers {
-		job, err := h.buildApptainerCommands(&pod.Spec.InitContainers[i])
+		job, err := h.makeApptainerCommands(&pod.Spec.InitContainers[i], true)
 		if err != nil {
 			return errors.Wrapf(err, "creation request failed for container '%s'", container.Name)
 		}
@@ -301,7 +303,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, rmanager *resourcemanager.R
 	var containers []Process
 
 	for i, container := range pod.Spec.Containers {
-		job, err := h.buildApptainerCommands(&pod.Spec.Containers[i])
+		job, err := h.makeApptainerCommands(&pod.Spec.Containers[i], false)
 		if err != nil {
 			return errors.Wrapf(err, "creation request failed for container '%s'", container.Name)
 		}
@@ -384,22 +386,15 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, rmanager *resourcemanager.R
 	return nil
 }
 
-func (h *podHandler) buildApptainerCommands(container *corev1.Container) (Process, error) {
+func (h *podHandler) makeApptainerCommands(container *corev1.Container, isInitContainer bool) (Process, error) {
 	h.logger.Info("== Build Process Command  ==", "container", container.Name)
 
 	/*---------------------------------------------------
 	 * Prepare fields for Process Template
 	 *---------------------------------------------------*/
-	h.logger.Info(" * Set flags and args")
+	h.logger.Info(" * Set flags and execution args")
 
 	tFields := ApptainerTemplateFields{
-		Apptainer: func() string {
-			if container.Command == nil {
-				return ApptainerRun
-			} else {
-				return ApptainerExec
-			}
-		}(),
 		Image:   compute.Environment.ContainerRegistry + container.Image,
 		Command: container.Command,
 		Args:    container.Args,
@@ -428,6 +423,22 @@ func (h *podHandler) buildApptainerCommands(container *corev1.Container) (Proces
 			return mountArgs
 		}(),
 	}
+
+	//	if isInitContainer {
+	if container.Command == nil {
+		tFields.Apptainer = ApptainerRun
+	} else {
+		tFields.Apptainer = ApptainerExec
+	}
+	/*
+		} else {
+			tFields.Apptainer = ApptainerStart
+
+			/*-- $(hostname)-${USER} will be evaluated at execution time --* /
+			instanceName := "$(hostname)-${USER}-" + container.Name
+			tFields.InstanceName = &instanceName
+		}
+	*/
 
 	/*---------------------------------------------------
 	 * Build the Process Command
@@ -479,7 +490,7 @@ func (h *podHandler) submitJob(scriptFilePath string) error {
 	return nil
 }
 
-func (h *podHandler) makeMounts(rmanager *resourcemanager.ResourceManager) error {
+func (h *podHandler) makeMounts(ctx context.Context) error {
 	/*---------------------------------------------------
 	 * Copy volumes from local VirtualEnvironment to remote HPCBackend
 	 *---------------------------------------------------*/
@@ -494,17 +505,25 @@ func (h *podHandler) makeMounts(rmanager *resourcemanager.ResourceManager) error
 				   configMap:
 					 name: game-config
 			 *---------------------------------------------------*/
+			var configMap corev1.ConfigMap
+
 			source := vol.VolumeSource.ConfigMap
 
-			configMap, err := rmanager.GetConfigMap(source.Name, h.Pod.GetNamespace())
+			key := types.NamespacedName{
+				Namespace: h.Pod.GetNamespace(),
+				Name:      source.Name,
+			}
+
+			err := compute.K8SClient.Get(ctx, key, &configMap)
+
 			if k8errors.IsNotFound(err) {
-				if source.Optional != nil && !*source.Optional {
-					return errors.Wrapf(err, "Configmap '%s' is required by VirtualEnvironment '%s' and does not exist", source.Name, h.Pod.GetName())
+				if source.Optional != nil && *source.Optional == false {
+					return errors.Wrapf(err, "mandatory Configmap '%s' was not found", key)
 				}
 			}
 
 			if err != nil {
-				return errors.Wrapf(err, "Error getting configmap '%s' from API server", h.Pod.GetName())
+				return errors.Wrapf(err, "failed to get ConfigMap '%s'", key)
 			}
 
 			// .hpk/namespace/podName/volName/*
@@ -526,16 +545,25 @@ func (h *podHandler) makeMounts(rmanager *resourcemanager.ResourceManager) error
 			/*---------------------------------------------------
 			 * Secret
 			 *---------------------------------------------------*/
+			var secret corev1.Secret
+
 			source := vol.VolumeSource.Secret
 
-			secret, err := rmanager.GetSecret(source.SecretName, h.Pod.GetNamespace())
+			key := types.NamespacedName{
+				Namespace: h.Pod.GetNamespace(),
+				Name:      source.SecretName,
+			}
+
+			err := compute.K8SClient.Get(ctx, key, &secret)
+
 			if k8errors.IsNotFound(err) {
-				if source.Optional != nil && !*source.Optional {
-					return errors.Wrapf(err, "Secret '%s' not found in namespace '%s'", source.SecretName, h.Pod.GetNamespace())
+				if source.Optional != nil && *source.Optional == false {
+					return errors.Wrapf(err, "mandatory Secret '%s' was not found", key)
 				}
 			}
+
 			if err != nil {
-				return errors.Wrapf(err, "Error getting secret '%s' from API server", source.SecretName)
+				return errors.Wrapf(err, "failed to get Secret '%s'", key)
 			}
 
 			// .hpk/namespace/podName/secretName/*
@@ -668,51 +696,96 @@ func (h *podHandler) makeMounts(rmanager *resourcemanager.ResourceManager) error
 					/*---------------------------------------------------
 					 * Projected ServiceAccountToken
 					 *---------------------------------------------------*/
-					serviceAccount, err := rmanager.GetServiceAccount(h.Pod.Spec.ServiceAccountName, h.Pod.GetNamespace())
+					source := projectedSrc.ServiceAccountToken
+
+					tokenRequest, err := compute.ClientSet.CoreV1().
+						ServiceAccounts(h.Pod.GetNamespace()).
+						CreateToken(ctx, h.Pod.Spec.ServiceAccountName, &authv1.TokenRequest{
+							Spec: authv1.TokenRequestSpec{
+								Audiences:         []string{source.Audience},
+								ExpirationSeconds: source.ExpirationSeconds,
+								BoundObjectRef: &authv1.BoundObjectReference{
+									Kind:       "Pod",
+									APIVersion: "v1",
+									Name:       h.Pod.GetName(),
+								},
+							},
+						}, metav1.CreateOptions{})
+
 					if err != nil {
-						return errors.Wrapf(err, "Error getting service account '%s' from API server", h.Pod.Spec.ServiceAccountName)
+						return errors.Wrapf(err, "failed to create token for Pod '%s'", h.podKey)
 					}
 
-					if serviceAccount == nil {
-						panic("this should never happen ")
+					// TODO: Update upon exceeded expiration date
+					// TODO: Ensure that these files are deleted in failure cases
+					fullPath := filepath.Join(projectedVolPath, projectedSrc.ServiceAccountToken.Path)
+
+					if err := os.WriteFile(fullPath, []byte(tokenRequest.Status.Token), fs.FileMode(0o766)); err != nil {
+						return errors.Wrapf(err, "cannot write token '%s'", fullPath)
 					}
 
-					if serviceAccount.AutomountServiceAccountToken != nil && *serviceAccount.AutomountServiceAccountToken {
-						for _, secretRef := range serviceAccount.Secrets {
-							secret, err := rmanager.GetSecret(secretRef.Name, h.Pod.GetNamespace())
-							if err != nil {
-								return errors.Wrapf(err, "get secret error")
-							}
+					/*
+							automount follows the instructions of:
+							https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/
 
-							// TODO: Update upon exceeded expiration date
-							// TODO: Ensure that these files are deleted in failure cases
-							fullPath := filepath.Join(projectedVolPath, projectedSrc.ServiceAccountToken.Path)
-							if err := os.WriteFile(fullPath, secret.Data[projectedSrc.ServiceAccountToken.Path], fs.FileMode(0o766)); err != nil {
-								return errors.Wrapf(err, "cannot write config map file '%s'", fullPath)
+							If both the ServiceAccount and the Pod's .spec specify a value for automountServiceAccountToken, the Pod spec takes precedence.
+
+						var automount bool
+
+						switch {
+						case h.Pod.Spec.AutomountServiceAccountToken != nil:
+							automount = *h.Pod.Spec.AutomountServiceAccountToken
+						case serviceAccount.AutomountServiceAccountToken != nil:
+							automount = *serviceAccount.AutomountServiceAccountToken
+						}
+
+						if automount {
+							for _, secretRef := range serviceAccount.Secrets {
+								var secret corev1.Secret
+
+								secretKey := types.NamespacedName{Namespace: secretRef.Namespace, Name: secretRef.Name}
+
+								if err := compute.K8SClient.Get(ctx, secretKey, &secret); err != nil {
+									return errors.Wrapf(err, "failed to get secret '%s'", secretKey)
+								}
+
+								// TODO: Update upon exceeded expiration date
+								// TODO: Ensure that these files are deleted in failure cases
+								fullPath := filepath.Join(projectedVolPath, projectedSrc.ServiceAccountToken.Path)
+
+								if err := os.WriteFile(fullPath, secret.Data[projectedSrc.ServiceAccountToken.Path], fs.FileMode(0o766)); err != nil {
+									return errors.Wrapf(err, "cannot write config map file '%s'", fullPath)
+								}
 							}
 						}
-					}
+					*/
 
 				case projectedSrc.ConfigMap != nil:
 					/*---------------------------------------------------
 					 * Projected ConfigMap
 					 *---------------------------------------------------*/
-					configMap, err := rmanager.GetConfigMap(projectedSrc.ConfigMap.Name, h.Pod.GetNamespace())
-					{ // err check
-						if projectedSrc.ConfigMap.Optional != nil && !*projectedSrc.ConfigMap.Optional {
-							return errors.Wrapf(err, "Configmap '%s' is required by VirtualEnvironment '%s' and does not exist", projectedSrc.ConfigMap.Name, h.Pod.GetName())
-						}
+					var configmap corev1.ConfigMap
 
-						if err != nil {
-							return errors.Wrapf(err, "Error getting configmap '%s' from API server", h.Pod.Name)
-						}
+					source := projectedSrc.ConfigMap
 
-						if configMap == nil {
-							continue
+					key := types.NamespacedName{
+						Namespace: h.Pod.GetNamespace(),
+						Name:      source.Name,
+					}
+
+					err := compute.K8SClient.Get(ctx, key, &configmap)
+
+					if k8errors.IsNotFound(err) {
+						if source.Optional != nil && *source.Optional == false {
+							return errors.Wrapf(err, "mandatory configmap '%s' was not found", key)
 						}
 					}
 
-					for k, item := range configMap.Data {
+					if err != nil {
+						return errors.Wrapf(err, "failed to get Secret '%s'", key)
+					}
+
+					for k, item := range configmap.Data {
 						// TODO: Ensure that these files are deleted in failure cases
 						itemPath := filepath.Join(projectedVolPath, k)
 						if err := os.WriteFile(itemPath, []byte(item), PodGlobalDirectoryPermissions); err != nil {
@@ -724,28 +797,39 @@ func (h *podHandler) makeMounts(rmanager *resourcemanager.ResourceManager) error
 					/*---------------------------------------------------
 					 * Projected Secret
 					 *---------------------------------------------------*/
-					secret, err := rmanager.GetSecret(projectedSrc.Secret.Name, h.Pod.GetNamespace())
-					{ // err check
-						if projectedSrc.Secret.Optional != nil && !*projectedSrc.Secret.Optional {
-							return errors.Wrapf(err, "Secret '%s' is required by VirtualEnvironment '%s' and does not exist", projectedSrc.Secret.Name, h.Pod.GetName())
-						}
+					var secret corev1.Secret
 
-						if err != nil {
-							return errors.Wrapf(err, "Error getting secret '%s' from API server", h.Pod.Name)
-						}
+					source := projectedSrc.Secret
 
-						if secret == nil {
-							continue
+					key := types.NamespacedName{
+						Namespace: h.Pod.GetNamespace(),
+						Name:      source.Name,
+					}
+
+					err := compute.K8SClient.Get(ctx, key, &secret)
+
+					if k8errors.IsNotFound(err) {
+						if source.Optional != nil && *source.Optional == false {
+							return errors.Wrapf(err, "mandatory Secret '%s' was not found", key)
 						}
+					}
+
+					if err != nil {
+						return errors.Wrapf(err, "failed to get Secret '%s'", key)
 					}
 
 					for k, item := range secret.Data {
 						// TODO: Ensure that these files are deleted in failure cases
 						itemPath := filepath.Join(projectedVolPath, k)
+
 						if err := os.WriteFile(itemPath, item, PodGlobalDirectoryPermissions); err != nil {
 							return errors.Wrapf(err, "cannot write config map file '%s'", itemPath)
 						}
 					}
+				default:
+					logrus.Warn(projectedSrc)
+
+					panic("Have I missed something ")
 				}
 			}
 		}

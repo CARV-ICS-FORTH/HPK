@@ -19,13 +19,14 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
+	"regexp"
 	"sync"
 
 	"github.com/carv-ics-forth/hpk/pkg/process"
 	"github.com/fsnotify/fsnotify"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
@@ -110,14 +111,14 @@ func (p PodPath) VirtualEnvironmentDir() PodPath {
 	return PodPath(filepath.Join(string(p), ".venv"))
 }
 
-// ConstructorPath .hpk/namespace/podName/.venv/create.sh
+// ConstructorPath .hpk/namespace/podName/.venv/constructor.sh
 func (p PodPath) ConstructorPath() string {
-	return filepath.Join(string(p.VirtualEnvironmentDir()), "create.sh")
+	return filepath.Join(string(p.VirtualEnvironmentDir()), "constructor.sh")
 }
 
-// SubmitJobPath .hpk/namespace/podName/.venv/sbatch.sh
+// SubmitJobPath .hpk/namespace/podName/.venv/submit.sh
 func (p PodPath) SubmitJobPath() string {
-	return filepath.Join(string(p.VirtualEnvironmentDir()), "sbatch.sh")
+	return filepath.Join(string(p.VirtualEnvironmentDir()), "submit.sh")
 }
 
 // IPAddressPath .hpk/namespace/podName/.venv/pod.ip
@@ -165,6 +166,34 @@ func (c ContainerPath) IDPath() string {
 
 func (c ContainerPath) ExitCodePath() string {
 	return filepath.Join(string(c) + ExtensionExitCode)
+}
+
+// ParseINotifyPath parses the path according to the expected HPK format, and returns
+// the corresponding fields.
+// Validated through: https://regex101.com/r/s4tb8x/1
+func ParseINotifyPath(path string) (podKey types.NamespacedName, fileName string) {
+	re := regexp.MustCompile(`^.hpk/(?P<namespace>\w+)/(?P<pod>.*?)(/.venv)*/(?P<file>.*)$`)
+
+	match := re.FindStringSubmatch(path)
+
+	if len(match) == 0 {
+		panic(errors.Errorf("path '%s' does not follow the HPC convention", path))
+	}
+
+	for i, name := range re.SubexpNames() {
+		if i > 0 && i <= len(match) {
+			switch name {
+			case "namespace":
+				podKey.Namespace = match[i]
+			case "pod":
+				podKey.Name = match[i]
+			case "file":
+				fileName = match[i]
+			}
+		}
+	}
+
+	return
 }
 
 /************************************************************
@@ -322,16 +351,10 @@ func (d *FSEventDispatcher) Run(ctx context.Context) {
 					return
 				case event := <-d.Queue:
 					if event.Op == fsnotify.Write {
-						dir, file := filepath.Split(event.Name)
 
-						fields := strings.Split(dir, "/")
+						podkey, file := ParseINotifyPath(event.Name)
 
-						podKey := client.ObjectKey{
-							Namespace: fields[1],
-							Name:      fields[2],
-						}
-
-						logger := DefaultLogger.WithValues("pod", podKey)
+						logger := DefaultLogger.WithValues("pod", podkey)
 
 						/*---------------------------------------------------
 						 * Declare events that warrant VirtualEnvironment reconciliation
@@ -356,13 +379,14 @@ func (d *FSEventDispatcher) Run(ctx context.Context) {
 							continue
 						}
 
-						if err := reconcilePodStatus(podKey); err != nil {
+						if err := reconcilePodStatus(podkey); err != nil {
 							logger.Error(err, "failed to reconcile pod status")
 						}
 					}
 				}
 			}
 		}()
+
 		waitGroup.Wait()
 	}
 }
