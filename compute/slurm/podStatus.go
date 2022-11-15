@@ -43,7 +43,8 @@ func PodWithExplicitlyUnsupportedFields(pod *corev1.Pod) bool {
 	}
 
 	if pod.Spec.Affinity != nil {
-		unsupportedFields = append(unsupportedFields, ".Spec.Affinity")
+		DefaultLogger.Info("Ignore .Spec.Affinity")
+		// unsupportedFields = append(unsupportedFields, ".Spec.Affinity")
 	}
 
 	if pod.Spec.DNSConfig != nil {
@@ -316,23 +317,27 @@ func LoadContainerStatuses(pod *corev1.Pod) error {
 		exitCode, exitCodeExists := readIntFromFile(exitCodePath)
 
 		if exitCodeExists {
-			var reason string
-
-			if exitCode == 0 {
-				reason = "Success"
-			} else {
-				reason = "Failed"
-			}
-
 			containerStatus.State = corev1.ContainerState{
 				Waiting: nil,
 				Running: nil,
 				Terminated: &corev1.ContainerStateTerminated{
-					ExitCode:    int32(exitCode),
-					Signal:      0,
-					Reason:      reason,
-					Message:     trytoDecodeExitCode(exitCode),
-					StartedAt:   containerStatus.State.Running.StartedAt,
+					ExitCode: int32(exitCode),
+					Signal:   0,
+					Reason: func() string {
+						if exitCode == 0 {
+							return "Success"
+						} else {
+							return "Failed"
+						}
+					}(),
+					Message: trytoDecodeExitCode(exitCode),
+					StartedAt: func() metav1.Time {
+						if containerStatus.State.Running != nil {
+							return containerStatus.State.Running.StartedAt
+						} else {
+							return metav1.Time{}
+						}
+					}(),
 					FinishedAt:  metav1.Now(), // fixme: get it from the file's ctime
 					ContainerID: containerStatus.ContainerID,
 				},

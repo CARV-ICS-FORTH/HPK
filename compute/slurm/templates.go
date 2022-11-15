@@ -30,23 +30,27 @@ const (
 
 	// ApptainerExec launch the container, run the command that you passed in, and then back out of the container.
 	// example: apptainer exec first.sif /bin/bash
-	ApptainerExec = ApptainerBin + " exec --unsquash --compat --cleanenv --pid --no-mount tmp,home \\"
+	ApptainerExec = ApptainerBin + " exec --compat --cleanenv --pid --no-mount tmp,home \\"
 
 	// ApptainerRun launch the container, perform the runscript within the container, and then back out of the container.
 	// example: apptainer run first.sif
-	ApptainerRun = ApptainerBin + " run --unsquash --compat --cleanenv --pid --no-mount tmp,home \\"
+	ApptainerRun = ApptainerBin + " run --compat --cleanenv --pid --no-mount tmp,home \\"
+
+	// ApptainerStart launches an instance with the name you provide it and lets it run in the background.
+	// example: apptainer start first.sif instance_name [startscript args...]
+	ApptainerStart = ApptainerBin + " start --compat --cleanenv --no-mount tmp,home \\"
 )
 
-var ApptainerTemplate = `{{.Apptainer}}
+var ApptainerTemplate = `{{.Apptainer}} 
 {{- if .Environment}}
 --env {{ range $index, $variable := .Environment}}{{if $index}},{{end}}{{$variable}}{{end}} \
 {{- end}}
 {{- if .Bind}}
 --bind {{ range $index, $path := .Bind}}{{if $index}},{{end}}{{$path}}{{end}} \
 {{- end}}
-{{.Image}} 
-{{- if .Command}}{{range $index, $cmd := .Command}} "{{$cmd}}"{{end}}{{end -}}
-{{- if .Args}}{{range $index, $arg := .Args}} "{{$arg}}"{{end}}{{end -}}
+{{.Image}}
+{{- if .Command}}{{range $index, $cmd := .Command}} '''{{$cmd}}'''{{end}}{{end -}}
+{{- if .Args}}{{range $index, $arg := .Args}} '''{{$arg}}'''{{end}}{{end -}}
 `
 
 // ApptainerTemplateFields container the supported fields for the Process template.
@@ -63,6 +67,7 @@ type ApptainerTemplateFields struct {
 	/*--
 		Optional Fields (marked by a pointer)
 	--*/
+	InstanceName *string // Used for Instance
 
 	Environment []string // format: VAR=VALUE
 	Bind        []string // format: /hostpath:/containerpath or /hostpath
@@ -94,6 +99,23 @@ const (
 {{- if .Options.CustomFlags}}
 {{.Options.CustomFlags}}
 {{end}}
+`
+	Initialize = `#!/bin/sh
+
+trap cleanup EXIT
+cleanup() {
+   exit_code=$?
+   echo $exit_code > {{.VirtualEnv.ExitCodePath}}
+}
+
+# Store IP
+echo $(hostname -I) > {{.VirtualEnv.IPAddressPath}}
+
+echo "== Virtual Environment Info =="
+echo "* User:" $(id)
+echo "* Hostname:" $(hostname)
+echo "* HostIPs:" $(hostname -I)
+echo "* DNS: {{.ComputeEnv.KubeDNS}}"
 `
 
 	SetEnv = `
@@ -131,18 +153,6 @@ DNS_EOF
 
 #### END SECTION: DNS ####`
 
-	DebugInfo = `
-#### BEGIN SECTION: DebugInfo ####
-# Description
-# 	Prints some debugging info
-
-echo "Path:" $(pwd)
-echo "Hostname:" $(hostname)
-echo "HostIPs:" $(hostname -I)
-echo "Date:" $(date)
-
-#### END SECTION: DebugInfo ####`
-
 	RunAndWaitInitContainers = `
 #### BEGIN SECTION: InitContainers ####
 # Description
@@ -169,6 +179,7 @@ $({{$container.Command}} 2>> {{$container.StderrPath}} 1>> {{$container.StdoutPa
 echo $! > {{$container.IDPath}}
 {{end}}
 
+echo "Waiting for containers "
 wait
 {{- end}}
 #### END SECTION: Containers ####`
@@ -179,35 +190,24 @@ wait
 // Double ## are comments.
 var SBatchTemplate = SbatchPreamble + `
 
-#### BEGIN SECTION: NestedEnvironment ####
-# Description
-# 	... Explain what I do ...
-
-cat > {{.VirtualEnv.ConstructorPath}} << "PAUSE_EOF"
-echo "Starting VirtualEnvironment $(hostname -I)"
-echo $(hostname -I) > {{.VirtualEnv.IPAddressPath}}
-` + SetEnv + FixDNS + DebugInfo + RunAndWaitInitContainers + RunAndWaitContainers + `
-PAUSE_EOF
-
-chmod +x  {{.VirtualEnv.ConstructorPath}} 
-#### END SECTION: NestedEnvironment ####
-
-#### BEGIN SECTION: Host ####
-# Description:
-# 	... Explain what I do ...
 set -eum pipeline
 
-trap cleanup EXIT
-cleanup() {
-   exit_code=$?
-   echo $exit_code > {{.VirtualEnv.ExitCodePath}}
-}
+#### BEGIN SECTION: VirtualEnvironment Builder ####
+# Description
+# 	Builds a script for running a Virtual Environment
+# 	that resembles the semantics of a Pod.
 
-echo "Initializing the Pause Environment ..."
-apptainer exec --net --fakeroot --bind /bin,/etc/apptainer,/var/lib/apptainer,/lib,/lib64,/usr,/etc/passwd,$HOME \
-docker://alpine	 {{.VirtualEnv.ConstructorPath}}
+cat > {{.VirtualEnv.ConstructorPath}} << "PAUSE_EOF"
+` + Initialize + SetEnv + FixDNS + RunAndWaitInitContainers + RunAndWaitContainers + `
+PAUSE_EOF
+#### END SECTION: Pause Builder ####
 
-#### END SECTION: Host ####`
+echo "Initializing the Virtual Environment ..."
+chmod +x  {{.VirtualEnv.ConstructorPath}}
+
+apptainer exec --net --network=flannel --fakeroot									\
+--bind /bin,/etc/apptainer,/var/lib/apptainer,/lib,/lib64,/usr,/etc/passwd,$HOME	\
+docker://alpine	{{.VirtualEnv.ConstructorPath}}`
 
 // SBatchTemplateFields container the supported fields for the submission template.
 type SBatchTemplateFields struct {

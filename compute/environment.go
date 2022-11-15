@@ -15,6 +15,7 @@
 package compute
 
 import (
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -28,4 +29,5 @@ type HPCEnvironment struct {
 
 var Environment HPCEnvironment
 
+var ClientSet *kubernetes.Clientset
 var K8SClient client.Client
