@@ -3,7 +3,6 @@ module github.com/carv-ics-forth/hpk
 go 1.18
 
 require (
-	github.com/coreos/pkg v0.0.0-20180928190104-399ea9e2e55f
 	github.com/dimiro1/banner v1.1.0
 	github.com/fsnotify/fsnotify v1.6.0
 	github.com/go-logr/logr v1.2.3
