@@ -195,11 +195,13 @@ spec:
 ---
 apiVersion: v1
 kind: ServiceAccount
+automountServiceAccountToken: true
 metadata:
   name: argo
 ---
 apiVersion: v1
 kind: ServiceAccount
+automountServiceAccountToken: true
 metadata:
   name: argo-server
 ---
@@ -520,7 +522,6 @@ spec:
   ports:
   - name: web
     port: 2746
-    targetPort: 2746
   selector:
     app: argo-server
 ---
