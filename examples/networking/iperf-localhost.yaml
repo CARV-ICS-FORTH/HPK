@@ -22,12 +22,3 @@ spec:
          - |
            sleep 10
            iperf3 -c localhost
-
-  # Schedule execution on virtual-kubelet
-  nodeSelector:
-    kubernetes.io/role: agent
-    kubernetes.io/os: linux
-    type: virtual-kubelet
-  tolerations:
-    - key: virtual-kubelet.io/provider
-      operator: Exists

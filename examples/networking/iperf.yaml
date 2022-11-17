@@ -34,15 +34,6 @@ spec:
         - |
           iperf3 -s
 
-  # Schedule execution on virtual-kubelet
-  nodeSelector:
-    kubernetes.io/role: agent
-    kubernetes.io/os: linux
-    type: virtual-kubelet
-  tolerations:
-    - key: virtual-kubelet.io/provider
-      operator: Exists
-
 ---
 apiVersion: v1
 kind: Pod
@@ -61,12 +52,3 @@ spec:
           # Delay waiting for server to become ready
           sleep 10 
           iperf3 -c server-service
-
-  # Schedule execution on virtual-kubelet
-  nodeSelector:
-    kubernetes.io/role: agent
-    kubernetes.io/os: linux
-    type: virtual-kubelet
-  tolerations:
-    - key: virtual-kubelet.io/provider
-      operator: Exists

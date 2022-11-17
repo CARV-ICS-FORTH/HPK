@@ -30,12 +30,12 @@ import (
 type Opts struct {
 	// Namespace to watch for pods and other resources
 	KubeNamespace string
-	// Sets the port to listen for requests from the Kubernetes API server
-	ListenPort int32
 
 	// Node name to use when creating a node in Kubernetes
 	NodeName string
 
+	// Sets the port to listen for requests from the Kubernetes API server
+	ListenAddr  int32
 	MetricsAddr string
 
 	ContainerRegistry string
@@ -61,18 +61,19 @@ func installFlags(flags *pflag.FlagSet, c *Opts) {
 
 	flags.StringVar(&c.NodeName, "nodename", "hpk-kubelet", "kubernetes node name")
 
+	flags.Int32Var(&c.ListenAddr, "listen-addr", 10250, "listen for log requests")
 	flags.StringVar(&c.MetricsAddr, "metrics-addr", ":10255", "address to listen for metrics/stats requests")
 
 	flags.StringVar(&c.ContainerRegistry, "registry", "docker://", "container registry")
 
 	flags.IntVar(&c.PodSyncWorkers, "pod-sync-workers", 1, `set the number of pod synchronization workers`)
+	flags.DurationVar(&c.InformerResyncPeriod, "full-resync-period", 1*time.Minute, "how often to perform a full resync of pods between kubernetes and the provider")
+
 	flags.BoolVar(&c.EnableNodeLease, "enable-node-lease", true, `use node leases (1.13) for node heartbeats`)
 
-	flags.DurationVar(&c.InformerResyncPeriod, "full-resync-period", 1*time.Minute, "how often to perform a full resync of pods between kubernetes and the provider")
 	flags.DurationVar(&c.StartupTimeout, "startup-timeout", 0, "How long to wait for the virtual-kubelet to start")
 
 	flags.BoolVar(&c.DisableTaint, "disable-taint", false, "disable the virtual-kubelet node taint")
-
 	flags.StringVar(&c.TaintKey, "taint-key", "virtual-kubelet.io/provider", "Set node taint key")
 	flags.StringVar(&c.TaintValue, "taint-value", "hpk", "Set node taint value")
 	flags.StringVar(&c.TaintEffect, "taint-effect", string(corev1.TaintEffectNoSchedule), "Set node taint effect")
