@@ -42,15 +42,15 @@ const (
 )
 
 var ApptainerTemplate = `{{.Apptainer}} 
-{{- if .Environment}}
---env {{ range $index, $variable := .Environment}}{{if $index}},{{end}}{{$variable}}{{end}} \
+{{- if .EnvironmentFilePath}}
+--env-file {{.EnvironmentFilePath}} \
 {{- end}}
 {{- if .Bind}}
 --bind {{ range $index, $path := .Bind}}{{if $index}},{{end}}{{$path}}{{end}} \
 {{- end}}
 {{.Image}}
-{{- if .Command}}{{range $index, $cmd := .Command}} '''{{$cmd}}'''{{end}}{{end -}}
-{{- if .Args}}{{range $index, $arg := .Args}} '''{{$arg}}'''{{end}}{{end -}}
+{{- if .Command}}{{range $index, $cmd := .Command}} '{{$cmd}}'{{end}}{{end -}}
+{{- if .Args}}{{range $index, $arg := .Args}} '{{$arg}}'{{end}}{{end -}}
 `
 
 // ApptainerTemplateFields container the supported fields for the Process template.
@@ -69,8 +69,8 @@ type ApptainerTemplateFields struct {
 	--*/
 	InstanceName *string // Used for Instance
 
-	Environment []string // format: VAR=VALUE
-	Bind        []string // format: /hostpath:/containerpath or /hostpath
+	EnvironmentFilePath string   // format: VAR=VALUE
+	Bind                []string // format: /hostpath:/containerpath or /hostpath
 }
 
 /************************************************************
