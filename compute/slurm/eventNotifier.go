@@ -75,8 +75,9 @@ const (
 	ExtensionExitCode = ".exitCode"
 	ExtensionJobID    = ".jid"
 
-	ExtensionStdout = ".stdout"
-	ExtensionStderr = ".stderr"
+	ExtensionStdout      = ".stdout"
+	ExtensionStderr      = ".stderr"
+	ExtensionEnvironment = ".env"
 )
 
 type PodPath string
@@ -106,32 +107,32 @@ func (p PodPath) ExitCodePath() string {
 	return filepath.Join(string(p), ExtensionExitCode)
 }
 
-// VirtualEnvironmentDir .hpk/namespace/podName/.venv
+// VirtualEnvironmentDir .hpk/namespace/podName/.virtualenv
 func (p PodPath) VirtualEnvironmentDir() PodPath {
-	return PodPath(filepath.Join(string(p), ".venv"))
+	return PodPath(filepath.Join(string(p), ".virtualenv"))
 }
 
-// ConstructorPath .hpk/namespace/podName/.venv/constructor.sh
+// ConstructorPath .hpk/namespace/podName/.virtualenv/constructor.sh
 func (p PodPath) ConstructorPath() string {
 	return filepath.Join(string(p.VirtualEnvironmentDir()), "constructor.sh")
 }
 
-// SubmitJobPath .hpk/namespace/podName/.venv/submit.sh
+// SubmitJobPath .hpk/namespace/podName/.virtualenv/submit.sh
 func (p PodPath) SubmitJobPath() string {
 	return filepath.Join(string(p.VirtualEnvironmentDir()), "submit.sh")
 }
 
-// IPAddressPath .hpk/namespace/podName/.venv/pod.ip
+// IPAddressPath .hpk/namespace/podName/.virtualenv/pod.ip
 func (p PodPath) IPAddressPath() string {
 	return filepath.Join(string(p.VirtualEnvironmentDir()), "pod"+ExtensionIP)
 }
 
-// StdoutPath .hpk/namespace/podName/.venv/pod.stdout
+// StdoutPath .hpk/namespace/podName/.virtualenv/pod.stdout
 func (p PodPath) StdoutPath() string {
 	return filepath.Join(string(p.VirtualEnvironmentDir()), "pod"+ExtensionStdout)
 }
 
-// StderrPath .hpk/namespace/podName/.venv/pod.stderr
+// StderrPath .hpk/namespace/podName/.virtualenv/pod.stderr
 func (p PodPath) StderrPath() string {
 	return filepath.Join(string(p.VirtualEnvironmentDir()), "pod"+ExtensionStderr)
 }
@@ -168,11 +169,15 @@ func (c ContainerPath) ExitCodePath() string {
 	return filepath.Join(string(c) + ExtensionExitCode)
 }
 
+func (c ContainerPath) EnvFilePath() string {
+	return filepath.Join(string(c) + ExtensionEnvironment)
+}
+
 // ParseINotifyPath parses the path according to the expected HPK format, and returns
 // the corresponding fields.
 // Validated through: https://regex101.com/r/s4tb8x/1
 func ParseINotifyPath(path string) (podKey types.NamespacedName, fileName string) {
-	re := regexp.MustCompile(`^.hpk/(?P<namespace>\w+)/(?P<pod>.*?)(/.venv)*/(?P<file>.*)$`)
+	re := regexp.MustCompile(`^.hpk/(?P<namespace>\w+)/(?P<pod>.*?)(/.virtualenv)*/(?P<file>.*)$`)
 
 	match := re.FindStringSubmatch(path)
 
@@ -393,20 +398,16 @@ func (d *FSEventDispatcher) Run(ctx context.Context) {
 
 func reconcilePodStatus(podKey client.ObjectKey) error {
 	/*-- Load VirtualEnvironment from reference --*/
-	pod, err := GetPod(podKey)
-	if err != nil {
-		return errors.Wrapf(err, "unable to load pod")
+	pod := LoadPod(podKey)
+	if pod == nil {
+		return errors.Errorf("pod '%s' does not exist", podKey)
 	}
 
 	/*-- Recalculate the VirtualEnvironment status from locally stored containers --*/
-	if err := podStateMapper(pod); err != nil {
-		return errors.Wrapf(err, "unable to update pod status")
-	}
+	podStateMapper(pod)
 
 	/*-- Update the top-level VirtualEnvironment description --*/
-	if err := SavePod(pod); err != nil {
-		return errors.Wrapf(err, "unable to store pod")
-	}
+	SavePod(pod)
 
 	return nil
 }

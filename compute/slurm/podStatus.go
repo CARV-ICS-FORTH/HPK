@@ -22,17 +22,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const (
-	containerIDType = "pid://"
-)
-
-func PodWithExplicitlyUnsupportedFields(pod *corev1.Pod) bool {
+func PodWithExplicitlyUnsupportedFields(logger logr.Logger, pod *corev1.Pod) bool {
 	var unsupportedFields []string
 
 	/*---------------------------------------------------
@@ -43,7 +40,7 @@ func PodWithExplicitlyUnsupportedFields(pod *corev1.Pod) bool {
 	}
 
 	if pod.Spec.Affinity != nil {
-		DefaultLogger.Info("Ignore .Spec.Affinity")
+		logger.Info("Ignore .Spec.Affinity")
 		// unsupportedFields = append(unsupportedFields, ".Spec.Affinity")
 	}
 
@@ -52,7 +49,7 @@ func PodWithExplicitlyUnsupportedFields(pod *corev1.Pod) bool {
 	}
 
 	if pod.Spec.SecurityContext != nil {
-		DefaultLogger.Info("Ignore .Spec.SecurityContext")
+		logger.Info("Ignore .Spec.SecurityContext")
 		//	unsupportedFields = append(unsupportedFields, ".Spec.SecurityContext")
 	}
 
@@ -61,22 +58,22 @@ func PodWithExplicitlyUnsupportedFields(pod *corev1.Pod) bool {
 	 *---------------------------------------------------*/
 	for i, container := range pod.Spec.Containers {
 		if container.SecurityContext != nil {
-			DefaultLogger.Info(fmt.Sprintf("Ignore .Spec.Containers[%d].SecurityContext", i))
+			logger.Info(fmt.Sprintf("Ignore .Spec.Containers[%d].SecurityContext", i))
 			// unsupportedFields = append(unsupportedFields, fmt.Sprintf(".Spec.Containers[%d].SecurityContext", i))
 		}
 
 		if container.StartupProbe != nil {
-			DefaultLogger.Info(fmt.Sprintf("Ignore .Spec.Containers[%d].StartupProbe", i))
+			logger.Info(fmt.Sprintf("Ignore .Spec.Containers[%d].StartupProbe", i))
 			// unsupportedFields = append(unsupportedFields, fmt.Sprintf(".Spec.Containers[%d].StartupProbe", i))
 		}
 
 		if container.LivenessProbe != nil {
-			DefaultLogger.Info(fmt.Sprintf("Ignore .Spec.Containers[%d].LivenessProbe", i))
+			logger.Info(fmt.Sprintf("Ignore .Spec.Containers[%d].LivenessProbe", i))
 			// unsupportedFields = append(unsupportedFields, fmt.Sprintf(".Spec.Containers[%d].LivenessProbe", i))
 		}
 
 		if container.ReadinessProbe != nil {
-			DefaultLogger.Info(fmt.Sprintf("Ignore .Spec.Containers[%d].ReadinessProbe", i))
+			logger.Info(fmt.Sprintf("Ignore .Spec.Containers[%d].ReadinessProbe", i))
 			// unsupportedFields = append(unsupportedFields, fmt.Sprintf(".Spec.Containers[%d].ReadinessProbe", i))
 		}
 	}
@@ -85,9 +82,7 @@ func PodWithExplicitlyUnsupportedFields(pod *corev1.Pod) bool {
 	 * Summary of Unsupported Fields
 	 *---------------------------------------------------*/
 	if len(unsupportedFields) > 0 {
-		pod.Status.Phase = corev1.PodFailed
-		pod.Status.Reason = "Rejected"
-		pod.Status.Message = "UnsupportedFeatures: " + strings.Join(unsupportedFields, ",")
+		PodError(pod, ReasonUnsupportedFeatures, "UnsupportedFeatures: %s", strings.Join(unsupportedFields, ","))
 
 		return true
 	}
@@ -100,16 +95,24 @@ type test struct {
 	change     func(status *corev1.PodStatus)
 }
 
-func podStateMapper(pod *corev1.Pod) error {
+func podStateMapper(pod *corev1.Pod) {
 	podKey := client.ObjectKeyFromObject(pod)
 	podDir := PodRuntimeDir(podKey)
 	logger := DefaultLogger.WithValues("pod", podKey)
 
 	/*---------------------------------------------------
-	 * Filter-out Pods with Unsupported Fields
+	 * Handle Initialization and Finals States
 	 *---------------------------------------------------*/
-	if PodWithExplicitlyUnsupportedFields(pod) {
-		return nil
+	/*-- If met for first time, check for unsupported fields --*/
+	if pod.Status.Phase == "" {
+		if PodWithExplicitlyUnsupportedFields(logger, pod) {
+			return
+		}
+	}
+
+	/*-- If on final states, there is nothing else to do --*/
+	if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+		return
 	}
 
 	/*---------------------------------------------------
@@ -119,11 +122,9 @@ func podStateMapper(pod *corev1.Pod) error {
 	exitCodePath := podDir.ExitCodePath()
 	exitCode, exitCodeExists := readIntFromFile(exitCodePath)
 	if exitCodeExists && exitCode != 0 {
-		pod.Status.Phase = corev1.PodFailed
-		pod.Status.Reason = "PodExecutionError"
-		pod.Status.Message = "More info at:" + podDir.StderrPath()
+		PodError(pod, ReasonExecutionError, "More info at: %s", podDir.StderrPath())
 
-		return nil
+		return
 	}
 
 	/*-- Get IP of the Virtual Environment --*/
@@ -140,23 +141,30 @@ func podStateMapper(pod *corev1.Pod) error {
 	 * Load Container Statuses
 	 *---------------------------------------------------*/
 	if err := LoadContainerStatuses(pod); err != nil {
-		return errors.Wrapf(err, "Cannot update container status for VirtualEnvironment '%s'", podKey)
+		SystemError(err, "Failed to retrieve container status")
 	}
 
 	/*---------------------------------------------------
 	 * Check status of Init Containers
 	 *---------------------------------------------------*/
 	if pod.Status.Phase == corev1.PodPending {
-		logger.Info(" O Check Init Process Status")
+		logger.Info(" O Checking Init Container Status")
 
 		for _, initContainer := range pod.Status.InitContainerStatuses {
-			if initContainer.State.Terminated != nil {
-				// the VirtualEnvironment is pending is at least one InitContainer is still running
-				return nil
+			if initContainer.State.Terminated == nil {
+				/*-- Initializing: at least one init container is still running --*/
+				return
+			} else {
+				/*-- Initialization error: at least one init container has failed --*/
+				if initContainer.State.Terminated.ExitCode != 0 {
+					PodError(pod, ReasonInitializationError, "Init container '%s' has failed", initContainer.Name)
+
+					return
+				}
 			}
 		}
 
-		/*-- PodInitialized: all init containers have completed successfully --*/
+		/*-- Pod Successful Initialization: all init containers have completed successfully --*/
 		pod.Status.Conditions = append(pod.Status.Conditions, corev1.PodCondition{
 			Type:               corev1.PodInitialized,
 			Status:             corev1.ConditionTrue,
@@ -170,7 +178,7 @@ func podStateMapper(pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Classify container statuses
 	 *---------------------------------------------------*/
-	logger.Info(" O Check Process Status")
+	logger.Info(" O Checking Container Status")
 
 	var state Classifier
 	state.Reset()
@@ -250,7 +258,8 @@ func podStateMapper(pod *corev1.Pod) error {
 	for _, testcase := range testSequence {
 		if testcase.expression {
 			testcase.change(&pod.Status)
-			return nil
+
+			return
 		}
 	}
 
@@ -296,7 +305,7 @@ func LoadContainerStatuses(pod *corev1.Pod) error {
 
 		/*-- StateRunning: existing jobid, means that the job is running --*/
 		if jobIDExists && containerStatus.State.Running == nil {
-			containerStatus.ContainerID = containerIDType + jobID
+			SetContainerStatusID(containerStatus, IDTypeProcess, jobID)
 
 			/*-- todo: since we do not support probes, make everything to look ok --*/
 			started := true
