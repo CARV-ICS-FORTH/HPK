@@ -33,6 +33,11 @@ func FromEndpoints(endpoints []*corev1.Endpoints) []corev1.EnvVar {
 		// fixme: always select the first endpoint
 		subset := endpoint.Subsets[0]
 
+		if subset.Addresses == nil {
+			/*-- ignore addresses that are not ready --*/
+			continue
+		}
+
 		// Host
 		name := makeEnvVariableName(endpoint.Name) + "_SERVICE_HOST"
 		result = append(result, corev1.EnvVar{Name: name, Value: subset.Addresses[0].IP})

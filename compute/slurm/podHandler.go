@@ -16,6 +16,7 @@ package slurm
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -31,7 +32,6 @@ import (
 	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
-	authv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	k8errors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,8 +40,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/json"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
-
-var escapeScripts = regexp.MustCompile(`(--[A-Za-z0-9\-]+=)(\$[{\(][A-Za-z0-9_]+[\)\}])`)
 
 type podHandler struct {
 	*corev1.Pod
@@ -54,25 +52,50 @@ type podHandler struct {
 	logger logr.Logger
 }
 
-func GetPod(podRef client.ObjectKey) (*corev1.Pod, error) {
+func LoadPod(podRef client.ObjectKey) *corev1.Pod {
 	encodedPodFilepath := PodRuntimeDir(podRef).EncodedJSONPath()
 
 	encodedPod, err := os.ReadFile(encodedPodFilepath)
-	if err != nil {
-		// if not found, it means that VirtualEnvironment that:
-		// 1) the pod is  not scheduled on this node (user's problem).
-		// 2) someone removed the file (administrator's problem).
-		// 3) we have a race condition (our problem).
-		return nil, errors.Wrapf(err, "cannot read pod description file '%s'", encodedPodFilepath)
+	if os.IsNotExist(err) {
+		/*
+				if err not found, it means that:
+			 	1) the pod is  not scheduled on this node (user's problem).
+				2) someone removed the file (administrator's problem).
+				3) we have a race condition (our problem).
+		*/
+		return nil
+	} else if err != nil {
+		SystemError(err, "failed to read pod description file '%s'", encodedPodFilepath)
 	}
 
 	var pod corev1.Pod
 
 	if err := json.Unmarshal(encodedPod, &pod); err != nil {
-		return nil, errors.Wrapf(err, "cannot decode pod description file '%s'", encodedPodFilepath)
+		SystemError(err, "cannot decode pod description file '%s'", encodedPodFilepath)
 	}
 
-	return &pod, nil
+	return &pod
+}
+
+func SavePod(pod *corev1.Pod) {
+	podKey := client.ObjectKeyFromObject(pod)
+	logger := DefaultLogger.WithValues("pod", podKey)
+
+	encodedPod, err := json.Marshal(pod)
+	if err != nil {
+		SystemError(err, "cannot marshall pod '%s' to json", podKey)
+	}
+
+	encodedPodFile := PodRuntimeDir(podKey).EncodedJSONPath()
+
+	if err := os.WriteFile(encodedPodFile, encodedPod, PodSpecJsonFilePermissions); err != nil {
+		SystemError(err, "cannot write pod json file '%s'", encodedPodFile)
+	}
+
+	logger.Info("DISK <-- Event: VirtualEnvironment Status Renewed",
+		"version", pod.ResourceVersion,
+		"phase", pod.Status.Phase,
+	)
 }
 
 func GetPods() ([]*corev1.Pod, error) {
@@ -105,104 +128,56 @@ func GetPods() ([]*corev1.Pod, error) {
 	return pods, merr.ErrorOrNil()
 }
 
-func SavePod(pod *corev1.Pod) error {
-	podKey := client.ObjectKeyFromObject(pod)
+/*
+DeletePod takes a Pod Reference and deletes the Pod from the provider.
+DeletePod may be called multiple times for the same pod.
+
+Notice that by using the reference, we operate on the local copy instead of the remote. This serves two purposes:
+1) We can extract updated information from .spec (Kubernetes only fetches .Status)
+2) We can have "fresh" information that is not yet propagated to Kubernetes
+*/
+func DeletePod(podKey client.ObjectKey) error {
+	pod := LoadPod(podKey)
+	if pod == nil {
+		return nil
+	}
+
 	logger := DefaultLogger.WithValues("pod", podKey)
 
-	encodedPod, err := json.Marshal(pod)
-	if err != nil {
-		return errors.Wrapf(err, "cannot marshall pod '%s' to json", podKey)
-	}
-
-	encodedPodFile := PodRuntimeDir(podKey).EncodedJSONPath()
-
-	if err := os.WriteFile(encodedPodFile, encodedPod, PodSpecJsonFilePermissions); err != nil {
-		return errors.Wrapf(err, "cannot write pod json file '%s'", encodedPodFile)
-	}
-
-	logger.Info("DISK <-- Event: VirtualEnvironment Status Renewed",
-		"version", pod.ResourceVersion,
-		"phase", pod.Status.Phase,
-	)
-
-	return nil
-}
-
-func DeletePod(pod *corev1.Pod) error {
-	podKey := client.ObjectKeyFromObject(pod)
-	// logger := DefaultLogger.WithValues("pod", podKey)
-
 	/*---------------------------------------------------
-	 * Cancel Slurm Jobs
+	 * Cancel Slurm Job
 	 *---------------------------------------------------*/
-	/*
-			DeletePod takes a Kubernetes VirtualEnvironment and deletes it from the provider.
-			TODO: Once a pod is deleted, the provider is expected
-			to call the NotifyPods callback with a terminal pod status
-			where all the containers are in a terminal state, as well as the pod.
-			DeletePod may be called multiple times for the same pod
+	logger.Info(" * Cancelling Slurm Job")
 
-		{
-			// Fail this condition because containers are no longer individual Slurm jobs,
-			// but they are processes within a pod/job.
-			// TODO: find a way to use the slurm identifier to cancel the job
+	idType, podID := ParsePodID(pod)
 
-			var merr *multierror.Error
-
-			for i, container := range pod.Status.InitContainerStatuses {
-				/*-- Cancel Process Job --* /
-				if container.ContainerID != "" {
-					/*-- Extract container_id from raw format '<type>://<container_id>'. --* /
-					containerID := strings.Split(container.ContainerID, containerIDType)[1]
-
-					_, err := CancelJob(containerID)
-					if err != nil {
-						merr = multierror.Append(merr, errors.Wrapf(err, "failed to cancel job '%s'", container.ContainerID))
-					}
-				}
-
-				/*-- Mark the Process as Terminated --* /
-				pod.Status.InitContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
-					Reason:     "PodIsDeleted",
-					Message:    "VirtualEnvironment is being deleted",
-					FinishedAt: metav1.Now(),
-				}
-			}
-
-			for i, container := range pod.Status.ContainerStatuses {
-				/*-- Cancel Process Job --* /
-				if container.ContainerID != "" {
-					/*-- Extract container_id from raw format '<type>://<container_id>'. --* /
-					containerID := strings.Split(container.ContainerID, containerIDType)[1]
-
-					_, err := CancelJob(containerID)
-					if err != nil {
-						merr = multierror.Append(merr, errors.Wrapf(err, "failed to cancel job '%s'", container.ContainerID))
-					}
-				}
-
-				/*-- Mark the Process as Terminated --* /
-				pod.Status.ContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
-					Reason:     "PodIsDeleted",
-					Message:    "VirtualEnvironment is being deleted",
-					FinishedAt: metav1.Now(),
-				}
-			}
-
-			if merr.ErrorOrNil() != nil {
-				logger.Error(merr, "VirtualEnvironment termination error")
-			}
+	if idType != IDTypeEmpty {
+		out, err := CancelJob(podID)
+		if err != nil {
+			SystemError(err, "failed to cancel job '%s'. out: '%s'", podID, out)
 		}
-	*/
+
+		logger.Info("Slurm Job has been cancelled", "job", podID, "out", out)
+	} else {
+		logger.Info(" * No Slurm ID was found.")
+	}
 
 	/*---------------------------------------------------
-	 * Remove VirtualEnvironment directory
+	 * Remove Pod Directory
 	 *---------------------------------------------------*/
+	logger.Info(" * Removing Pod Directory")
+
 	podDir := PodRuntimeDir(podKey)
 
 	if err := os.RemoveAll(string(podDir)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return errors.Wrapf(err, "failed to delete pod directory %s'", podDir)
+		SystemError(err, "failed to delete pod directory %s'", podDir)
 	}
+
+	/*
+		TODO: Once a pod is deleted, the provider is expected
+		to call the NotifyPods callback with a terminal pod status
+		where all the containers are in a terminal state, as well as the pod.
+	*/
 
 	return nil
 }
@@ -230,19 +205,19 @@ func CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Prepare VirtualEnvironment for execution on Slurm
 	 *---------------------------------------------------*/
-	logger.Info("* Creating Virtual Environment ==")
+	logger.Info("== Creating Virtual Environment ==")
 
 	/*-- Create the directory for virtual environment --*/
 	virtualEnvironmentDir := PodRuntimeDir(podKey).VirtualEnvironmentDir()
 
 	if err := os.MkdirAll(string(virtualEnvironmentDir), PodGlobalDirectoryPermissions); err != nil {
-		return errors.Wrapf(err, "Cant create sbatch directory '%s'", virtualEnvironmentDir)
+		SystemError(err, "Cant create sbatch directory '%s'", virtualEnvironmentDir)
 	}
 
 	/*-- Setting a list of services the pod in a namespace should see --*/
 	podEnvVariables, err := getServiceEnvVarMap(ctx, pod.GetNamespace())
 	if err != nil {
-		return errors.Wrapf(err, "failed to prepare environment variables")
+		SystemError(err, "failed to prepare environment variables")
 	}
 
 	/*-- Create the pod handler --*/
@@ -254,19 +229,15 @@ func CreatePod(ctx context.Context, pod *corev1.Pod) error {
 		logger:          logger,
 	}
 
-	/*-- Kind of Journalling --*/
-	if err := SavePod(pod); err != nil {
-		return errors.Wrapf(err, "failed to save pod description")
-	}
+	/*-- Kind of Journaling --*/
+	SavePod(pod)
 
 	/*---------------------------------------------------
 	 * Prepare Volumes on the VirtualEnvironment
 	 *---------------------------------------------------*/
 	logger.Info(" * Creating Backend Volumes")
 
-	if err := h.makeMounts(ctx); err != nil {
-		return errors.Wrapf(err, "volume preparation error")
-	}
+	h.makeMounts(ctx)
 
 	/*---------------------------------------------------
 	 * Set listeners for async changes on the VirtualEnvironment
@@ -276,7 +247,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	// because fswatch does not work recursively, we cannot have the container directories nested within the pod.
 	// instead, we use a flat directory in the format "podir/containername.{jid,stdout,stdour,...}"
 	if err := fswatcher.Add(string(h.podDirectory)); err != nil {
-		return errors.Wrapf(err, "register to fsnotify has failed for path '%s'", h.podDirectory)
+		SystemError(err, "register to fsnotify has failed for path '%s'", h.podDirectory)
 	}
 
 	/*---------------------------------------------------
@@ -289,7 +260,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	for i, container := range pod.Spec.InitContainers {
 		job, err := h.makeApptainerCommands(&pod.Spec.InitContainers[i], true)
 		if err != nil {
-			return errors.Wrapf(err, "creation request failed for container '%s'", container.Name)
+			SystemError(err, "creation request failed for container '%s'", container.Name)
 		}
 
 		initContainers = append(initContainers, job)
@@ -354,7 +325,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	sbatchTemplate, err := template.New(h.Name).Option("missingkey=error").Parse(SBatchTemplate)
 	if err != nil {
 		/*-- template errors should be expected from the custom fields where users can inject shitty input.	--*/
-		return errors.Wrapf(err, "sbatch template error")
+		SystemError(err, "sbatch template error")
 	}
 
 	/*---------------------------------------------------
@@ -367,27 +338,59 @@ func CreatePod(ctx context.Context, pod *corev1.Pod) error {
 
 	if err := sbatchTemplate.Execute(&sbatchScript, job); err != nil {
 		/*-- since both the template and fields are internal to the code, the evaluation should always succeed	--*/
-		panic(errors.Wrapf(err, "failed to evaluate sbatch template"))
+		SystemError(err, "failed to evaluate sbatch template")
 	}
 
 	if err := os.WriteFile(sbatchScriptPath, []byte(sbatchScript.String()), ContainerJobPermissions); err != nil {
-		return errors.Wrapf(err, "unable to write sbatch sbatchScript in file '%s'", job.VirtualEnv.ConstructorPath)
+		SystemError(err, "unable to write sbatch sbatchScript in file '%s'", job.VirtualEnv.ConstructorPath)
 	}
 
 	/*---------------------------------------------------
-	 * Submit Sbatch to Slurm and get Submission Results
+	 * Submit job to Slurm, and store the JobID
 	 *---------------------------------------------------*/
 	logger.Info(" * Submit sbatch to Slurm", "scriptPath", job.VirtualEnv.ConstructorPath)
 
-	if err := h.submitJob(sbatchScriptPath); err != nil {
-		return errors.Wrapf(err, "sbatch submission error")
+	jobID, err := h.submitJob(sbatchScriptPath)
+	if err != nil {
+		SystemError(err, "failed to submit job")
 	}
 
+	/*-- Update Pod with the JobID --*/
+	SetPodID(h.Pod, IDTypeSlurm, jobID)
+	if err != nil {
+		SystemError(err, "failed to submit job")
+	}
+
+	SavePod(h.Pod)
+
+	h.logger.Info(" * Job has been submitted to Slurm", "jobID", jobID)
 	return nil
 }
 
 func (h *podHandler) makeApptainerCommands(container *corev1.Container, isInitContainer bool) (Process, error) {
-	h.logger.Info("== Build Process Command  ==", "container", container.Name)
+	h.logger.Info(" == Apptainer ==", "container", container.Name)
+
+	containerPath := h.podDirectory.Container(container.Name)
+
+	/*---------------------------------------------------
+	 * Prepare Environment Variables
+	 *---------------------------------------------------*/
+	var envfile strings.Builder
+	envfilePath := containerPath.EnvFilePath()
+
+	/*-- Set pod-wide variables --*/
+	for _, envVar := range h.podEnvVariables {
+		envfile.WriteString(fmt.Sprintf("%s='%s'\n", envVar.Name, envVar.Value))
+	}
+
+	/*-- Set container-specific variables --*/
+	for _, envVar := range container.Env {
+		envfile.WriteString(fmt.Sprintf("%s='%s'\n", envVar.Name, envVar.Value))
+	}
+
+	if err := os.WriteFile(envfilePath, []byte(envfile.String()), PodGlobalDirectoryPermissions); err != nil {
+		SystemError(err, "cannot write env file for container '%s' of pod '%s'", container, h.podKey)
+	}
 
 	/*---------------------------------------------------
 	 * Prepare fields for Process Template
@@ -395,24 +398,10 @@ func (h *podHandler) makeApptainerCommands(container *corev1.Container, isInitCo
 	h.logger.Info(" * Set flags and execution args")
 
 	tFields := ApptainerTemplateFields{
-		Image:   compute.Environment.ContainerRegistry + container.Image,
-		Command: container.Command,
-		Args:    container.Args,
-		Environment: func() []string {
-			var envArgs []string
-
-			/*-- Set pod-wide variables --*/
-			for _, envVar := range h.podEnvVariables {
-				envArgs = append(envArgs, envVar.Name+"="+envVar.Value)
-			}
-
-			/*-- Set container-specific variables --*/
-			for _, envVar := range container.Env {
-				envArgs = append(envArgs, envVar.Name+"="+envVar.Value)
-			}
-
-			return envArgs
-		}(),
+		Image:               compute.Environment.ContainerRegistry + container.Image,
+		Command:             container.Command,
+		Args:                container.Args,
+		EnvironmentFilePath: envfilePath,
 		Bind: func() []string {
 			mountArgs := make([]string, 0, len(container.VolumeMounts))
 
@@ -458,8 +447,6 @@ func (h *podHandler) makeApptainerCommands(container *corev1.Container, isInitCo
 		panic(errors.Wrapf(err, "failed to evaluate Process template"))
 	}
 
-	containerPath := h.podDirectory.Container(container.Name)
-
 	return Process{
 		Command:      apptainerCmd.String(),
 		IDPath:       containerPath.IDPath(),
@@ -469,28 +456,22 @@ func (h *podHandler) makeApptainerCommands(container *corev1.Container, isInitCo
 	}, nil
 }
 
-func (h *podHandler) submitJob(scriptFilePath string) error {
+func (h *podHandler) submitJob(scriptFilePath string) (string, error) {
 	out, err := SubmitJob(scriptFilePath)
 	if err != nil {
-		h.logger.Error(err, "sbatch submission error", "out", out)
-
-		panic(errors.Wrapf(err, "sbatch submission error"))
+		SystemError(err, "sbatch submission error. out : '%s'", out)
 	}
 
 	expectedOutput := regexp.MustCompile(`Submitted batch job (?P<jid>\d+)`)
 	jid := expectedOutput.FindStringSubmatch(out)
 
-	intJobID, err := strconv.Atoi(jid[1])
-	if err != nil {
-		return errors.Wrap(err, "Cant convert jid as integer. Parsed irregular output!")
+	if _, err := strconv.Atoi(jid[1]); err != nil {
+		SystemError(err, "Cant convert jid as integer. Parsed irregular output!")
 	}
-
-	h.logger.Info(" * Job has been submitted to Slurm", "jobID", intJobID)
-
-	return nil
+	return jid[1], nil
 }
 
-func (h *podHandler) makeMounts(ctx context.Context) error {
+func (h *podHandler) makeMounts(ctx context.Context) {
 	/*---------------------------------------------------
 	 * Copy volumes from local VirtualEnvironment to remote HPCBackend
 	 *---------------------------------------------------*/
@@ -509,27 +490,23 @@ func (h *podHandler) makeMounts(ctx context.Context) error {
 
 			source := vol.VolumeSource.ConfigMap
 
-			key := types.NamespacedName{
-				Namespace: h.Pod.GetNamespace(),
-				Name:      source.Name,
-			}
+			key := types.NamespacedName{Namespace: h.Pod.GetNamespace(), Name: source.Name}
 
-			err := compute.K8SClient.Get(ctx, key, &configMap)
-
-			if k8errors.IsNotFound(err) {
+			if err := compute.K8SClient.Get(ctx, key, &configMap); k8errors.IsNotFound(err) {
 				if source.Optional != nil && *source.Optional == false {
-					return errors.Wrapf(err, "mandatory Configmap '%s' was not found", key)
+					PodError(h.Pod, ReasonObjectNotFound, "configMap '%s'", key)
 				}
-			}
 
-			if err != nil {
-				return errors.Wrapf(err, "failed to get ConfigMap '%s'", key)
+				/*-- configMap is optional, and we can safely skip the step --*/
+				return
+			} else if err != nil {
+				SystemError(err, "error getting configMap '%s'", key)
 			}
 
 			// .hpk/namespace/podName/volName/*
 			podConfigMapDir, err := h.podDirectory.CreateSubDirectory(vol.Name)
 			if err != nil {
-				return errors.Wrapf(err, "cannot create dir '%s' for configMap", podConfigMapDir)
+				SystemError(err, "cannot create dir '%s' for configMap", podConfigMapDir)
 			}
 
 			for k, v := range configMap.Data {
@@ -537,7 +514,7 @@ func (h *podHandler) makeMounts(ctx context.Context) error {
 				fullPath := filepath.Join(podConfigMapDir, k)
 
 				if err := os.WriteFile(fullPath, []byte(v), fs.FileMode(*source.DefaultMode)); err != nil {
-					return errors.Wrapf(err, "cannot write config map file '%s'", fullPath)
+					SystemError(err, "cannot write config map file '%s'", fullPath)
 				}
 			}
 
@@ -549,34 +526,30 @@ func (h *podHandler) makeMounts(ctx context.Context) error {
 
 			source := vol.VolumeSource.Secret
 
-			key := types.NamespacedName{
-				Namespace: h.Pod.GetNamespace(),
-				Name:      source.SecretName,
-			}
+			key := types.NamespacedName{Namespace: h.Pod.GetNamespace(), Name: source.SecretName}
 
-			err := compute.K8SClient.Get(ctx, key, &secret)
-
-			if k8errors.IsNotFound(err) {
+			if err := compute.K8SClient.Get(ctx, key, &secret); k8errors.IsNotFound(err) {
 				if source.Optional != nil && *source.Optional == false {
-					return errors.Wrapf(err, "mandatory Secret '%s' was not found", key)
+					PodError(h.Pod, ReasonObjectNotFound, "secret '%s'", key)
 				}
-			}
 
-			if err != nil {
-				return errors.Wrapf(err, "failed to get Secret '%s'", key)
+				/*-- secret is optional, and we can safely skip the step --*/
+				return
+			} else if err != nil {
+				SystemError(err, "error getting secret '%s'", key)
 			}
 
 			// .hpk/namespace/podName/secretName/*
 			podSecretDir, err := h.podDirectory.CreateSubDirectory(vol.Name)
 			if err != nil {
-				return errors.Wrapf(err, "cannot create dir '%s' for secrets", podSecretDir)
+				SystemError(err, "cannot create dir '%s' for secrets", podSecretDir)
 			}
 
 			for k, v := range secret.Data {
 				fullPath := filepath.Join(podSecretDir, k)
 
 				if err := os.WriteFile(fullPath, v, fs.FileMode(*source.DefaultMode)); err != nil {
-					return errors.Wrapf(err, "Could not write secret file %s", fullPath)
+					SystemError(err, "Could not write secret file %s", fullPath)
 				}
 			}
 
@@ -586,7 +559,7 @@ func (h *podHandler) makeMounts(ctx context.Context) error {
 			 *---------------------------------------------------*/
 			emptyDir, err := h.podDirectory.CreateSubDirectory(vol.Name)
 			if err != nil {
-				return errors.Wrapf(err, "cannot create dir '%s' for emptyDir", emptyDir)
+				SystemError(err, "cannot create dir '%s' for emptyDir", emptyDir)
 			}
 			// without size limit for now
 
@@ -596,18 +569,20 @@ func (h *podHandler) makeMounts(ctx context.Context) error {
 			 *---------------------------------------------------*/
 			downApiDir, err := h.podDirectory.CreateSubDirectory(vol.Name)
 			if err != nil {
-				return errors.Wrapf(err, "cannot create dir '%s' for downwardApi", downApiDir)
+				SystemError(err, "cannot create dir '%s' for downwardApi", downApiDir)
 			}
 
 			for _, item := range vol.DownwardAPI.Items {
 				itemPath := filepath.Join(downApiDir, item.Path)
 				value, err := fieldpath.ExtractFieldPathAsString(h.Pod, item.FieldRef.FieldPath)
 				if err != nil {
-					return err
+					PodError(h.Pod, ReasonSpecError, err.Error())
+
+					return
 				}
 
 				if err := os.WriteFile(itemPath, []byte(value), fs.FileMode(*vol.Projected.DefaultMode)); err != nil {
-					return errors.Wrapf(err, "cannot write config map file '%s'", itemPath)
+					SystemError(err, "cannot write config map file '%s'", itemPath)
 				}
 			}
 
@@ -619,19 +594,19 @@ func (h *podHandler) makeMounts(ctx context.Context) error {
 			case corev1.HostPathUnset:
 				// For backwards compatible, leave it empty if unset
 				if path, err := h.podDirectory.CreateSubDirectory(vol.Name); err != nil {
-					return errors.Wrapf(err, "cannot create HostPathUnset at path '%s'", path)
+					SystemError(err, "cannot create HostPathUnset at path '%s'", path)
 				}
 
 			case corev1.HostPathDirectoryOrCreate:
 				// If nothing exists at the given path, an empty directory will be created there
 				// as needed with file mode 0755, having the same group and ownership with Kubelet.
 				if path, err := h.podDirectory.CreateSubDirectory(vol.Name); err != nil {
-					return errors.Wrapf(err, "cannot create HostPathDirectoryOrCreate at path '%s'", path)
+					SystemError(err, "cannot create HostPathDirectoryOrCreate at path '%s'", path)
 				}
 			case corev1.HostPathDirectory:
 				// A directory must exist at the given path
 				if path, err := h.podDirectory.CreateSubDirectory(vol.Name); err != nil {
-					return errors.Wrapf(err, "cannot create HostPathDirectory at path '%s'", path)
+					SystemError(err, "cannot create HostPathDirectory at path '%s'", path)
 				}
 
 			case corev1.HostPathFileOrCreate:
@@ -640,23 +615,24 @@ func (h *podHandler) makeMounts(ctx context.Context) error {
 				// .hpk/podName/volName/*
 				f, err := os.Create(string(h.podDirectory))
 				if err != nil {
-					return errors.Wrapf(err, "cannot create '%s'", string(h.podDirectory))
+					SystemError(err, "cannot create  '%s'", string(h.podDirectory))
 				}
 
 				if err := f.Close(); err != nil {
-					return errors.Wrapf(err, "cannot close file '%s'", string(h.podDirectory))
+					SystemError(err, "cannot close file '%s'", string(h.podDirectory))
 				}
 			case corev1.HostPathFile:
 				// A file must exist at the given path
 				// .hpk/podName/volName/*
 				f, err := os.Create(string(h.podDirectory))
 				if err != nil {
-					return errors.Wrapf(err, "cannot create '%s'", string(h.podDirectory))
+					SystemError(err, "cannot create '%s'", string(h.podDirectory))
 				}
 
 				if err := f.Close(); err != nil {
-					return errors.Wrapf(err, "cannot close file '%s'", string(h.podDirectory))
+					SystemError(err, "cannot close file '%s'", string(h.podDirectory))
 				}
+
 			case corev1.HostPathSocket, corev1.HostPathCharDev, corev1.HostPathBlockDev:
 				// A UNIX socket/char device/ block device must exist at the given path
 				continue
@@ -670,7 +646,7 @@ func (h *podHandler) makeMounts(ctx context.Context) error {
 			 *---------------------------------------------------*/
 			projectedVolPath, err := h.podDirectory.CreateSubDirectory(vol.Name)
 			if err != nil {
-				return errors.Wrapf(err, "cannot create dir '%s' for projected volume", projectedVolPath)
+				SystemError(err, "cannot create dir '%s' for projected volume", projectedVolPath)
 			}
 
 			for _, projectedSrc := range vol.Projected.Sources {
@@ -684,11 +660,13 @@ func (h *podHandler) makeMounts(ctx context.Context) error {
 
 						value, err := fieldpath.ExtractFieldPathAsString(h.Pod, item.FieldRef.FieldPath)
 						if err != nil {
-							return err
+							PodError(h.Pod, ReasonSpecError, err.Error())
+
+							return
 						}
 
 						if err := os.WriteFile(itemPath, []byte(value), fs.FileMode(*vol.Projected.DefaultMode)); err != nil {
-							return errors.Wrapf(err, "cannot write config map file '%s'", itemPath)
+							SystemError(err, "cannot write config map file '%s'", itemPath)
 						}
 					}
 
@@ -696,68 +674,114 @@ func (h *podHandler) makeMounts(ctx context.Context) error {
 					/*---------------------------------------------------
 					 * Projected ServiceAccountToken
 					 *---------------------------------------------------*/
-					source := projectedSrc.ServiceAccountToken
+					var serviceAccount corev1.ServiceAccount
 
-					tokenRequest, err := compute.ClientSet.CoreV1().
-						ServiceAccounts(h.Pod.GetNamespace()).
-						CreateToken(ctx, h.Pod.Spec.ServiceAccountName, &authv1.TokenRequest{
-							Spec: authv1.TokenRequestSpec{
-								Audiences:         []string{source.Audience},
-								ExpirationSeconds: source.ExpirationSeconds,
-								BoundObjectRef: &authv1.BoundObjectReference{
-									Kind:       "Pod",
-									APIVersion: "v1",
-									Name:       h.Pod.GetName(),
-								},
-							},
-						}, metav1.CreateOptions{})
+					key := types.NamespacedName{Namespace: h.Pod.GetNamespace(), Name: h.Pod.Spec.ServiceAccountName}
 
-					if err != nil {
-						return errors.Wrapf(err, "failed to create token for Pod '%s'", h.podKey)
-					}
+					if err := compute.K8SClient.Get(ctx, key, &serviceAccount); k8errors.IsNotFound(err) {
+						PodError(h.Pod, ReasonObjectNotFound, "serviceaccount '%s'", key)
 
-					// TODO: Update upon exceeded expiration date
-					// TODO: Ensure that these files are deleted in failure cases
-					fullPath := filepath.Join(projectedVolPath, projectedSrc.ServiceAccountToken.Path)
-
-					if err := os.WriteFile(fullPath, []byte(tokenRequest.Status.Token), fs.FileMode(0o766)); err != nil {
-						return errors.Wrapf(err, "cannot write token '%s'", fullPath)
+						return
+					} else if err != nil {
+						SystemError(err, "error getting serviceaccount '%s'", key)
 					}
 
 					/*
-							automount follows the instructions of:
-							https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/
+						automount follows the instructions of:
+						https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/
+					*/
 
-							If both the ServiceAccount and the Pod's .spec specify a value for automountServiceAccountToken, the Pod spec takes precedence.
+					automount := true
 
-						var automount bool
+					switch {
+					case h.Pod.Spec.AutomountServiceAccountToken != nil:
+						automount = *h.Pod.Spec.AutomountServiceAccountToken
+					case serviceAccount.AutomountServiceAccountToken != nil:
+						automount = *serviceAccount.AutomountServiceAccountToken
+					}
 
-						switch {
-						case h.Pod.Spec.AutomountServiceAccountToken != nil:
-							automount = *h.Pod.Spec.AutomountServiceAccountToken
-						case serviceAccount.AutomountServiceAccountToken != nil:
-							automount = *serviceAccount.AutomountServiceAccountToken
-						}
+					if automount {
+						for _, secretRef := range serviceAccount.Secrets {
+							var secret corev1.Secret
 
-						if automount {
-							for _, secretRef := range serviceAccount.Secrets {
-								var secret corev1.Secret
+							secretKey := types.NamespacedName{Namespace: h.Pod.GetNamespace(), Name: secretRef.Name}
 
-								secretKey := types.NamespacedName{Namespace: secretRef.Namespace, Name: secretRef.Name}
+							if err := compute.K8SClient.Get(ctx, secretKey, &secret); k8errors.IsNotFound(err) {
+								PodError(h.Pod, ReasonObjectNotFound, "secret '%s'", secretKey)
 
-								if err := compute.K8SClient.Get(ctx, secretKey, &secret); err != nil {
-									return errors.Wrapf(err, "failed to get secret '%s'", secretKey)
-								}
+								return
+							} else if err != nil {
+								SystemError(err, "error getting secret '%s'", secretKey)
+							}
 
-								// TODO: Update upon exceeded expiration date
-								// TODO: Ensure that these files are deleted in failure cases
-								fullPath := filepath.Join(projectedVolPath, projectedSrc.ServiceAccountToken.Path)
+							// TODO: Update upon exceeded expiration date
+							// TODO: Ensure that these files are deleted in failure cases
+							fullPath := filepath.Join(projectedVolPath, projectedSrc.ServiceAccountToken.Path)
 
-								if err := os.WriteFile(fullPath, secret.Data[projectedSrc.ServiceAccountToken.Path], fs.FileMode(0o766)); err != nil {
-									return errors.Wrapf(err, "cannot write config map file '%s'", fullPath)
-								}
+							if err := os.WriteFile(fullPath, secret.Data[projectedSrc.ServiceAccountToken.Path], fs.FileMode(0o766)); err != nil {
+								SystemError(err, "cannot write token '%s'", fullPath)
 							}
 						}
+					}
+
+					/*
+						source := projectedSrc.ServiceAccountToken
+
+						tokenRequest, err := compute.ClientSet.CoreV1().
+							ServiceAccounts(h.Pod.GetNamespace()).
+							CreateToken(ctx, h.Pod.Spec.ServiceAccountName, &authv1.TokenRequest{
+								Spec: authv1.TokenRequestSpec{
+									Audiences:         []string{source.Audience},
+									ExpirationSeconds: source.ExpirationSeconds,
+									BoundObjectRef: &authv1.BoundObjectReference{
+										Kind:       "Pod",
+										APIVersion: "v1",
+										Name:       h.Pod.GetName(),
+									},
+								},
+							}, metav1.CreateOptions{})
+
+						if err != nil {
+							return errors.Wrapf(err, "failed to create token for Pod '%s'", h.podKey)
+						}
+
+						// TODO: Update upon exceeded expiration date
+						// TODO: Ensure that these files are deleted in failure cases
+						fullPath := filepath.Join(projectedVolPath, projectedSrc.ServiceAccountToken.Path)
+
+						if err := os.WriteFile(fullPath, []byte(tokenRequest.Status.Token), fs.FileMode(0o766)); err != nil {
+							return errors.Wrapf(err, "cannot write token '%s'", fullPath)
+						}
+
+
+							var automount bool
+
+							switch {
+							case h.Pod.Spec.AutomountServiceAccountToken != nil:
+								automount = *h.Pod.Spec.AutomountServiceAccountToken
+							case serviceAccount.AutomountServiceAccountToken != nil:
+								automount = *serviceAccount.AutomountServiceAccountToken
+							}
+
+							if automount {
+								for _, secretRef := range serviceAccount.Secrets {
+									var secret corev1.Secret
+
+									secretKey := types.NamespacedName{Namespace: secretRef.Namespace, Name: secretRef.Name}
+
+									if err := compute.K8SClient.Get(ctx, secretKey, &secret); err != nil {
+										return errors.Wrapf(err, "failed to get secret '%s'", secretKey)
+									}
+
+									// TODO: Update upon exceeded expiration date
+									// TODO: Ensure that these files are deleted in failure cases
+									fullPath := filepath.Join(projectedVolPath, projectedSrc.ServiceAccountToken.Path)
+
+									if err := os.WriteFile(fullPath, secret.Data[projectedSrc.ServiceAccountToken.Path], fs.FileMode(0o766)); err != nil {
+										return errors.Wrapf(err, "cannot write config map file '%s'", fullPath)
+									}
+								}
+							}
 					*/
 
 				case projectedSrc.ConfigMap != nil:
@@ -768,28 +792,24 @@ func (h *podHandler) makeMounts(ctx context.Context) error {
 
 					source := projectedSrc.ConfigMap
 
-					key := types.NamespacedName{
-						Namespace: h.Pod.GetNamespace(),
-						Name:      source.Name,
-					}
+					key := types.NamespacedName{Namespace: h.Pod.GetNamespace(), Name: source.Name}
 
-					err := compute.K8SClient.Get(ctx, key, &configmap)
-
-					if k8errors.IsNotFound(err) {
+					if err := compute.K8SClient.Get(ctx, key, &configmap); k8errors.IsNotFound(err) {
 						if source.Optional != nil && *source.Optional == false {
-							return errors.Wrapf(err, "mandatory configmap '%s' was not found", key)
+							PodError(h.Pod, ReasonObjectNotFound, "configmap '%s'", key)
 						}
-					}
 
-					if err != nil {
-						return errors.Wrapf(err, "failed to get Secret '%s'", key)
+						/*-- configmap is optional, and we can safely skip the step --*/
+						return
+					} else if err != nil {
+						SystemError(err, "error getting configmap '%s'", key)
 					}
 
 					for k, item := range configmap.Data {
 						// TODO: Ensure that these files are deleted in failure cases
 						itemPath := filepath.Join(projectedVolPath, k)
 						if err := os.WriteFile(itemPath, []byte(item), PodGlobalDirectoryPermissions); err != nil {
-							return errors.Wrapf(err, "cannot write config map file '%s'", itemPath)
+							SystemError(err, "cannot write config map file '%s'", itemPath)
 						}
 					}
 
@@ -801,21 +821,17 @@ func (h *podHandler) makeMounts(ctx context.Context) error {
 
 					source := projectedSrc.Secret
 
-					key := types.NamespacedName{
-						Namespace: h.Pod.GetNamespace(),
-						Name:      source.Name,
-					}
+					key := types.NamespacedName{Namespace: h.Pod.GetNamespace(), Name: source.Name}
 
-					err := compute.K8SClient.Get(ctx, key, &secret)
-
-					if k8errors.IsNotFound(err) {
+					if err := compute.K8SClient.Get(ctx, key, &secret); k8errors.IsNotFound(err) {
 						if source.Optional != nil && *source.Optional == false {
-							return errors.Wrapf(err, "mandatory Secret '%s' was not found", key)
+							PodError(h.Pod, ReasonObjectNotFound, "secret '%s'", key)
 						}
-					}
 
-					if err != nil {
-						return errors.Wrapf(err, "failed to get Secret '%s'", key)
+						/*-- secret is optional, and we can safely skip the step --*/
+						return
+					} else if err != nil {
+						SystemError(err, "error getting secret '%s'", key)
 					}
 
 					for k, item := range secret.Data {
@@ -823,7 +839,7 @@ func (h *podHandler) makeMounts(ctx context.Context) error {
 						itemPath := filepath.Join(projectedVolPath, k)
 
 						if err := os.WriteFile(itemPath, item, PodGlobalDirectoryPermissions); err != nil {
-							return errors.Wrapf(err, "cannot write config map file '%s'", itemPath)
+							SystemError(err, "cannot write config map file '%s'", itemPath)
 						}
 					}
 				default:
@@ -834,8 +850,6 @@ func (h *podHandler) makeMounts(ctx context.Context) error {
 			}
 		}
 	}
-
-	return nil
 }
 
 // getServiceEnvVarMap makes a map[string]string of env vars for services a  pod in namespace ns should see.

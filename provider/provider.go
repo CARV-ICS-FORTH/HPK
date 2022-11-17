@@ -21,25 +21,13 @@ import (
 	"github.com/carv-ics-forth/hpk/compute/slurm"
 	"github.com/go-logr/logr"
 	"github.com/niemeyer/pretty"
-	"github.com/pkg/errors"
+	"github.com/virtual-kubelet/virtual-kubelet/errdefs"
 	vkapi "github.com/virtual-kubelet/virtual-kubelet/node/api"
 	"github.com/virtual-kubelet/virtual-kubelet/node/api/statsv1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
-
-func Abort(pod *corev1.Pod, abortErr error) error {
-	pod.Status.Phase = corev1.PodFailed
-	pod.Status.Reason = "ProviderError"
-	pod.Status.Message = abortErr.Error()
-
-	if err := slurm.SavePod(pod); err != nil {
-		panic(errors.Wrapf(err, "this should not happeen"))
-	}
-
-	return abortErr
-}
 
 // Provider implements the virtual-kubelet provider interface and stores pods in memory.
 type Provider struct {
@@ -82,28 +70,27 @@ func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	logger.Info("-> CreatePod")
 
 	defer func() {
-		logger.Info("<- CreatePod", "podIP", pod.Status.PodIP)
+		logger.Info("<- CreatePod")
 	}()
 
 	/*---------------------------------------------------
-	 * Match the IPs between host and pod.
+	 * Compromise with Virtual Kubernetes Conventions
 	 *---------------------------------------------------*/
 
 	/*
+		Match the IPs between host and pod.
 		This is needed so that node-level logging requests
 		will be handled by the Virtual Kubelet
 		https://ritazh.com/understanding-kubectl-logs-with-virtual-kubelet-a135e83ae0ee
 	*/
 	pod.Status.HostIP = p.InitConfig.InternalIP
 
-	/*---------------------------------------------------
-	 * Pass the pod for creation to the backend
-	 *---------------------------------------------------*/
-	if err := slurm.CreatePod(ctx, pod); err != nil {
-		return Abort(pod, errors.Wrapf(err, "unable to create pod"))
-	}
-
-	return nil
+	/*
+		If an error is returned, Virtual Kubernetes will set the Phase to either "Pending" or "Failed",
+		depending on the pod.RestartPolicy.
+		In both cases, it will	wrap the reason into "podStatusReasonProviderFailed"
+	*/
+	return slurm.CreatePod(ctx, pod)
 }
 
 // UpdatePod accepts a VirtualEnvironment definition and updates its reference.
@@ -123,9 +110,9 @@ func (p *Provider) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Ensure that received pod is newer than the local
 	 *---------------------------------------------------*/
-	oldPod, err := slurm.GetPod(podKey)
-	if err != nil {
-		return Abort(pod, errors.Wrapf(err, "unable to load local pod"))
+	oldPod := slurm.LoadPod(podKey)
+	if oldPod == nil {
+		return errdefs.NotFoundf("object not found")
 	}
 
 	if oldPod.ResourceVersion >= pod.ResourceVersion {
@@ -172,7 +159,7 @@ func (p *Provider) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 	logger.Info("-> DeletePod")
 	defer logger.Info("<- DeletePod")
 
-	return slurm.DeletePod(pod)
+	return slurm.DeletePod(podKey)
 }
 
 // GetPods returns a list of all pods known to be "running".
@@ -197,7 +184,11 @@ func (p *Provider) GetPod(ctx context.Context, namespace, name string) (*corev1.
 	logger.Info("-> GetPod")
 	defer logger.Info("<- GetPod")
 
-	return slurm.GetPod(podKey)
+	/*
+		From Virtual-Kubelet doc.
+		... Hence, we ignore the error and just act upon the pod if it is non-nil ...
+	*/
+	return slurm.LoadPod(podKey), nil
 }
 
 // GetPodStatus returns the status of a pod by name that is "running".
@@ -211,14 +202,9 @@ func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*c
 	 *---------------------------------------------------*/
 	logger.Info("-> GetPodStatus")
 
-	pod, err := slurm.GetPod(podKey)
-	if err != nil {
-		/*
-			if the pod is not found, then the only thing we can do is to create a mock-up status.
-			on error, the virtual-kubelet sets the status.Reason to "ProviderFailure" and the status.Message to err.
-			however, it is up to us to set the status.Phase to failed.
-		*/
-		return &corev1.PodStatus{Phase: corev1.PodFailed}, errors.Wrapf(err, "unable to load pod '%s'", podKey)
+	pod := slurm.LoadPod(podKey)
+	if pod == nil {
+		return nil, errdefs.NotFoundf("object not found")
 	}
 
 	logger.Info("<- GetPodStatus", "phase", pod.Status.Phase)
