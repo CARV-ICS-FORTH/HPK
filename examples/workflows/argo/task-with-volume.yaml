@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: game-config
+data:
+  allowed: '"true"'
+  enemies: aliens
+  lives: "3"
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: task-with-volume
+spec:
+  volumes:
+    - name: config-volume
+      configMap:
+        name: game-config
+
+  containers:
+    - name: busyecho
+      image: argoproj/argosay:v2
+      volumeMounts:
+        - name: config-volume
+          mountPath: /etc/config
+      command: ["sh", "-c"]
+      args:
+        - |
+          cat /etc/config/enemies

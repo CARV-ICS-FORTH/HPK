@@ -207,7 +207,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	newProvider, err := provider.NewProvider(provider.InitConfig{
 		NodeName:     c.NodeName,
 		InternalIP:   envOr("VKUBELET_POD_IP", "127.0.0.1"),
-		DaemonPort:   c.ListenPort,
+		DaemonPort:   c.ListenAddr,
 		BuildVersion: commands.BuildVersion,
 	})
 	if err != nil {
@@ -228,7 +228,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		serverConfig := &apiServerConfig{
 			CertPath:    os.Getenv("APISERVER_CERT_LOCATION"),
 			KeyPath:     os.Getenv("APISERVER_KEY_LOCATION"),
-			Addr:        fmt.Sprintf(":%d", c.ListenPort),
+			Addr:        fmt.Sprintf(":%d", c.ListenAddr),
 			MetricsAddr: "",
 		}
 

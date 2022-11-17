@@ -22,8 +22,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/carv-ics-forth/hpk/pkg/crdtools"
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
+	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -205,6 +207,10 @@ func podStateMapper(pod *corev1.Pod) {
 		{ /*-- SUCCESS: all jobs are successfully completed --*/
 			expression: state.NumSuccessfulJobs() == totalJobs,
 			change: func(status *corev1.PodStatus) {
+
+				logrus.Warn("POD SUCCESS. pod '%s', succesful containers '%d', total '%d' ",
+					podKey, state.ListSuccessfulJobs(), totalJobs)
+
 				status.Phase = corev1.PodSucceeded
 			},
 		},
@@ -215,7 +221,7 @@ func podStateMapper(pod *corev1.Pod) {
 				status.Phase = corev1.PodRunning
 
 				/*-- ContainersReady: all containers in the pod are ready. --*/
-				pod.Status.Conditions = append(pod.Status.Conditions, corev1.PodCondition{
+				crdtools.SetPodStatusCondition(&pod.Status.Conditions, corev1.PodCondition{
 					Type:               corev1.ContainersReady,
 					Status:             corev1.ConditionTrue,
 					LastProbeTime:      metav1.Time{},
@@ -226,7 +232,7 @@ func podStateMapper(pod *corev1.Pod) {
 
 				/*-- PodReady: the pod is able to service requests and should be added to the
 				  load balancing pools of all matching services. --*/
-				pod.Status.Conditions = append(pod.Status.Conditions, corev1.PodCondition{
+				crdtools.SetPodStatusCondition(&pod.Status.Conditions, corev1.PodCondition{
 					Type:               corev1.PodReady,
 					Status:             corev1.ConditionTrue,
 					LastProbeTime:      metav1.Time{},
@@ -305,7 +311,7 @@ func LoadContainerStatuses(pod *corev1.Pod) error {
 
 		/*-- StateRunning: existing jobid, means that the job is running --*/
 		if jobIDExists && containerStatus.State.Running == nil {
-			SetContainerStatusID(containerStatus, IDTypeProcess, jobID)
+			SetContainerStatusID(containerStatus, JobIDTypeProcess, jobID)
 
 			/*-- todo: since we do not support probes, make everything to look ok --*/
 			started := true
@@ -374,7 +380,7 @@ func LoadContainerStatuses(pod *corev1.Pod) error {
 func trytoDecodeExitCode(code int) string {
 	switch code {
 	case 0:
-		return "Purposely Stopped"
+		return "Process exited"
 	case 1:
 		return "Application error"
 	case 125:

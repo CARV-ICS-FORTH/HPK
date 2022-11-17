@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"sync"
 
 	"github.com/carv-ics-forth/hpk/pkg/process"
@@ -229,10 +230,17 @@ var Slurm struct {
 func SubmitJob(scriptFile string) (string, error) {
 	out, err := process.Execute(Slurm.SubmitCmd, scriptFile)
 	if err != nil {
-		return string(out), errors.Wrapf(err, "sbatch execution error")
+		SystemError(err, "sbatch submission error. out : '%s'", out)
 	}
 
-	return string(out), nil
+	expectedOutput := regexp.MustCompile(`Submitted batch job (?P<jid>\d+)`)
+	jid := expectedOutput.FindStringSubmatch(string(out))
+
+	if _, err := strconv.Atoi(jid[1]); err != nil {
+		SystemError(err, "Invalid JobID")
+	}
+
+	return jid[1], nil
 }
 
 func CancelJob(args string) (string, error) {

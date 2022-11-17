@@ -23,49 +23,49 @@ import (
 
 /************************************************************
 
-		Parse Known Job Types
+		Known Job Types
 
 ************************************************************/
 
-type IDType string
+type JobIDType string
 
 const (
-	IDTypeProcess IDType = "pid://"
+	JobIDTypeProcess JobIDType = "pid://"
 
-	IDTypeSlurm IDType = "slurm://"
+	JobIDTypeSlurm JobIDType = "slurm://"
 
-	IDTypeEmpty IDType = ""
+	JobIDTypeEmpty JobIDType = ""
 )
 
-func SetPodID(pod *corev1.Pod, idType IDType, value string) {
+func SetPodID(pod *corev1.Pod, idType JobIDType, value string) {
 	metav1.SetMetaDataAnnotation(&pod.ObjectMeta, "pod.hpk/id", string(idType)+value)
 }
 
-func SetContainerStatusID(status *corev1.ContainerStatus, idType IDType, value string) {
+func SetContainerStatusID(status *corev1.ContainerStatus, idType JobIDType, value string) {
 	status.ContainerID = string(idType) + value
 }
 
-func ParsePodID(pod *corev1.Pod) (idType IDType, value string) {
+func ParsePodID(pod *corev1.Pod) (idType JobIDType, value string) {
 	raw, exists := pod.GetAnnotations()["pod.hpk/id"]
 
 	if !exists {
-		return IDTypeEmpty, ""
+		return JobIDTypeEmpty, ""
 	}
 
 	return parseIDType(raw)
 }
 
-func ParseContainerID(status *corev1.ContainerStatus) (idType IDType, value string) {
+func ParseContainerID(status *corev1.ContainerStatus) (idType JobIDType, value string) {
 	return parseIDType(status.ContainerID)
 }
 
-func parseIDType(raw string) (idType IDType, value string) {
+func parseIDType(raw string) (idType JobIDType, value string) {
 	/*-- Extract id from raw format '<type>://<job_id>'. --*/
 	switch {
-	case strings.HasPrefix(raw, string(IDTypeSlurm)):
-		return IDTypeSlurm, strings.Split(raw, string(IDTypeSlurm))[1]
-	case strings.HasPrefix(raw, string(IDTypeProcess)):
-		return IDTypeProcess, strings.Split(raw, string(IDTypeProcess))[1]
+	case strings.HasPrefix(raw, string(JobIDTypeSlurm)):
+		return JobIDTypeSlurm, strings.Split(raw, string(JobIDTypeSlurm))[1]
+	case strings.HasPrefix(raw, string(JobIDTypeProcess)):
+		return JobIDTypeProcess, strings.Split(raw, string(JobIDTypeProcess))[1]
 	default:
 		panic("unknown id format: " + raw)
 	}
