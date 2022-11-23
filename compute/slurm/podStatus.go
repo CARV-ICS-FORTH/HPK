@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/pkg/crdtools"
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
@@ -35,7 +36,7 @@ func PodWithExplicitlyUnsupportedFields(logger logr.Logger, pod *corev1.Pod) boo
 	var unsupportedFields []string
 
 	/*---------------------------------------------------
-	 * Unsupported VirtualEnvironment-Level Fields
+	 * Unsupported Pod-Level Fields
 	 *---------------------------------------------------*/
 	if pod.GetNamespace() == "kube-system" {
 		unsupportedFields = append(unsupportedFields, ".Meta.Namespace == 'kube-system'")
@@ -56,7 +57,7 @@ func PodWithExplicitlyUnsupportedFields(logger logr.Logger, pod *corev1.Pod) boo
 	}
 
 	/*---------------------------------------------------
-	 * Unsupported Process-Level Fields
+	 * Unsupported Container-Level Fields
 	 *---------------------------------------------------*/
 	for i, container := range pod.Spec.Containers {
 		if container.SecurityContext != nil {
@@ -99,8 +100,8 @@ type test struct {
 
 func podStateMapper(pod *corev1.Pod) {
 	podKey := client.ObjectKeyFromObject(pod)
-	podDir := PodRuntimeDir(podKey)
-	logger := DefaultLogger.WithValues("pod", podKey)
+	podDir := compute.PodRuntimeDir(podKey)
+	logger := compute.DefaultLogger.WithValues("pod", podKey)
 
 	/*---------------------------------------------------
 	 * Handle Initialization and Finals States
@@ -167,11 +168,11 @@ func podStateMapper(pod *corev1.Pod) {
 		}
 
 		/*-- Pod Successful Initialization: all init containers have completed successfully --*/
-		pod.Status.Conditions = append(pod.Status.Conditions, corev1.PodCondition{
-			Type:               corev1.PodInitialized,
-			Status:             corev1.ConditionTrue,
-			LastProbeTime:      metav1.Time{},
-			LastTransitionTime: metav1.Time{},
+		crdtools.SetPodStatusCondition(&pod.Status.Conditions, corev1.PodCondition{
+			Type:   corev1.PodInitialized,
+			Status: corev1.ConditionTrue,
+			// LastProbeTime:      metav1.Time{},
+			LastTransitionTime: metav1.Now(),
 			Reason:             "Initialized",
 			Message:            "all init containers in the pod have started successfully",
 		})
@@ -208,10 +209,30 @@ func podStateMapper(pod *corev1.Pod) {
 			expression: state.NumSuccessfulJobs() == totalJobs,
 			change: func(status *corev1.PodStatus) {
 
-				logrus.Warn("POD SUCCESS. pod '%s', succesful containers '%d', total '%d' ",
+				logrus.Warnf("POD SUCCESS. pod '%s', succesful containers '%s', total '%d' ",
 					podKey, state.ListSuccessfulJobs(), totalJobs)
 
 				status.Phase = corev1.PodSucceeded
+				status.Reason = "Success"
+				status.Message = fmt.Sprintf("Success containers: %s", state.ListSuccessfulJobs())
+
+				crdtools.SetPodStatusCondition(&pod.Status.Conditions, corev1.PodCondition{
+					Type:   corev1.ContainersReady,
+					Status: corev1.ConditionFalse,
+					// LastProbeTime:      metav1.Time{},
+					LastTransitionTime: metav1.Now(),
+					Reason:             "ContainersUnready",
+					Message:            "Pod Has been Successfully Terminated.",
+				})
+
+				crdtools.SetPodStatusCondition(&pod.Status.Conditions, corev1.PodCondition{
+					Type:   corev1.PodReady,
+					Status: corev1.ConditionFalse,
+					// LastProbeTime:      metav1.Time{},
+					LastTransitionTime: metav1.Now(),
+					Reason:             "PodUnready",
+					Message:            "Pod Has been Successfully Terminated.",
+				})
 			},
 		},
 
@@ -222,10 +243,10 @@ func podStateMapper(pod *corev1.Pod) {
 
 				/*-- ContainersReady: all containers in the pod are ready. --*/
 				crdtools.SetPodStatusCondition(&pod.Status.Conditions, corev1.PodCondition{
-					Type:               corev1.ContainersReady,
-					Status:             corev1.ConditionTrue,
-					LastProbeTime:      metav1.Time{},
-					LastTransitionTime: metav1.Time{},
+					Type:   corev1.ContainersReady,
+					Status: corev1.ConditionTrue,
+					// LastProbeTime:      metav1.Time{},
+					LastTransitionTime: metav1.Now(),
 					Reason:             "ContainersReady",
 					Message:            " all containers in the pod are ready.",
 				})
@@ -233,10 +254,10 @@ func podStateMapper(pod *corev1.Pod) {
 				/*-- PodReady: the pod is able to service requests and should be added to the
 				  load balancing pools of all matching services. --*/
 				crdtools.SetPodStatusCondition(&pod.Status.Conditions, corev1.PodCondition{
-					Type:               corev1.PodReady,
-					Status:             corev1.ConditionTrue,
-					LastProbeTime:      metav1.Time{},
-					LastTransitionTime: metav1.Time{},
+					Type:   corev1.PodReady,
+					Status: corev1.ConditionTrue,
+					// LastProbeTime:      metav1.Time{},
+					LastTransitionTime: metav1.Now(),
 					Reason:             "PodReady",
 					Message:            "the pod is able to service requests",
 				})
@@ -278,13 +299,13 @@ func podStateMapper(pod *corev1.Pod) {
 
 /*************************************************************
 
-		Load Process status from the FS
+		Load Container status from the FS
 
 *************************************************************/
 
 func LoadContainerStatuses(pod *corev1.Pod) error {
 	podKey := client.ObjectKeyFromObject(pod)
-	podDir := PodRuntimeDir(podKey)
+	podDir := compute.PodRuntimeDir(podKey)
 
 	/*---------------------------------------------------
 	 * Generic Handler for ContainerStatus
@@ -311,7 +332,7 @@ func LoadContainerStatuses(pod *corev1.Pod) error {
 
 		/*-- StateRunning: existing jobid, means that the job is running --*/
 		if jobIDExists && containerStatus.State.Running == nil {
-			SetContainerStatusID(containerStatus, JobIDTypeProcess, jobID)
+			SetContainerStatusID(containerStatus, JobIDTypeInstance, jobID)
 
 			/*-- todo: since we do not support probes, make everything to look ok --*/
 			started := true
@@ -380,11 +401,11 @@ func LoadContainerStatuses(pod *corev1.Pod) error {
 func trytoDecodeExitCode(code int) string {
 	switch code {
 	case 0:
-		return "Process exited"
+		return "Container exited"
 	case 1:
 		return "Application error"
 	case 125:
-		return "Process failed to run error"
+		return "Container failed to run error"
 	case 126:
 		return "Command invoke error"
 	case 127:
@@ -413,7 +434,7 @@ func readStringFromFile(filepath string) (string, bool) {
 	}
 
 	if err != nil {
-		DefaultLogger.Error(err, "cannot read file", "path", filepath)
+		compute.DefaultLogger.Error(err, "cannot read file", "path", filepath)
 		return "", false
 	}
 
@@ -428,7 +449,7 @@ func readIntFromFile(filepath string) (int, bool) {
 	}
 
 	if err != nil {
-		DefaultLogger.Error(err, "cannot read file", "path", filepath)
+		compute.DefaultLogger.Error(err, "cannot read file", "path", filepath)
 		return -1, false
 	}
 
@@ -449,7 +470,7 @@ func readIntFromFile(filepath string) (int, bool) {
 
 /*************************************************************
 
-				VirtualEnvironment Lifecycle
+				Pod Lifecycle
 
 *************************************************************/
 

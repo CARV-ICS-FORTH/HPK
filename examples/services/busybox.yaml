@@ -4,12 +4,12 @@ metadata:
   name: busybox-sleep
 spec:
   containers:
-  - name: busybox
-    image: busybox
-    command:
-      - sh
-      - -c
-      - |
-        env
-        sleep infinity
+    - name: busybox
+      image: busybox
+      command:
+        - sh
+        - -c
+        - |
+          env
+          sleep infinity
 ---
