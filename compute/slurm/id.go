@@ -17,6 +17,7 @@ package slurm
 import (
 	"strings"
 
+	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -30,6 +31,8 @@ import (
 type JobIDType string
 
 const (
+	JobIDTypeInstance JobIDType = "instance://"
+
 	JobIDTypeProcess JobIDType = "pid://"
 
 	JobIDTypeSlurm JobIDType = "slurm://"
@@ -41,8 +44,14 @@ func SetPodID(pod *corev1.Pod, idType JobIDType, value string) {
 	metav1.SetMetaDataAnnotation(&pod.ObjectMeta, "pod.hpk/id", string(idType)+value)
 }
 
-func SetContainerStatusID(status *corev1.ContainerStatus, idType JobIDType, value string) {
-	status.ContainerID = string(idType) + value
+func SetContainerStatusID(status *corev1.ContainerStatus, expectedIDType JobIDType, typedValue string) {
+	idType, value := parseIDType(typedValue)
+
+	if idType != expectedIDType {
+		panic(errors.Errorf("Expected IDtype '%s' but got '%s'. raw: '%s'", expectedIDType, idType, value))
+	}
+
+	status.ContainerID = value
 }
 
 func ParsePodID(pod *corev1.Pod) (idType JobIDType, value string) {
@@ -64,6 +73,8 @@ func parseIDType(raw string) (idType JobIDType, value string) {
 	switch {
 	case strings.HasPrefix(raw, string(JobIDTypeSlurm)):
 		return JobIDTypeSlurm, strings.Split(raw, string(JobIDTypeSlurm))[1]
+	case strings.HasPrefix(raw, string(JobIDTypeInstance)):
+		return JobIDTypeInstance, strings.Split(raw, string(JobIDTypeInstance))[1]
 	case strings.HasPrefix(raw, string(JobIDTypeProcess)):
 		return JobIDTypeProcess, strings.Split(raw, string(JobIDTypeProcess))[1]
 	default:

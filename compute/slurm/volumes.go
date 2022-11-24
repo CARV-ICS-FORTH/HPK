@@ -30,7 +30,7 @@ import (
 
 func (h *podHandler) prepareVolumes(ctx context.Context) {
 	/*---------------------------------------------------
-	 * Copy volumes from local VirtualEnvironment to remote HPCBackend
+	 * Copy volumes from local Pod to remote HPCBackend
 	 *---------------------------------------------------*/
 	for _, vol := range h.Pod.Spec.Volumes {
 		switch {
@@ -365,7 +365,7 @@ func (h *podHandler) prepareVolumes(ctx context.Context) {
 					for k, item := range configmap.Data {
 						// TODO: Ensure that these files are deleted in failure cases
 						itemPath := filepath.Join(projectedVolPath, k)
-						if err := os.WriteFile(itemPath, []byte(item), PodGlobalDirectoryPermissions); err != nil {
+						if err := os.WriteFile(itemPath, []byte(item), compute.PodGlobalDirectoryPermissions); err != nil {
 							SystemError(err, "cannot write config map file '%s'", itemPath)
 						}
 					}
@@ -395,7 +395,7 @@ func (h *podHandler) prepareVolumes(ctx context.Context) {
 						// TODO: Ensure that these files are deleted in failure cases
 						itemPath := filepath.Join(projectedVolPath, k)
 
-						if err := os.WriteFile(itemPath, item, PodGlobalDirectoryPermissions); err != nil {
+						if err := os.WriteFile(itemPath, item, compute.PodGlobalDirectoryPermissions); err != nil {
 							SystemError(err, "cannot write config map file '%s'", itemPath)
 						}
 					}

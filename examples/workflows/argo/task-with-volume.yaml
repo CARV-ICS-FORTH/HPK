@@ -24,7 +24,7 @@ spec:
       volumeMounts:
         - name: config-volume
           mountPath: /etc/config
-      command: ["sh", "-c"]
+      command: [ "sh", "-c" ]
       args:
         - |
           cat /etc/config/enemies

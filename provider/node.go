@@ -27,7 +27,7 @@ import (
 
 // CreateVirtualNode builds a kubernetes node object from a provider
 // This is a temporary solution until node stuff actually split off from the provider interface itself.
-func (p *Provider) CreateVirtualNode(ctx context.Context, name string, taint *corev1.Taint) *corev1.Node {
+func (p *Provider) CreateVirtualNode(ctx context.Context, nodename string, taint *corev1.Taint) *corev1.Node {
 	taints := make([]corev1.Taint, 0)
 
 	if taint != nil {
@@ -42,31 +42,30 @@ func (p *Provider) CreateVirtualNode(ctx context.Context, name string, taint *co
 
 	return &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
+			Name: nodename,
 			Labels: map[string]string{
 				"type":                   "hpk-kubelet",
 				"kubernetes.io/role":     "agent",
 				"kubernetes.io/os":       runtime.GOOS,
-				"kubernetes.io/hostname": name,
+				"kubernetes.io/hostname": nodename,
 				"alpha.service-controller.kubernetes.io/exclude-balancer": "true",
 				"node.kubernetes.io/exclude-from-external-load-balancers": "true",
+			},
+			Annotations: map[string]string{
+				"alpha.service-controller.kubernetes.io/exclude-balancer": "true",
 			},
 		},
 		Spec: corev1.NodeSpec{
 			Taints: taints,
 		},
 		Status: corev1.NodeStatus{
+			NodeInfo:        p.NodeSystemInfo(ctx),
 			Capacity:        resources,
 			Allocatable:     resources,
-			Phase:           corev1.NodeRunning,
 			Conditions:      NodeConditions(ctx),
 			Addresses:       p.NodeAddresses(ctx),
 			DaemonEndpoints: p.NodeDaemonEndpoints(ctx),
-			NodeInfo:        p.NodeSystemInfo(ctx),
-			Images:          nil,
-			VolumesInUse:    nil,
-			VolumesAttached: nil,
-			Config:          nil,
+			Phase:           corev1.NodeRunning,
 		},
 	}
 }
@@ -77,41 +76,41 @@ func NodeConditions(_ context.Context) []corev1.NodeCondition {
 	// TODO: Make this configurable
 	return []corev1.NodeCondition{
 		{
-			Type:               corev1.NodeReady,
-			Status:             corev1.ConditionTrue,
-			LastHeartbeatTime:  metav1.Now(),
+			Type:   corev1.NodeReady,
+			Status: corev1.ConditionTrue,
+			// LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
 			Reason:             "KubeletPending",
 			Message:            "kubelet is pending.",
 		},
 		{
-			Type:               corev1.NodeMemoryPressure,
-			Status:             corev1.ConditionFalse,
-			LastHeartbeatTime:  metav1.Now(),
+			Type:   corev1.NodeMemoryPressure,
+			Status: corev1.ConditionFalse,
+			// LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
 			Reason:             "KubeletHasSufficientMemory",
 			Message:            "kubelet has sufficient memory available",
 		},
 		{
-			Type:               corev1.NodeDiskPressure,
-			Status:             corev1.ConditionFalse,
-			LastHeartbeatTime:  metav1.Now(),
+			Type:   corev1.NodeDiskPressure,
+			Status: corev1.ConditionFalse,
+			// LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
 			Reason:             "KubeletHasNoDiskPressure",
 			Message:            "kubelet has no disk pressure",
 		},
 		{
-			Type:               corev1.NodePIDPressure,
-			Status:             corev1.ConditionFalse,
-			LastHeartbeatTime:  metav1.Now(),
+			Type:   corev1.NodePIDPressure,
+			Status: corev1.ConditionFalse,
+			// LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
 			Reason:             "KubeletHasNoPIDPressure",
 			Message:            "kubelet has no PID pressure",
 		},
 		{
-			Type:               corev1.NodeNetworkUnavailable,
-			Status:             corev1.ConditionFalse,
-			LastHeartbeatTime:  metav1.Now(),
+			Type:   corev1.NodeNetworkUnavailable,
+			Status: corev1.ConditionFalse,
+			// LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
 			Reason:             "RouteCreated",
 			Message:            "RouteController created a route",

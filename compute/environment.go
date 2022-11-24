@@ -15,8 +15,16 @@
 package compute
 
 import (
+	"os"
+	"path/filepath"
+	"regexp"
+
+	"github.com/pkg/errors"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 type HPCEnvironment struct {
@@ -31,3 +39,150 @@ var Environment HPCEnvironment
 
 var ClientSet *kubernetes.Clientset
 var K8SClient client.Client
+
+var DefaultLogger = zap.New(zap.UseDevMode(true))
+
+/************************************************************
+
+			Set Shared Paths for Slurm runtime
+
+************************************************************/
+
+const (
+	PodGlobalDirectoryPermissions = 0o777
+	PodSpecJsonFilePermissions    = 0o600
+	ContainerJobPermissions       = 0o777
+)
+
+const (
+	RuntimeDir = ".hpk"
+
+	// Pod-Related Extensions
+	ExtensionIP     = ".ip"
+	ExtensionCRD    = ".crd"
+	ExtensionStdout = ".stdout"
+	ExtensionStderr = ".stderr"
+
+	// Container-Related Extensions
+	ExtensionExitCode    = ".exitCode"
+	ExtensionJobID       = ".jid"
+	ExtensionEnvironment = ".env"
+	ExtensionLogs        = ".logs"
+)
+
+type PodPath string
+
+func PodRuntimeDir(podRef client.ObjectKey) PodPath {
+	path := filepath.Join(RuntimeDir, podRef.Namespace, podRef.Name)
+
+	return PodPath(path)
+}
+
+func (p PodPath) EncodedJSONPath() string {
+	return filepath.Join(string(p), ExtensionCRD)
+}
+
+// Mountpaths returns .hpk/namespace/podName/mountName:mountPath
+func (p PodPath) Mountpaths(mount corev1.VolumeMount) string {
+	return filepath.Join(string(p), mount.Name+":"+mount.MountPath)
+}
+
+// IDPath .hpk/namespace/podName/.jid
+func (p PodPath) IDPath() string {
+	return filepath.Join(string(p), ExtensionJobID)
+}
+
+// ExitCodePath .hpk/namespace/podName/.exitCode
+func (p PodPath) ExitCodePath() string {
+	return filepath.Join(string(p), ExtensionExitCode)
+}
+
+// IPAddressPath .hpk/namespace/podName/.ip
+func (p PodPath) IPAddressPath() string {
+	return filepath.Join(string(p), ExtensionIP)
+}
+
+// VirtualEnvironmentDir .hpk/namespace/podName/.virtualenv
+func (p PodPath) VirtualEnvironmentDir() PodPath {
+	return PodPath(filepath.Join(string(p), ".virtualenv"))
+}
+
+// ConstructorPath .hpk/namespace/podName/.virtualenv/constructor.sh
+func (p PodPath) ConstructorPath() string {
+	return filepath.Join(string(p.VirtualEnvironmentDir()), "constructor.sh")
+}
+
+// SubmitJobPath .hpk/namespace/podName/.virtualenv/submit.sh
+func (p PodPath) SubmitJobPath() string {
+	return filepath.Join(string(p.VirtualEnvironmentDir()), "submit.sh")
+}
+
+// StdoutPath .hpk/namespace/podName/.virtualenv/pod.stdout
+func (p PodPath) StdoutPath() string {
+	return filepath.Join(string(p.VirtualEnvironmentDir()), "pod"+ExtensionStdout)
+}
+
+// StderrPath .hpk/namespace/podName/.virtualenv/pod.stderr
+func (p PodPath) StderrPath() string {
+	return filepath.Join(string(p.VirtualEnvironmentDir()), "pod"+ExtensionStderr)
+}
+
+func (p PodPath) CreateSubDirectory(name string) (string, error) {
+	fullPath := filepath.Join(string(p), name)
+
+	if err := os.MkdirAll(fullPath, PodGlobalDirectoryPermissions); err != nil {
+		return fullPath, errors.Wrapf(err, "cannot create dir '%s'", fullPath)
+	}
+
+	return fullPath, nil
+}
+
+func (p PodPath) Container(containerName string) ContainerPath {
+	return ContainerPath(filepath.Join(string(p), containerName))
+}
+
+type ContainerPath string
+
+func (c ContainerPath) LogsPath() string {
+	return filepath.Join(string(c) + ExtensionLogs)
+}
+
+func (c ContainerPath) IDPath() string {
+	return filepath.Join(string(c) + ExtensionJobID)
+}
+
+func (c ContainerPath) ExitCodePath() string {
+	return filepath.Join(string(c) + ExtensionExitCode)
+}
+
+func (c ContainerPath) EnvFilePath() string {
+	return filepath.Join(string(c) + ExtensionEnvironment)
+}
+
+// ParsePath parses the path according to the expected HPK format, and returns
+// the corresponding fields.
+// Validated through: https://regex101.com/r/s4tb8x/1
+func ParsePath(path string) (podKey types.NamespacedName, fileName string) {
+	re := regexp.MustCompile(`^.hpk/(?P<namespace>\w+)/(?P<pod>.*?)(/.virtualenv)*/(?P<file>.*)$`)
+
+	match := re.FindStringSubmatch(path)
+
+	if len(match) == 0 {
+		panic(errors.Errorf("path '%s' does not follow the HPC convention", path))
+	}
+
+	for i, name := range re.SubexpNames() {
+		if i > 0 && i <= len(match) {
+			switch name {
+			case "namespace":
+				podKey.Namespace = match[i]
+			case "pod":
+				podKey.Name = match[i]
+			case "file":
+				fileName = match[i]
+			}
+		}
+	}
+
+	return
+}
