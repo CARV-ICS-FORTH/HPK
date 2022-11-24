@@ -129,14 +129,14 @@ Notice that by using the reference, we operate on the local copy instead of the 
 1) We can extract updated information from .spec (Kubernetes only fetches .Status)
 2) We can have "fresh" information that is not yet propagated to Kubernetes
 */
-func DeletePod(podKey client.ObjectKey) {
+func DeletePod(podKey client.ObjectKey) bool {
 	logger := compute.DefaultLogger.WithValues("pod", podKey)
 
 	pod := LoadPod(podKey)
 	if pod == nil {
-		logger.Info("Tried to delete pod, but it dod not exist in the cluster")
+		logger.Info("[WARN]: Tried to delete pod, but it dod not exist in the cluster")
 
-		return
+		return false
 	}
 
 	/*---------------------------------------------------
@@ -165,6 +165,8 @@ func DeletePod(podKey client.ObjectKey) {
 	if err := os.RemoveAll(string(podDir)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		SystemError(err, "failed to delete pod directory %s'", podDir)
 	}
+
+	return true
 }
 
 func CreatePod(ctx context.Context, pod *corev1.Pod, watcher *fsnotify.Watcher) error {
@@ -363,6 +365,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher *fsnotify.Watcher) 
 
 	h.logger.Info(" * Associating Slurm Jod ID to Pod ", "jobID", jobID)
 
+	/*-- Needed as it will follow a GetPod()--*/
 	SavePod(ctx, h.Pod)
 
 	return nil

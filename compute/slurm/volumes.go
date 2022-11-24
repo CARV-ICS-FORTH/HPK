@@ -22,6 +22,7 @@ import (
 
 	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/pkg/fieldpath"
+	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	k8errors "k8s.io/apimachinery/pkg/api/errors"
@@ -162,37 +163,69 @@ func (h *podHandler) prepareVolumes(ctx context.Context) {
 				}
 			case corev1.HostPathDirectory:
 				// A directory must exist at the given path
-				if path, err := h.podDirectory.CreateSubDirectory(vol.Name); err != nil {
-					SystemError(err, "cannot create HostPathDirectory at path '%s'", path)
+
+				info, err := h.podDirectory.PathExists(vol.Name)
+				if err != nil {
+					if errors.Is(err, os.ErrNotExist) {
+						PodError(h.Pod, "VolumeNotFound", "volume '%s' was not found", vol.Name)
+						return
+					}
+					SystemError(err, "failed to inspect volume '%s'", vol.Name)
+				}
+
+				if !info.Mode().IsDir() {
+					PodError(h.Pod, "UnexpectedVolumeType", "volume '%s' was expected to be directory", vol.Name)
+					return
 				}
 
 			case corev1.HostPathFileOrCreate:
 				// If nothing exists at the given path, an empty file will be created there
 				// as needed with file mode 0644, having the same group and ownership with Kubelet.
-				// .hpk/podName/volName/*
-				f, err := os.Create(string(h.podDirectory))
-				if err != nil {
-					SystemError(err, "cannot create  '%s'", string(h.podDirectory))
+
+				_, err := h.podDirectory.PathExists(vol.Name)
+				if err == nil {
+					return
 				}
 
-				if err := f.Close(); err != nil {
-					SystemError(err, "cannot close file '%s'", string(h.podDirectory))
+				if errors.Is(err, os.ErrNotExist) {
+					if path, err := h.podDirectory.CreateFile(vol.Name); err != nil {
+						SystemError(err, "cannot apply HostPathDirectoryOrCreate at path '%s'", path)
+					}
+				} else {
+					SystemError(err, "failed to inspect volume '%s'", vol.Name)
 				}
+
 			case corev1.HostPathFile:
 				// A file must exist at the given path
-				// .hpk/podName/volName/*
-				f, err := os.Create(string(h.podDirectory))
+
+				info, err := h.podDirectory.PathExists(vol.Name)
 				if err != nil {
-					SystemError(err, "cannot create '%s'", string(h.podDirectory))
+					if errors.Is(err, os.ErrNotExist) {
+						PodError(h.Pod, "VolumeNotFound", "volume '%s' was not found", vol.Name)
+						return
+					}
+					SystemError(err, "failed to inspect volume '%s'", vol.Name)
 				}
 
-				if err := f.Close(); err != nil {
-					SystemError(err, "cannot close file '%s'", string(h.podDirectory))
+				if !info.Mode().IsRegular() {
+					PodError(h.Pod, "UnexpectedVolumeType", "volume '%s' was expected to be file", vol.Name)
+					return
 				}
 
 			case corev1.HostPathSocket, corev1.HostPathCharDev, corev1.HostPathBlockDev:
 				// A UNIX socket/char device/ block device must exist at the given path
-				continue
+
+				info, err := h.podDirectory.PathExists(vol.Name)
+				if err != nil {
+					if errors.Is(err, os.ErrNotExist) {
+						PodError(h.Pod, "VolumeNotFound", "volume '%s' was not found", vol.Name)
+						return
+					}
+					SystemError(err, "failed to inspect volume '%s'", vol.Name)
+				}
+
+				// todo: perform the checks
+				_ = info
 			default:
 				panic("bug")
 			}

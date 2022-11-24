@@ -19,16 +19,19 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/url"
+	"time"
 
-	"github.com/carv-ics-forth/hpk/cmd/hpk-kubelet/commands"
+	"github.com/carv-ics-forth/hpk/cmd/hpk/commands"
 	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/pkg/resourcemanager"
 	"github.com/sirupsen/logrus"
 	"github.com/virtual-kubelet/virtual-kubelet/node/api"
-	k8errors "k8s.io/apimachinery/pkg/api/errors"
+	"golang.org/x/time/rate"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
@@ -40,7 +43,6 @@ import (
 	"github.com/virtual-kubelet/virtual-kubelet/node"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	kubeinformers "k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -63,11 +65,11 @@ func logo() string {
 func NewCommand(ctx context.Context, name string, c Opts) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   name,
-		Short: name + " provides a virtual kubelet interface for your kubernetes cluster.",
-		Long: name + ` implements the Kubelet interface with a pluggable
-backend implementation allowing users to create kubernetes nodes without running the kubelet.
-This allows users to schedule kubernetes workloads on nodes that aren't running Kubernetes.`,
+		Short: name + " run hpk",
+		Long:  name + ` run a kubelet-alike daemon that allows to schedule kubernetes workloads on Slurm nodes`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Println(logo())
+
 			var merr *multierror.Error
 
 			/*---------------------------------------------------
@@ -101,20 +103,19 @@ This allows users to schedule kubernetes workloads on nodes that aren't running 
 	}
 
 	installFlags(cmd.Flags(), &c)
+
 	return cmd
 }
 
 var DefaultLogger = zap.New(zap.UseDevMode(true))
 
-func runRootCommand(parentCtx context.Context, c Opts) error {
-	/*
-		https://medium.com/microsoftazure/virtual-kubelet-turns-1-0-deep-dive-b64056061b18
-	*/
-
-	fmt.Println(logo())
+// https://medium.com/microsoftazure/virtual-kubelet-turns-1-0-deep-dive-b64056061b18
+func runRootCommand(ctx context.Context, c Opts) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	/*---------------------------------------------------
-	 * Starting Kubernetes Client
+	 * Setup a client to Kubernetes API
 	 *---------------------------------------------------*/
 	DefaultLogger.Info("* Starting Kubernetes Client ....")
 
@@ -127,37 +128,26 @@ func runRootCommand(parentCtx context.Context, c Opts) error {
 	// * In-cluster config if running in cluster
 	//
 	// * $HOME/.kube/config if exists.
-	cfg, err := config.GetConfig()
+	restConfig, err := config.GetConfig()
 	if err != nil {
 		return errors.Wrapf(err, "unable to get kubeconfig")
 	}
 
-	/*-- fixme: replace the clientset with the most modern client --*/
-	clientset, err := kubernetes.NewForConfig(cfg)
+	k8sclientset, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
-		return errors.Wrapf(err, "unable to start kubernetes clientset")
+		return errors.Wrapf(err, "unable to start kubernetes k8sclientset")
 	}
 
-	modernClient, err := client.New(cfg, client.Options{})
+	k8sclient, err := client.New(restConfig, client.Options{})
 	if err != nil {
 		return errors.Wrapf(err, "unable to start kubernetes client")
 	}
 
-	u, err := url.Parse(cfg.Host)
-	if err != nil {
-		return errors.Wrapf(err, "failed to parse KUBERNETES_MASTER url")
-	}
-
-	compute.ClientSet = clientset
-	compute.K8SClient = modernClient
+	compute.K8SClient = k8sclient
 	compute.Environment.ContainerRegistry = c.ContainerRegistry
 
-	compute.Environment.KubeServiceHost = u.Hostname()
-	compute.Environment.KubeServicePort = u.Port()
-
 	DefaultLogger.Info(" ... Done ...",
-		"host", compute.Environment.KubeServiceHost,
-		"port", compute.Environment.KubeServicePort,
+		"KubernetesURL", restConfig.Host,
 		"registry", compute.Environment.ContainerRegistry,
 	)
 
@@ -166,7 +156,7 @@ func runRootCommand(parentCtx context.Context, c Opts) error {
 	 *---------------------------------------------------*/
 	DefaultLogger.Info("* Discovering Kubernetes DNS Server")
 	{
-		dnsEndpoint, err := clientset.CoreV1().Endpoints("kube-system").Get(parentCtx, "kube-dns", metav1.GetOptions{})
+		dnsEndpoint, err := k8sclientset.CoreV1().Endpoints("kube-system").Get(ctx, "kube-dns", metav1.GetOptions{})
 		if err != nil && !errors.Is(err, context.Canceled) {
 			return errors.Wrapf(err, "unable to discover dns server")
 		}
@@ -185,56 +175,56 @@ func runRootCommand(parentCtx context.Context, c Opts) error {
 	}
 
 	/*---------------------------------------------------
-	 * Load Kubernetes Informers
+	 * Create Informers for Kubernetes CRDs
 	 *---------------------------------------------------*/
 	DefaultLogger.Info("* Starting Kubernetes Informers",
 		"namespace", c.KubeNamespace,
 		"crds", []string{
-			"secrets", "configMap", "service", "serviceAccount",
+			"pods", "secrets", "configMap", "service", "serviceAccount",
 		})
 
-	// Create a shared informer factory for Kubernetes pods in the current namespace (if specified) and scheduled to the current node.
+	// Create a shared informer factory for Kubernetes Pods assigned to this Node.
 	podInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(
-		clientset,
+		k8sclientset,
 		c.InformerResyncPeriod,
-		kubeinformers.WithNamespace(c.KubeNamespace),
 		kubeinformers.WithTweakListOptions(func(options *metav1.ListOptions) {
 			options.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", c.NodeName).String()
-		}))
-
-	// Create another shared informer factory for Kubernetes secrets and configmaps (not subject to any selectors).
+		}),
+	)
 	podInformer := podInformerFactory.Core().V1().Pods()
 
-	scmInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(clientset, c.InformerResyncPeriod)
-	secretInformer := scmInformerFactory.Core().V1().Secrets()
-	configMapInformer := scmInformerFactory.Core().V1().ConfigMaps()
-	serviceInformer := scmInformerFactory.Core().V1().Services()
-	serviceAccountInformer := scmInformerFactory.Core().V1().ServiceAccounts()
+	// Create another shared informer factory for Kubernetes secrets and configmaps (not subject to any selectors).
+	informerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(k8sclientset, c.InformerResyncPeriod)
+	secretInformer := informerFactory.Core().V1().Secrets()
+	configMapInformer := informerFactory.Core().V1().ConfigMaps()
+	serviceInformer := informerFactory.Core().V1().Services()
+	serviceAccountInformer := informerFactory.Core().V1().ServiceAccounts()
 
-	{
-		if _, err := resourcemanager.NewResourceManager(
-			podInformer.Lister(),
-			secretInformer.Lister(),
-			configMapInformer.Lister(),
-			serviceInformer.Lister(),
-			serviceAccountInformer.Lister(),
-		); err != nil {
-			return errors.Wrap(err, "could not create resource manager")
-		}
-
-		// Start the informers now, so the provider will get a functional resource manager.
-		podInformerFactory.Start(parentCtx.Done())
-		scmInformerFactory.Start(parentCtx.Done())
-
-		DefaultLogger.Info(" ... Done ...")
+	// Setup the known Pods related resources manager.
+	if _, err := resourcemanager.NewResourceManager(
+		podInformer.Lister(),
+		secretInformer.Lister(),
+		configMapInformer.Lister(),
+		serviceInformer.Lister(),
+		serviceAccountInformer.Lister(),
+	); err != nil {
+		return errors.Wrap(err, "could not create resource manager")
 	}
+
+	// Finally, start the informers.
+	podInformerFactory.Start(ctx.Done())
+	podInformerFactory.WaitForCacheSync(ctx.Done())
+	informerFactory.Start(ctx.Done())
+	informerFactory.WaitForCacheSync(ctx.Done())
+
+	DefaultLogger.Info(" ... Done ...")
 
 	/*---------------------------------------------------
 	 * Register the Provisioner of Virtual Nodes
 	 *---------------------------------------------------*/
 	DefaultLogger.Info("* Creating the Provisioner of Virtual Nodes")
 
-	hpkProvider, err := provider.NewProvider(provider.InitConfig{
+	virtualk8s, err := provider.NewVirtualK8S(provider.InitConfig{
 		NodeName:     c.NodeName,
 		InternalIP:   c.KubeletAddress,
 		DaemonPort:   c.KubeletPort,
@@ -245,9 +235,9 @@ func runRootCommand(parentCtx context.Context, c Opts) error {
 	}
 
 	DefaultLogger.Info(" ... Done ...",
-		"nodeName", hpkProvider.NodeName,
-		"internalIP", hpkProvider.InternalIP,
-		"daemonPort", hpkProvider.DaemonPort,
+		"nodeName", virtualk8s.NodeName,
+		"internalIP", virtualk8s.InternalIP,
+		"daemonPort", virtualk8s.DaemonPort,
 	)
 
 	/*---------------------------------------------------
@@ -258,13 +248,13 @@ func runRootCommand(parentCtx context.Context, c Opts) error {
 		mux := http.NewServeMux()
 
 		api.AttachPodRoutes(api.PodHandlerConfig{
-			RunInContainer:   hpkProvider.RunInContainer,
-			GetContainerLogs: hpkProvider.GetContainerLogs,
-			GetPods:          hpkProvider.GetPods,
+			RunInContainer:   virtualk8s.RunInContainer,
+			GetContainerLogs: virtualk8s.GetContainerLogs,
+			GetPods:          virtualk8s.GetPods,
 			// GetPodsFromKubernetes: func(context.Context) ([]*corev1.Pod, error) {
-			//	return clientset.CoreV1().Pods(c.KubeNamespace).List(ctx, labels.Everything())
+			//	return k8sclientset.CoreV1().Pods(c.KubeNamespace).List(ctx, labels.Everything())
 			// },
-			// GetStatsSummary:       hpkProvider.GetStatsSummary,
+			// GetStatsSummary:       virtualk8s.GetStatsSummary,
 			// StreamIdleTimeout:     0,
 			// StreamCreationTimeout: 0,
 		}, mux, true)
@@ -292,61 +282,65 @@ func runRootCommand(parentCtx context.Context, c Opts) error {
 	}
 
 	/*---------------------------------------------------
-	 * Create a new Pod Controller
+	 * Create Pod Controller
 	 *---------------------------------------------------*/
-	DefaultLogger.Info("* Creating Pod Controller")
+	DefaultLogger.Info("* Starting the Pod Controller")
 	{
 		eb := record.NewBroadcaster()
 		eb.StartLogging(logrus.Infof)
 
 		pc, err := node.NewPodController(node.PodControllerConfig{
-			PodClient:         clientset.CoreV1(),
-			PodInformer:       podInformer,
-			EventRecorder:     eb.NewRecorder(scheme.Scheme, corev1.EventSource{Component: "hpk-controller"}),
-			Provider:          hpkProvider,
-			SecretInformer:    secretInformer,
-			ConfigMapInformer: configMapInformer,
-			ServiceInformer:   serviceInformer,
+			PodClient:                            k8sclientset.CoreV1(),
+			PodInformer:                          podInformer,
+			EventRecorder:                        eb.NewRecorder(scheme.Scheme, corev1.EventSource{Component: "hpk-controller"}),
+			Provider:                             virtualk8s,
+			ConfigMapInformer:                    configMapInformer,
+			SecretInformer:                       secretInformer,
+			ServiceInformer:                      serviceInformer,
+			SyncPodsFromKubernetesRateLimiter:    rateLimiter(),
+			DeletePodsFromKubernetesRateLimiter:  rateLimiter(),
+			SyncPodStatusFromProviderRateLimiter: rateLimiter(),
 		})
 		if err != nil {
 			return err
 		}
 
-		var pcCtx context.Context
-
-		// If there is a startup timeout, it does two things:
-		// 1. It causes the VK to shut down if we haven't gotten into an operational state in a time period
-		// 2. It prevents node advertisement from happening until we're in an operational state
-		if c.StartupTimeout > 0 {
-			tCtx, pcCancel := context.WithTimeout(parentCtx, c.StartupTimeout)
-			defer pcCancel()
-
-			pcCtx = tCtx
-		}
-
+		// Start the Pod controller.
 		go func() {
-			if err := pc.Run(pcCtx, c.PodSyncWorkers); err != nil && !errors.Is(err, context.Canceled) {
+			if err := pc.Run(ctx, c.PodSyncWorkers); err != nil && !errors.Is(err, context.Canceled) {
 				DefaultLogger.Error(err, "Pod Controller Has failed")
 				// handle error
 			}
 		}()
 
-		// wait to start the node until the pod controller is ready
-		select {
-		case <-pc.Ready():
-		case <-parentCtx.Done():
-			DefaultLogger.Info("... Aborted before initialization is complete ....")
+		// If there is a startup timeout, it does two things:
+		// 1. It causes the VK to shut down if we haven't gotten into an operational state in a time period
+		// 2. It prevents node advertisement from happening until we're in an operational state
+		if c.StartupTimeout > 0 {
+			pcCtx, pcCancel := context.WithTimeout(ctx, c.StartupTimeout)
+			select {
+			case <-pcCtx.Done():
+				DefaultLogger.Info("... Aborted before initialization is complete ....")
 
-			return nil
-		case <-pcCtx.Done():
-			return errors.New("timed out waiting for pod controller to be ready")
+				pcCancel()
+				return pcCtx.Err()
+			case <-pc.Ready():
+			}
+			pcCancel()
+			if err := pc.Err(); err != nil {
+				return err
+			}
 		}
+
+		DefaultLogger.Info(" ... Done ...")
 	}
 
 	/*---------------------------------------------------
-	 * Create Virtual Node Controller
+	 * Create Node Controller
 	 *---------------------------------------------------*/
-	DefaultLogger.Info("* Creating Node Controller")
+	DefaultLogger.Info("* Starting the Node Controller")
+
+	np := node.NewNaiveNodeProvider()
 	{
 		var taint *corev1.Taint
 		if !c.DisableTaint {
@@ -356,26 +350,39 @@ func runRootCommand(parentCtx context.Context, c Opts) error {
 			}
 		}
 
-		nc, err := node.NewNodeController(
-			&node.NaiveNodeProvider{},
-			hpkProvider.CreateVirtualNode(parentCtx, c.NodeName, taint),
-			clientset.CoreV1().Nodes(),
-			node.WithNodeEnableLeaseV1(clientset.CoordinationV1().Leases(corev1.NamespaceNodeLease), 0),
+		virtualNode := virtualk8s.CreateVirtualNode(ctx, c.NodeName, taint)
+
+		ncOpts := []node.NodeControllerOpt{
+			node.WithNodeEnableLeaseV1(k8sclientset.CoordinationV1().Leases(corev1.NamespaceNodeLease), 0),
 			node.WithNodeStatusUpdateErrorHandler(func(ctx context.Context, err error) error {
-				if !k8errors.IsNotFound(err) {
+				if !k8serrors.IsNotFound(err) {
 					return err
 				}
-
-				DefaultLogger.Info("Node not found")
+				DefaultLogger.Info("node not found")
+				newNode := virtualNode.DeepCopy()
+				newNode.ResourceVersion = ""
+				_, err = k8sclientset.CoreV1().Nodes().Create(ctx, newNode, metav1.CreateOptions{})
+				if err != nil {
+					return err
+				}
+				DefaultLogger.Info("registered node")
 				return nil
 			}),
+		}
+
+		nc, err := node.NewNodeController(
+			np,
+			virtualNode,
+			k8sclientset.CoreV1().Nodes(),
+			ncOpts...,
 		)
 		if err != nil {
 			return err
 		}
 
+		// Start the Node controller.
 		go func() {
-			if err := nc.Run(parentCtx); err != nil && err != context.Canceled {
+			if err := nc.Run(ctx); err != nil && err != context.Canceled {
 				DefaultLogger.Error(err, "NodeController has failed")
 
 				// handle error
@@ -385,6 +392,14 @@ func runRootCommand(parentCtx context.Context, c Opts) error {
 		// Wait for node controller to become ready
 		<-nc.Ready()
 
+		// If we got here, set Node condition Ready.
+		setNodeReady(virtualNode)
+		if err := np.UpdateStatus(ctx, virtualNode); err != nil {
+			return errors.Wrap(err, "error marking the node as ready")
+		}
+
+		DefaultLogger.Info("... HPK initialized....")
+
 		// wait for as long the app is running
 		<-nc.Done()
 
@@ -392,4 +407,28 @@ func runRootCommand(parentCtx context.Context, c Opts) error {
 	}
 
 	return nil
+}
+
+func rateLimiter() workqueue.RateLimiter {
+	return workqueue.NewMaxOfRateLimiter(
+		workqueue.NewItemExponentialFailureRateLimiter(5*time.Millisecond, 10*time.Second),
+		// 100 qps, 1000 bucket size.  This is only for retry speed and its only the overall factor (not per item)
+		&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(100), 1000)},
+	)
+}
+
+func setNodeReady(n *corev1.Node) {
+	for i, c := range n.Status.Conditions {
+		if c.Type != "Ready" {
+			continue
+		}
+
+		c.Message = "systemk is ready"
+		c.Reason = "KubeletReady"
+		c.Status = corev1.ConditionTrue
+		c.LastHeartbeatTime = metav1.Now()
+		c.LastTransitionTime = metav1.Now()
+		n.Status.Conditions[i] = c
+		return
+	}
 }

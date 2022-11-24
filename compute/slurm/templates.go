@@ -41,159 +41,193 @@ const SbatchScriptTemplate = `#!/bin/bash
 
 set -eum pipeline
 
+
+
 #### BEGIN SECTION: VirtualEnvironment Builder ####
 # Description
 # 	Builds a script for running a Virtual Environment
 # 	that resembles the semantics of a Pause Environment.
-
 cat > {{.VirtualEnv.ConstructorPath}} << "PAUSE_EOF"
 #!/bin/sh
 
-# Store IP
-echo $(hostname -I) > {{.VirtualEnv.IPAddressPath}}
 
-echo "== Virtual Environment Info =="
-echo "* User:" $(id)
-echo "* Hostname:" $(hostname)
-echo "* HostIPs:" $(hostname -I)
-echo "* DNS: {{.ComputeEnv.KubeDNS}}"
-echo "=============================="
+debug_info() {
+	echo "== Virtual Environment Info =="
+	echo "* User:" $(id)
+	echo "* Hostname:" $(hostname)
+	echo "* HostIPs:" $(hostname -I)
+	echo "* DNS: {{.ComputeEnv.KubeDNS}}"
+	echo "=============================="
+}
 
-#### BEGIN SECTION: SetEnv ####
-# Description
-# 	If not removed, Flags will be consumed by the nested singularity and overwrite paths.
-# Source
-# 	https://apptainer.org/user-docs/master/environment_and_metadata.html#environment-from-the-singularity-runtime
-
-unset SINGULARITY_COMMAND
-unset SINGULARITY_CONTAINER
-unset SINGULARITY_ENVIRONMENT
-unset SINGULARITY_NAME
-unset SINGULARITY_BIND
-
-unset APPTAINER_APPNAME
-unset APPTAINER_COMMAND
-unset APPTAINER_CONTAINER
-unset APPTAINER_ENVIRONMENT
-unset APPTAINER_NAME
-unset APPTAINER_BIND
-#### END SECTION: SetEnv ####
-
-#### BEGIN SECTION: DNS ####
-# Description
-# 	Rewire /etc/resolv.conf to point to KubeDNS
-
+# Rewire /etc/resolv.conf to point to KubeDNS
+handle_dns() {
 cat > /etc/resolv.conf << DNS_EOF
 search {{.Pod.Namespace}}.svc.cluster.local svc.cluster.local cluster.local
 nameserver {{.ComputeEnv.KubeDNS}}
 options ndots:5
 DNS_EOF
-#### END SECTION: DNS ####
+}
 
-#### BEGIN SECTION: InitContainers ####
-# Description
-# 	Execute the Init containers and wait for completion
+# If not removed, Flags will be consumed by the nested singularity and overwrite paths.
+# https://apptainer.org/user-docs/master/environment_and_metadata.html#environment-from-the-singularity-runtime
+unset_env() {
+	unset SINGULARITY_COMMAND
+	unset SINGULARITY_CONTAINER
+	unset SINGULARITY_ENVIRONMENT
+	unset SINGULARITY_NAME
+	unset SINGULARITY_BIND
+	
+	unset APPTAINER_APPNAME
+	unset APPTAINER_COMMAND
+	unset APPTAINER_CONTAINER
+	unset APPTAINER_ENVIRONMENT
+	unset APPTAINER_NAME
+	unset APPTAINER_BIND
+}
 
-{{- if .InitContainers}}
+handle_init_containers() {
 {{ range $index, $container := .InitContainers}}
-echo "* Running init container {{$index}}"
-
-$(apptainer {{ $container.ApptainerMode }} --compat --cleanenv --pid --no-mount tmp,home  \ 
-{{- if $container.EnvFilePath}}
---env-file {{$container.EnvFilePath}} \
-{{- end}}
-{{- if $container.Binds}}
---bind {{join "," $container.Binds}} \
-{{- end}}
-{{$container.Image}}
-{{- if $container.Command}}{{range $index, $cmd := $container.Command}} '{{$cmd}}'{{end}}{{end -}}
-{{- if $container.Args}}{{range $index, $arg := $container.Args}} '{{$arg}}'{{end}}{{end -}} \
-&>> {{$container.LogsPath}}; echo $? > {{$container.ExitCodePath}}) &
-echo $! > {{$container.JobIDPath}}
-
+	echo "* Running init container {{$index}}"
+	
+	$(apptainer {{ $container.ApptainerMode }} --compat --cleanenv --pid --no-mount tmp,home  \ 
+	{{- if $container.EnvFilePath}}
+	--env-file {{$container.EnvFilePath}} \
+	{{- end}}
+	{{- if $container.Binds}}
+	--bind {{join "," $container.Binds}} \
+	{{- end}}
+	{{$container.Image}}
+	{{- if $container.Command}}{{range $index, $cmd := $container.Command}} '{{$cmd}}'{{end}}{{end -}}
+	{{- if $container.Args}}{{range $index, $arg := $container.Args}} '{{$arg}}'{{end}}{{end -}} \
+	&>> {{$container.LogsPath}}; echo $? > {{$container.ExitCodePath}}) &
+	echo $! > {{$container.JobIDPath}}
 {{end}}
-# waiting for init container sto complete
-wait
-{{- end}}
-#### END SECTION: InitContainers ####
 
-#### BEGIN SECTION: Spinup Container Instances ####
-# Description
-# 	Launch an instance with the name you provide it and lets it run in the background.
-#   example: apptainer instance start first.sif instance_name [startscript args...]
+return
+}
 
-{{- if .Containers}}
- {{ range $index, $container := .Containers}}
- echo "* Preparing instance://{{$container.InstanceName}}"
+# Launch an instance with the name you provide it and lets it run in the background.
+spinup_instances() {
+{{ range $index, $container := .Containers}}
+	echo "* Preparing instance://{{$container.InstanceName}}"
 
+	apptainer instance start --no-init --no-umask --no-eval --no-mount tmp,home --unsquash --writable-tmpfs \
+	{{- if $container.Binds}}
+	--bind {{join "," $container.Binds}} \
+	{{- end}}
+	{{$container.Image}} {{$container.InstanceName}}
 
- apptainer instance start --no-init --no-umask --no-eval --no-mount tmp,home --unsquash --writable-tmpfs \
-  {{- if $container.Binds}}
-  --bind {{join "," $container.Binds}} \
-  {{- end}}
- {{$container.Image}} {{$container.InstanceName}}
- {{- end}}
-
-# Do not return as it would release the namespace
-sleep infinity
 {{- end}}
 
-#### END SECTION: Spinup Container Instances ####
+return
+}
+
+
+	# Store IP
+	echo $(hostname -I) > {{.VirtualEnv.IPAddressPath}}
+	
+	debug_info
+	
+	unset_env
+	
+	handle_dns
+	
+	{{- if .InitContainers}}
+	handle_init_containers
+
+    echo "waiting for init containers to complete"
+	wait
+	{{- end}}
+
+	{{- if .Containers}}
+	spinup_instances
+	{{- end}}
+
+	# Do not return as it would release the namespace
+	sleep infinity
 PAUSE_EOF
-
-chmod +x  {{.VirtualEnv.ConstructorPath}}
 #### END SECTION: VirtualEnvironment Builder ####
+
+
 
 #### BEGIN SECTION: Host Environment ####
 # Description
 # 	Stuff to run outside the virtual environment
 
+run_virtual_environment() {
+	chmod +x  {{.VirtualEnv.ConstructorPath}}
 
-echo "* Initializing the Virtual Environment ..."
-apptainer exec --net --network=flannel --fakeroot \
---bind /bin,/etc/apptainer,/var/lib/apptainer,/lib,/lib64,/usr,/etc/passwd,$HOME \
-docker://alpine {{.VirtualEnv.ConstructorPath}} &  
+	apptainer exec --net --network=flannel --fakeroot \
+	--bind /bin,/etc/apptainer,/var/lib/apptainer,/lib,/lib64,/usr,/etc/passwd,$HOME \
+	docker://alpine {{.VirtualEnv.ConstructorPath}} &
 
-echo "* Waiting 5 seconds for the virtual environment to become ready ..."
-sleep 5
+	# return the PID of apptainer running the virtual environment
+	VPID=$!
 
-echo "* Setting up Environment cleaner ..."
-VPID=$!
-
-trap teardown EXIT
-teardown() {
- echo "* Tearing download the Virtual Environment ..."
-
- {{- if .Containers}}
- echo "** Stopping apptainer instances. ..."
- {{- range $index, $container := .Containers}} 
- apptainer instance stop {{$container.InstanceName}}
- {{- end}}
- {{- end}}
-
- echo "** Exiting the Virtual Environment. ..."
- kill ${VPID}
- wait ${VPID}
+	echo "* Waiting 5 seconds for the virtual environment to become ready ..."
+	sleep 5
 }
 
+teardown() {
+	echo "* Tearing download the Virtual Environment ..."
+	
 {{- if .Containers}}
+	echo "** Stopping apptainer instances. ..."
+	{{- range $index, $container := .Containers}} 
+	apptainer instance stop {{$container.InstanceName}}
+	{{- end}}
+{{- end}}
+	
+	echo "** Exiting the Virtual Environment. ..."
+	kill ${VPID}
+	wait ${VPID}
+}
+
+exec_containers() {
 {{ range $index, $container := .Containers}}
-echo "* Running instance://{{$container.InstanceName}}"
+	echo "* Running instance://{{$container.InstanceName}}"
+	
+	echo instance://{{$container.InstanceName}} > {{$container.JobIDPath}}
+	
+	$(apptainer {{$container.ApptainerMode}} --compat --cleanenv \ 
+	{{- if $container.EnvFilePath}}
+	--env-file {{$container.EnvFilePath}} \
+	{{- end}}
+	instance://{{$container.InstanceName}}
+	{{- if $container.Command}}{{range $index, $cmd := $container.Command}} '{{$cmd}}'{{end}}{{end -}}
+	{{- if $container.Args}}{{range $index, $arg := $container.Args}} '{{$arg}}'{{end}}{{end -}}
+	 &>> {{$container.LogsPath}}; echo $? > {{$container.ExitCodePath}}) &
 
-echo instance://{{$container.InstanceName}} > {{$container.JobIDPath}}
-
-$(apptainer {{$container.ApptainerMode}} --compat --cleanenv \ 
-{{- if $container.EnvFilePath}}
---env-file {{$container.EnvFilePath}} \
 {{- end}}
-instance://{{$container.InstanceName}}
-{{- if $container.Command}}{{range $index, $cmd := $container.Command}} '{{$cmd}}'{{end}}{{end -}}
-{{- if $container.Args}}{{range $index, $arg := $container.Args}} '{{$arg}}'{{end}}{{end -}}
- &>> {{$container.LogsPath}}; echo $? > {{$container.ExitCodePath}}) &
-{{- end}}
+}
 
-echo "Waiting for Containers to Complete..."
-wait
+
+echo "* Initializing the Virtual Environment ..."
+run_virtual_environment
+
+echo "* Setting up Environment cleaner ..."
+trap teardown EXIT
+
+
+# Wait until all containers become ready
+{{- if .Containers}}
+ {{ range $index, $container := .Containers}}
+ echo "* Verify instance://{{$container.InstanceName}}"
+ while !  apptainer instance list | grep "{{$container.InstanceName}}"; do 
+	echo "retry for {{$container.InstanceName}}"
+    apptainer instance list
+	sleep 3
+  done
+ {{- end}} # end range
+{{- end}} # end if
+
+
+{{- if .Containers}}
+	exec_containers
+
+	echo "Waiting for Containers to Complete..."
+	wait
 {{- end}}
 #### END SECTION: Host Environment ####
 `
@@ -288,132 +322,3 @@ type RequestOptions struct {
 	// CustomFlags are sbatch that are directly given by the end-user.
 	CustomFlags []string
 }
-
-/************************************************************
-
-		Container Execution Templates
-
-************************************************************
-
-const (
-	ApptainerBin = "apptainer"
-
-	// ApptainerExec launch the container, run the command that you passed in, and then back out of the container.
-	// example: apptainer exec first.sif /bin/bash
-	ApptainerExec = ApptainerBin + " exec --compat --cleanenv --pid --no-mount tmp,home \\"
-
-	// ApptainerRun launch the container, perform the runscript within the container, and then back out of the container.
-	// example: apptainer run first.sif
-	ApptainerRun = ApptainerBin + " run --compat --cleanenv --pid --no-mount tmp,home \\"
-
-
-	ApptainerStart = ApptainerBin + " start --compat --cleanenv --no-mount tmp,home \\"
-)
-
-var ApptainerTemplate = `{{.Apptainer}}
-{{- if .EnvironmentFilePath}}
---env-file {{.EnvironmentFilePath}} \
-{{- end}}
-{{- if .Bind}}
---bind {{ range $index, $path := .Bind}}{{if $index}},{{end}}{{$path}}{{end}} \
-{{- end}}
-{{.Image}}
-{{- if .Command}}{{range $index, $cmd := .Command}} '{{$cmd}}'{{end}}{{end -}}
-{{- if .Args}}{{range $index, $arg := .Args}} '{{$arg}}'{{end}}{{end -}}
-`
-
-// ApptainerTemplateFields container the supported fields for the Container template.
-type ApptainerTemplateFields struct {
-	/*--
-		Mandatory Fields
-	--* /
-	Apptainer string // Instruction on how to run apptainer
-
-	/*--
-		Optional Fields (marked by a pointer)
-	--* /
-	InstanceName *string // Used for Instance
-
-	EnvironmentFilePath string   // format: VAR=VALUE
-	Bind                []string // format: /hostpath:/containerpath or /hostpath
-}
-*/
-
-/************************************************************
-
-			Sbatch Templates
-
-************************************************************/
-
-/*
-
-
-
-
-
-
-	apptainer exec instance://skata_main 'sh' '-c' 'iperf3 -s'
-
-
-
-
-	echo "Initializing the Virtual Environment ..."
-
-
-	apptainer exec --net --network=flannel --fakeroot									\
-	--bind /bin,/etc/apptainer,/var/lib/apptainer,/lib,/lib64,/usr,/etc/passwd,$HOME	\
-	docker://alpine	{{.VirtualEnv.ConstructorPath}}`
-
-
-	`
-
-
-
-
-
-
-	$({{$container.Command}} &>> {{$container.LogsPath}}; echo $? > {{$container.ExitCodePath}}) &
-	echo $! > {{$container.JobIDPath}}
-
-
-
-
-
-
-
-
-
-
-	`
-		Initialize = `
-
-	`
-		SetEnv = `
-
-		FixDNS = `
-
-		RunAndWaitInitContainers = `
-
-		RunAndWaitContainers = `
-	#### BEGIN SECTION: Containers ####
-	# Description
-	# 	Execute the containers
-
-	{{- if .Containers}}
-	{{ range $index, $container := .Containers}}
-	$({{$container.Command}} &>> {{$container.LogsPath}}; echo $? > {{$container.ExitCodePath}}) &
-	echo $! > {{$container.JobIDPath}}
-	{{end}}
-
-	echo "Waiting for containers "
-	wait
-	{{- end}}
-	#### END SECTION: Containers ####`
-	)
-
-	// SBatchTemplate provides the context for going from Container jobs to slurm jobs
-	// Single # are directives to SBATCH
-	// Double ## are comments.
-	var SBatchTemplate = SbatchScriptTemplate + `
-
-*/

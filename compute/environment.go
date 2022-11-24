@@ -22,22 +22,17 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 type HPCEnvironment struct {
-	KubeServiceHost string
-	KubeServicePort string
-
 	KubeDNS           string
 	ContainerRegistry string
 }
 
 var Environment HPCEnvironment
 
-var ClientSet *kubernetes.Clientset
 var K8SClient client.Client
 
 var DefaultLogger = zap.New(zap.UseDevMode(true))
@@ -137,6 +132,27 @@ func (p PodPath) CreateSubDirectory(name string) (string, error) {
 	return fullPath, nil
 }
 
+func (p PodPath) CreateFile(name string) (string, error) {
+	fullPath := filepath.Join(string(p), name)
+
+	f, err := os.Create(fullPath)
+	if err != nil {
+		return fullPath, errors.Wrapf(err, "cannot create file '%s'", fullPath)
+	}
+
+	if err := f.Close(); err != nil {
+		return fullPath, errors.Wrapf(err, "cannot close file '%s'", fullPath)
+	}
+
+	return fullPath, nil
+}
+
+func (p PodPath) PathExists(name string) (os.FileInfo, error) {
+	fullPath := filepath.Join(string(p), name)
+
+	return os.Stat(fullPath)
+}
+
 func (p PodPath) Container(containerName string) ContainerPath {
 	return ContainerPath(filepath.Join(string(p), containerName))
 }
@@ -162,13 +178,14 @@ func (c ContainerPath) EnvFilePath() string {
 // ParsePath parses the path according to the expected HPK format, and returns
 // the corresponding fields.
 // Validated through: https://regex101.com/r/s4tb8x/1
-func ParsePath(path string) (podKey types.NamespacedName, fileName string) {
+func ParsePath(path string) (podKey types.NamespacedName, fileName string, invalid bool) {
 	re := regexp.MustCompile(`^.hpk/(?P<namespace>\w+)/(?P<pod>.*?)(/.virtualenv)*/(?P<file>.*)$`)
 
 	match := re.FindStringSubmatch(path)
 
 	if len(match) == 0 {
-		panic(errors.Errorf("path '%s' does not follow the HPC convention", path))
+		invalid = true
+		return
 	}
 
 	for i, name := range re.SubexpNames() {
@@ -183,6 +200,8 @@ func ParsePath(path string) (podKey types.NamespacedName, fileName string) {
 			}
 		}
 	}
+
+	invalid = false
 
 	return
 }
