@@ -142,12 +142,17 @@ func (h *EventHandler) Run(ctx context.Context, notifyVirtualKubelet func(pod *c
 
 					return
 				case event := <-h.Queue:
-					podkey, file := compute.ParsePath(event.Name)
+					podkey, file, invalid := compute.ParsePath(event.Name)
+					if invalid {
+						compute.DefaultLogger.Info("SLURM: omit unknown event", "op", event.Op, "path", event.Name)
+						continue
+					}
+
 					logger := compute.DefaultLogger.WithValues("pod", podkey)
 
 					/*-- Skip events that are not related to pod changes driven by Slurm --*/
 					if !event.Op.Has(fsnotify.Write) {
-						logger.Info("SLURM: omit event", "op", event.Op, "file", file)
+						logger.Info("SLURM: omit known event", "op", event.Op, "file", file)
 						continue
 					}
 
@@ -161,11 +166,11 @@ func (h *EventHandler) Run(ctx context.Context, notifyVirtualKubelet func(pod *c
 
 					case compute.ExtensionJobID:
 						/*-- Container Started --*/
-						logger.Info("SLURM -> Job Has Started", "op", event.Op, "path", file, )
+						logger.Info("SLURM -> Job Has Started", "op", event.Op, "path", file)
 
 					case compute.ExtensionExitCode:
 						/*-- Container Terminated --*/
-						logger.Info("SLURM -> Job Is Complete", "op", event.Op, "path", file, )
+						logger.Info("SLURM -> Job Is Complete", "op", event.Op, "path", file)
 
 					default:
 						/*-- Any other file gnored --*/

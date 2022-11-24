@@ -119,8 +119,6 @@ func TestSBatch(t *testing.T) {
 			name: "noenv",
 			fields: slurm.SbatchScriptFields{
 				ComputeEnv: compute.HPCEnvironment{
-					KubeServiceHost:   "6.6.6.6",
-					KubeServicePort:   "666",
 					KubeDNS:           "6.6.6.6",
 					ContainerRegistry: "none",
 				},

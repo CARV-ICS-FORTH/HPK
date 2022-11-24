@@ -83,7 +83,7 @@ func installFlags(flags *pflag.FlagSet, c *Opts) {
 	flags.StringVar(&c.ContainerRegistry, "registry", "docker://", "container registry")
 
 	flags.IntVar(&c.PodSyncWorkers, "pod-sync-workers", 1, `set the number of pod synchronization workers`)
-	flags.DurationVar(&c.InformerResyncPeriod, "full-resync-period", 1*time.Minute, "how often to perform a full resync of pods between kubernetes and the provider")
+	flags.DurationVar(&c.InformerResyncPeriod, "full-resync-period", 0, "how often to perform a full resync of pods between kubernetes and the provider")
 
 	flags.DurationVar(&c.StartupTimeout, "startup-timeout", 30*time.Second, "How long to wait for the virtual-kubelet to start")
 

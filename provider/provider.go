@@ -29,19 +29,18 @@ import (
 	vkapi "github.com/virtual-kubelet/virtual-kubelet/node/api"
 	"github.com/virtual-kubelet/virtual-kubelet/node/api/statsv1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
-// Provider implements the virtual-kubelet provider interface and stores pods in memory.
-type Provider struct {
+// VirtualK8S implements the virtual-kubelet provider interface and stores pods in memory.
+type VirtualK8S struct {
 	InitConfig
 
 	Logger logr.Logger
 
-	inotify                *fsnotify.Watcher
-	virtualKubeletNotifier func(*corev1.Pod)
+	inotify    *fsnotify.Watcher
+	updatedPod func(*corev1.Pod)
 }
 
 // InitConfig is the config passed to initialize a registered provider.
@@ -53,14 +52,15 @@ type InitConfig struct {
 	BuildVersion string
 }
 
-// NewProvider creates a new Provider, which implements the PodNotifier interface
-func NewProvider(config InitConfig) (*Provider, error) {
+// NewVirtualK8S reads a kubeconfig file and sets up a client to interact
+// with Slurm cluster.
+func NewVirtualK8S(config InitConfig) (*VirtualK8S, error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, errors.Wrapf(err, "add watcher on fsnotify failed")
 	}
 
-	return &Provider{
+	return &VirtualK8S{
 		InitConfig: config,
 		Logger:     zap.New(zap.UseDevMode(true)),
 		inotify:    watcher,
@@ -81,9 +81,9 @@ core logic to be able to understand the type of failure.
 ************************************************************/
 
 // CreatePod takes a Kubernetes Pod and deploys it within the provider.
-func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
+func (v *VirtualK8S) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	podKey := client.ObjectKeyFromObject(pod)
-	logger := p.Logger.WithValues("obj", podKey)
+	logger := v.Logger.WithValues("obj", podKey)
 
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
@@ -104,14 +104,14 @@ func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 		will be handled by the Virtual Kubelet
 		https://ritazh.com/understanding-kubectl-logs-with-virtual-kubelet-a135e83ae0ee
 	*/
-	pod.Status.HostIP = p.InitConfig.InternalIP
+	pod.Status.HostIP = v.InitConfig.InternalIP
 
 	/*
 		If an error is returned, Virtual Kubernetes will set the Phase to either "Pending" or "Failed",
 		depending on the pod.RestartPolicy.
 		In both cases, it will	wrap the reason into "podStatusReasonProviderFailed"
 	*/
-	if err := slurm.CreatePod(ctx, pod, p.inotify); err != nil {
+	if err := slurm.CreatePod(ctx, pod, v.inotify); err != nil {
 		return err
 	}
 
@@ -121,9 +121,9 @@ func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 }
 
 // UpdatePod takes a Kubernetes Pod and updates it within the provider.
-func (p *Provider) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
+func (v *VirtualK8S) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	podKey := client.ObjectKeyFromObject(pod)
-	logger := p.Logger.WithValues("obj", podKey)
+	logger := v.Logger.WithValues("obj", podKey)
 
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
@@ -173,53 +173,61 @@ func (p *Provider) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	/*-- Update the local status of Pod --*/
 	slurm.SavePod(ctx, pod)
 
+	logger.Info("Update pod success")
+
 	return nil
 }
 
 // DeletePod takes a Kubernetes Pod and deletes it from the provider. Once a pod is deleted, the provider is
 // expected to call the NotifyPods callback with a terminal pod status where all the containers are in a terminal
 // state, as well as the pod. DeletePod may be called multiple times for the same pod.
-func (p *Provider) DeletePod(ctx context.Context, pod *corev1.Pod) error {
+func (v *VirtualK8S) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 	podKey := client.ObjectKeyFromObject(pod)
-	logger := p.Logger.WithValues("obj", podKey)
+	logger := v.Logger.WithValues("obj", podKey)
 
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
 	logger.Info("K8s -> DeletePod")
-	defer logger.Info("K8s <- DeletePod")
 
-	if pod.Namespace == "kube-system" {
-		return nil
+	if !slurm.DeletePod(podKey) {
+		logger.Info("K8s <- DeletePod (POD NOT FOUND)")
+
+		return errdefs.NotFoundf("object not found")
 	}
-
-	slurm.DeletePod(podKey)
 
 	/*---------------------------------------------------
 	 * Mark Containers and Pod as Terminated
 	 *---------------------------------------------------*/
-	pod.Status.Phase = corev1.PodSucceeded
+	/*
+		pod.Status.Phase = corev1.PodSucceeded
+		ready := false
 
-	for i := range pod.Status.InitContainerStatuses {
-		pod.Status.InitContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
-			Reason:     "PodIsDeleted",
-			Message:    "Pod is being deleted",
-			FinishedAt: metav1.Now(),
+		for i := range pod.Status.InitContainerStatuses {
+			pod.Status.InitContainerStatuses[i].Started = &ready
+			pod.Status.InitContainerStatuses[i].Ready = ready
+			pod.Status.InitContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
+				Reason:     "PodIsDeleted",
+				Message:    "Pod is being deleted",
+				FinishedAt: metav1.Now(),
+			}
 		}
-	}
 
-	for i := range pod.Status.ContainerStatuses {
-		pod.Status.ContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
-			Reason:     "PodIsDeleted",
-			Message:    "Pod is being deleted",
-			FinishedAt: metav1.Now(),
+		for i := range pod.Status.ContainerStatuses {
+			pod.Status.ContainerStatuses[i].Started = &ready
+			pod.Status.ContainerStatuses[i].Ready = ready
+			pod.Status.ContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
+				Reason:     "PodIsDeleted",
+				Message:    "Pod is being deleted",
+				FinishedAt: metav1.Now(),
+			}
 		}
-	}
 
-	p.virtualKubeletNotifier(pod)
+		v.updatedPod(pod)
 
-	logger.Info("Delete pod success")
+	*/
 
+	logger.Info("K8s <- DeletePod (SUCCESS)")
 	return nil
 }
 
@@ -227,9 +235,9 @@ func (p *Provider) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 // The Pod returned is expected to be immutable, and may be accessed
 // concurrently outside the calling goroutine. Therefore, it is recommended
 // to return a version after DeepCopy.
-func (p *Provider) GetPod(ctx context.Context, namespace, name string) (*corev1.Pod, error) {
+func (v *VirtualK8S) GetPod(ctx context.Context, namespace, name string) (*corev1.Pod, error) {
 	podKey := client.ObjectKey{Namespace: namespace, Name: name}
-	logger := p.Logger.WithValues("obj", podKey)
+	logger := v.Logger.WithValues("obj", podKey)
 
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
@@ -255,9 +263,9 @@ func (p *Provider) GetPod(ctx context.Context, namespace, name string) (*corev1.
 // The PodStatus returned is expected to be immutable, and may be accessed
 // concurrently outside the calling goroutine. Therefore, it is recommended
 // to return a version after DeepCopy.
-func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*corev1.PodStatus, error) {
+func (v *VirtualK8S) GetPodStatus(ctx context.Context, namespace, name string) (*corev1.PodStatus, error) {
 	podKey := client.ObjectKey{Namespace: namespace, Name: name}
-	logger := p.Logger.WithValues("obj", podKey)
+	logger := v.Logger.WithValues("obj", podKey)
 
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
@@ -283,12 +291,12 @@ func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*c
 // The Pods returned are expected to be immutable, and may be accessed
 // concurrently outside the calling goroutine. Therefore, it is recommended
 // to return a version after DeepCopy.
-func (p *Provider) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
+func (v *VirtualK8S) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	p.Logger.Info("K8s -> GetPods")
-	defer p.Logger.Info("K8s <- GetPods")
+	v.Logger.Info("K8s -> GetPods")
+	defer v.Logger.Info("K8s <- GetPods")
 
 	return slurm.GetPods()
 }
@@ -302,17 +310,17 @@ func (p *Provider) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
 //
 // NotifyPods must not block the caller since it is only used to register the callback.
 // The callback passed into `NotifyPods` may block when called.
-func (p *Provider) NotifyPods(_ context.Context, f func(*corev1.Pod)) {
+func (v *VirtualK8S) NotifyPods(_ context.Context, f func(*corev1.Pod)) {
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	p.Logger.Info("K8s -> NotifyPods")
-	defer p.Logger.Info("K8s <- NotifyPods")
+	v.Logger.Info("K8s -> NotifyPods")
+	defer v.Logger.Info("K8s <- NotifyPods")
 
 	/*---------------------------------------------------
 	 * Listen for Slurm Events caused by Pods.
 	 *---------------------------------------------------*/
-	p.virtualKubeletNotifier = f
+	v.updatedPod = f
 
 	/*-- start event handler --*/
 	eh := slurm.NewEventHandler(slurm.Options{
@@ -326,13 +334,13 @@ func (p *Provider) NotifyPods(_ context.Context, f func(*corev1.Pod)) {
 	go func() {
 		for {
 			select {
-			case event, ok := <-p.inotify.Events:
+			case event, ok := <-v.inotify.Events:
 				if !ok {
 					return
 				}
 				eh.Push(event)
 
-			case err, ok := <-p.inotify.Errors:
+			case err, ok := <-v.inotify.Errors:
 				if !ok {
 					return
 				}
@@ -345,14 +353,14 @@ func (p *Provider) NotifyPods(_ context.Context, f func(*corev1.Pod)) {
 
 /************************************************************
 
-		Implements vkapi.Provider
+		Implements vkapi.VirtualK8S
 
 ************************************************************/
 
 // GetContainerLogs retrieves the logs of a container by name from the provider.
-func (p *Provider) GetContainerLogs(ctx context.Context, namespace, podName, containerName string, opts vkapi.ContainerLogOpts) (io.ReadCloser, error) {
+func (v *VirtualK8S) GetContainerLogs(ctx context.Context, namespace, podName, containerName string, opts vkapi.ContainerLogOpts) (io.ReadCloser, error) {
 	podKey := client.ObjectKey{Namespace: namespace, Name: podName}
-	logger := p.Logger.WithValues("obj", podKey)
+	logger := v.Logger.WithValues("obj", podKey)
 
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
@@ -375,9 +383,9 @@ func (p *Provider) GetContainerLogs(ctx context.Context, namespace, podName, con
 
 // RunInContainer executes a command in a container in the pod, copying data
 // between in/out/err and the container's stdin/stdout/stderr.
-func (p *Provider) RunInContainer(ctx context.Context, namespace, podName, containerName string, cmd []string, attach vkapi.AttachIO) error {
+func (v *VirtualK8S) RunInContainer(ctx context.Context, namespace, podName, containerName string, cmd []string, attach vkapi.AttachIO) error {
 	podKey := client.ObjectKey{Namespace: namespace, Name: podName}
-	logger := p.Logger.WithValues("obj", podKey)
+	logger := v.Logger.WithValues("obj", podKey)
 
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
@@ -431,22 +439,12 @@ func (p *Provider) RunInContainer(ctx context.Context, namespace, podName, conta
 	return nil
 }
 
-func (p *Provider) ConfigureNode(_ context.Context, _ corev1.Node) {
+func (v *VirtualK8S) GetStatsSummary(context.Context) (*statsv1alpha1.Summary, error) {
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	p.Logger.Info("K8s -> ConfigureNode")
-	defer p.Logger.Info("K8s <- ConfigureNode")
-
-	panic("not yet supported")
-}
-
-func (p *Provider) GetStatsSummary(context.Context) (*statsv1alpha1.Summary, error) {
-	/*---------------------------------------------------
-	 * Preamble used for Request tracing on the logs
-	 *---------------------------------------------------*/
-	p.Logger.Info("K8s -> GetStatsSummary")
-	defer p.Logger.Info("K8s <- GetStatsSummary")
+	v.Logger.Info("K8s -> GetStatsSummary")
+	defer v.Logger.Info("K8s <- GetStatsSummary")
 
 	panic("not yet supported")
 }

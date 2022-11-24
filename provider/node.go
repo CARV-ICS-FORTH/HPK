@@ -27,7 +27,7 @@ import (
 
 // CreateVirtualNode builds a kubernetes node object from a provider
 // This is a temporary solution until node stuff actually split off from the provider interface itself.
-func (p *Provider) CreateVirtualNode(ctx context.Context, nodename string, taint *corev1.Taint) *corev1.Node {
+func (v *VirtualK8S) CreateVirtualNode(ctx context.Context, nodename string, taint *corev1.Taint) *corev1.Node {
 	taints := make([]corev1.Taint, 0)
 
 	if taint != nil {
@@ -59,58 +59,73 @@ func (p *Provider) CreateVirtualNode(ctx context.Context, nodename string, taint
 			Taints: taints,
 		},
 		Status: corev1.NodeStatus{
-			NodeInfo:        p.NodeSystemInfo(ctx),
+			NodeInfo:        v.NodeSystemInfo(ctx),
 			Capacity:        resources,
 			Allocatable:     resources,
 			Conditions:      NodeConditions(ctx),
-			Addresses:       p.NodeAddresses(ctx),
-			DaemonEndpoints: p.NodeDaemonEndpoints(ctx),
+			Addresses:       v.NodeAddresses(ctx),
+			DaemonEndpoints: v.NodeDaemonEndpoints(ctx),
 			Phase:           corev1.NodeRunning,
 		},
 	}
 }
 
+// ConfigureNode enables a provider to configure the node object that
+// will be used for Kubernetes.
+func (v *VirtualK8S) ConfigureNode(ctx context.Context, node *corev1.Node) {
+	/*---------------------------------------------------
+	 * Preamble used for Request tracing on the logs
+	 *---------------------------------------------------*/
+	v.Logger.Info("K8s -> ConfigureNode")
+	defer v.Logger.Info("K8s <- ConfigureNode")
+
+	panic("not yet supported")
+}
+
+// NodeConditions creates a slice of node conditions representing a
+// kubelet in perfect health. These four conditions are the ones which virtual-kubelet
+// sets as Unknown when a Ping fails.
 func NodeConditions(_ context.Context) []corev1.NodeCondition {
 	// NodeConditions returns a list of conditions (Ready, OutOfDisk, etc), for updates to the node status
 	// within Kubernetes.
 	// TODO: Make this configurable
 	return []corev1.NodeCondition{
 		{
-			Type:   corev1.NodeReady,
-			Status: corev1.ConditionTrue,
-			// LastHeartbeatTime:  metav1.Now(),
+			Type:               corev1.NodeReady,
+			Status:             corev1.ConditionTrue,
+			LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
 			Reason:             "KubeletPending",
 			Message:            "kubelet is pending.",
 		},
 		{
-			Type:   corev1.NodeMemoryPressure,
-			Status: corev1.ConditionFalse,
-			// LastHeartbeatTime:  metav1.Now(),
+			Type:               corev1.NodeMemoryPressure,
+			Status:             corev1.ConditionFalse,
+			LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
 			Reason:             "KubeletHasSufficientMemory",
 			Message:            "kubelet has sufficient memory available",
 		},
 		{
-			Type:   corev1.NodeDiskPressure,
-			Status: corev1.ConditionFalse,
-			// LastHeartbeatTime:  metav1.Now(),
+			Type:               corev1.NodeDiskPressure,
+			Status:             corev1.ConditionFalse,
+			LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
 			Reason:             "KubeletHasNoDiskPressure",
 			Message:            "kubelet has no disk pressure",
 		},
 		{
-			Type:   corev1.NodePIDPressure,
-			Status: corev1.ConditionFalse,
-			// LastHeartbeatTime:  metav1.Now(),
+			Type:               corev1.NodePIDPressure,
+			Status:             corev1.ConditionFalse,
+			LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
 			Reason:             "KubeletHasNoPIDPressure",
 			Message:            "kubelet has no PID pressure",
 		},
 		{
-			Type:   corev1.NodeNetworkUnavailable,
-			Status: corev1.ConditionFalse,
-			// LastHeartbeatTime:  metav1.Now(),
+			Type:               corev1.NodeNetworkUnavailable,
+			Status:             corev1.ConditionFalse,
+			LastHeartbeatTime:  metav1.Now(),
 			LastTransitionTime: metav1.Now(),
 			Reason:             "RouteCreated",
 			Message:            "RouteController created a route",
@@ -118,31 +133,31 @@ func NodeConditions(_ context.Context) []corev1.NodeCondition {
 	}
 }
 
-func (p *Provider) NodeAddresses(_ context.Context) []corev1.NodeAddress {
+func (v *VirtualK8S) NodeAddresses(_ context.Context) []corev1.NodeAddress {
 	return []corev1.NodeAddress{
 		{
 			Type:    corev1.NodeExternalIP,
-			Address: p.InitConfig.InternalIP,
+			Address: v.InitConfig.InternalIP,
 		},
 		{
 			Type:    corev1.NodeInternalIP,
-			Address: p.InitConfig.InternalIP,
+			Address: v.InitConfig.InternalIP,
 		},
 	}
 }
 
-func (p *Provider) NodeDaemonEndpoints(_ context.Context) corev1.NodeDaemonEndpoints {
-	p.Logger.Info("-> NodeDaemonEndpoints")
-	defer p.Logger.Info("<- NodeDaemonEndpoints")
+func (v *VirtualK8S) NodeDaemonEndpoints(_ context.Context) corev1.NodeDaemonEndpoints {
+	v.Logger.Info("-> NodeDaemonEndpoints")
+	defer v.Logger.Info("<- NodeDaemonEndpoints")
 
 	return corev1.NodeDaemonEndpoints{
 		KubeletEndpoint: corev1.DaemonEndpoint{
-			Port: p.InitConfig.DaemonPort,
+			Port: v.InitConfig.DaemonPort,
 		},
 	}
 }
 
-func (p *Provider) NodeSystemInfo(_ context.Context) corev1.NodeSystemInfo {
+func (v *VirtualK8S) NodeSystemInfo(_ context.Context) corev1.NodeSystemInfo {
 	// goinfo.GetInfo may crash sometimes. use this method to recover and continue.
 	defer func() {
 		if r := recover(); r != nil {
@@ -172,7 +187,7 @@ func (p *Provider) NodeSystemInfo(_ context.Context) corev1.NodeSystemInfo {
 		KernelVersion:           kernelVersion,
 		OSImage:                 "hpk",
 		ContainerRuntimeVersion: "vkubelet://6.6.6.6",
-		KubeletVersion:          p.InitConfig.BuildVersion,
+		KubeletVersion:          v.InitConfig.BuildVersion,
 		KubeProxyVersion:        "",
 		OperatingSystem:         operatingSystem,
 		Architecture:            architecture,
