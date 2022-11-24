@@ -18,17 +18,17 @@ metadata:
   namespace: iperf
   name: server
   labels:
-      app: server
+    app: server
 spec:
   restartPolicy: Never
   containers:
-     - name: main
-       image: networkstatic/iperf3
-       ports:
-         - name: http
-           containerPort: 5201
-           protocol: TCP
-       command:
+    - name: main
+      image: networkstatic/iperf3
+      ports:
+        - name: http
+          containerPort: 5201
+          protocol: TCP
+      command:
         - sh
         - -c
         - |
@@ -50,5 +50,5 @@ spec:
         - -c
         - |
           # Delay waiting for server to become ready
-          sleep 10 
+          sleep 20 
           iperf3 -c server-service

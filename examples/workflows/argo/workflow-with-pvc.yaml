@@ -44,7 +44,7 @@ spec:
     - name: create-output-dir
       container:
         image: alpine:3.6
-        command: ["mkdir", "/mnt/data/output"]
+        command: [ "mkdir", "/mnt/data/output" ]
         volumeMounts:
           - name: workdir
             mountPath: /mnt/data
@@ -52,7 +52,7 @@ spec:
     - name: download-images
       container:
         image: mesosphere/aws-cli
-        command: ["aws", "--no-sign-request", "s3", "cp", "--recursive", "s3://ax-public/cricket_gif_images", "/mnt/data/"]
+        command: [ "aws", "--no-sign-request", "s3", "cp", "--recursive", "s3://ax-public/cricket_gif_images", "/mnt/data/" ]
         volumeMounts:
           - name: workdir
             mountPath: /mnt/data
@@ -60,7 +60,7 @@ spec:
     - name: create-gif
       container:
         image: v4tech/imagemagick
-        command: ["convert", "-delay", "20", "-loop", "0", "/mnt/data/*.gif", "/mnt/data/output/orig.gif"]
+        command: [ "convert", "-delay", "20", "-loop", "0", "/mnt/data/*.gif", "/mnt/data/output/orig.gif" ]
         volumeMounts:
           - name: workdir
             mountPath: /mnt/data
@@ -68,7 +68,7 @@ spec:
     - name: black-and-white
       container:
         image: v4tech/imagemagick
-        command: ["convert", "/mnt/data/output/orig.gif", "-colorspace", "Gray", "/mnt/data/output/black_white.gif"]
+        command: [ "convert", "/mnt/data/output/orig.gif", "-colorspace", "Gray", "/mnt/data/output/black_white.gif" ]
         volumeMounts:
           - name: workdir
             mountPath: /mnt/data
@@ -76,7 +76,7 @@ spec:
     - name: combine-horizontal
       container:
         image: v4tech/imagemagick
-        command: ["convert", "+append", "/mnt/data/*.gif", "/mnt/data/output/horizontal.gif"]
+        command: [ "convert", "+append", "/mnt/data/*.gif", "/mnt/data/output/horizontal.gif" ]
         volumeMounts:
           - name: workdir
             mountPath: /mnt/data
@@ -84,7 +84,7 @@ spec:
     - name: combine-vertical
       container:
         image: v4tech/imagemagick
-        command: ["convert", "-append", "/mnt/data/*.gif", "/mnt/data/output/vertical.gif"]
+        command: [ "convert", "-append", "/mnt/data/*.gif", "/mnt/data/output/vertical.gif" ]
         volumeMounts:
           - name: workdir
             mountPath: /mnt/data
@@ -92,7 +92,7 @@ spec:
     - name: make-bigger
       container:
         image: starefossen/gifsicle
-        command: ["gifsicle", "/mnt/data/output/orig.gif", "--resize", "1000x800", "-o", "/mnt/data/output/orig_big.gif"]
+        command: [ "gifsicle", "/mnt/data/output/orig.gif", "--resize", "1000x800", "-o", "/mnt/data/output/orig_big.gif" ]
         volumeMounts:
           - name: workdir
             mountPath: /mnt/data
@@ -100,7 +100,7 @@ spec:
     - name: bundle-up
       container:
         image: alpine:3.6
-        command: ["ls"]
+        command: [ "ls" ]
         volumeMounts:
           - name: workdir
             mountPath: /mnt/data

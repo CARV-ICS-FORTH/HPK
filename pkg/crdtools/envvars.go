@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -34,6 +35,8 @@ func FromEndpoints(endpoints []*corev1.Endpoints) []corev1.EnvVar {
 		subset := endpoint.Subsets[0]
 
 		if subset.Addresses == nil {
+			logrus.Warn("Ignoring subset ", subset.String())
+
 			/*-- ignore addresses that are not ready --*/
 			continue
 		}

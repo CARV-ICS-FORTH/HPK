@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -35,13 +36,13 @@ var (
 func PodError(pod *corev1.Pod, reason string, msgFormat string, msgArgs ...any) {
 	pod.Status.Phase = corev1.PodFailed
 	pod.Status.Reason = reason
-	pod.Status.Message = fmt.Sprintf(msgFormat, msgArgs)
+	pod.Status.Message = fmt.Sprintf(msgFormat, msgArgs...)
 }
 
 func SystemError(err error, errFormat string, errArgs ...any) {
-	werr := errors.Wrapf(err, errFormat, errArgs)
+	werr := errors.Wrapf(err, errFormat, errArgs...)
 
-	DefaultLogger.Error(werr, "SystemERROR")
+	compute.DefaultLogger.Error(werr, "SystemERROR")
 
 	panic(werr)
 }

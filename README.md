@@ -18,12 +18,12 @@ Compile using `make`. To run:
 # Start the control plane
 mkdir -p .k8sfs
 apptainer run --net --dns 8.8.8.8 --fakeroot \
-  --cleanenv --pid --containall \
-  --no-init --no-umask --no-eval \
-  --no-mount tmp,home --unsquash --writable \
-  --env K8SFS_MOCK_KUBELET=0 \
-  --bind .k8sfs:/usr/local/etc \
-  docker://chazapis/kubernetes-from-scratch:20221115
+--cleanenv --pid --containall \
+--no-init --no-umask --no-eval \
+--no-mount tmp,home --unsquash --writable \
+--env K8SFS_MOCK_KUBELET=0 \
+--bind .k8sfs:/usr/local/etc \
+docker://chazapis/kubernetes-from-scratch:20221115
 
 # Generate key and certificate
 export IP_ADDRESS=`ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p'`

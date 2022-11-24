@@ -15,6 +15,7 @@
 package root
 
 import (
+	"os"
 	"time"
 
 	"github.com/spf13/pflag"
@@ -28,24 +29,29 @@ import (
 // You can set the default options by creating a new `Opts` struct and passing
 // it into `SetDefaultOpts`
 type Opts struct {
+	// KubeletAddress determines which address to tell API Server to use.
+	// Node listens on all of its IP addresses on port 10250 and advertises the value specified in KubeletAddress to other nodes.
+	KubeletAddress string
+
+	// KubeletPorts determines the port to listen for requests from the Kubernetes API server.
+	KubeletPort int32
+
+	// MetricsPort int32
+
+	K8sAPICertFilepath string
+	K8sAPIKeyFilepath  string
+
 	// Namespace to watch for pods and other resources
 	KubeNamespace string
 
 	// Node name to use when creating a node in Kubernetes
 	NodeName string
 
-	// Sets the port to listen for requests from the Kubernetes API server
-	ListenAddr  int32
-	MetricsAddr string
-
 	ContainerRegistry string
 
 	// Number of workers to use to handle pod notifications
 	PodSyncWorkers       int
 	InformerResyncPeriod time.Duration
-
-	// Use node leases when supported by Kubernetes (instead of node status updates)
-	EnableNodeLease bool
 
 	// Startup Timeout is how long to wait for the kubelet to start
 	StartupTimeout time.Duration
@@ -56,22 +62,30 @@ type Opts struct {
 	TaintEffect  string
 }
 
+const (
+	EnvKubeletAddress  = "VKUBELET_ADDRESS"
+	EnvAPICertLocation = "APISERVER_CERT_LOCATION"
+	EnvAPIKeyLocation  = "APISERVER_KEY_LOCATION"
+)
+
 func installFlags(flags *pflag.FlagSet, c *Opts) {
+	flags.StringVar(&c.KubeletAddress, "kubelet-addr", os.Getenv(EnvKubeletAddress), "which address to tell API server to use")
+	flags.Int32Var(&c.KubeletPort, "kubelet-port", 10250, "port to listen for incoming requests from API server")
+
+	// flags.Int32Var(&c.MetricsPort, "metrics-port", 10255, "address to listen for metrics/stats requests")
+
+	flags.StringVar(&c.K8sAPICertFilepath, "certificate", os.Getenv(EnvAPICertLocation), "location for certificate to the API server")
+	flags.StringVar(&c.K8sAPIKeyFilepath, "key", os.Getenv(EnvAPIKeyLocation), "location for key for the API server")
+
 	flags.StringVar(&c.KubeNamespace, "namespace", corev1.NamespaceAll, "kubernetes namespace (default is 'all')")
-
 	flags.StringVar(&c.NodeName, "nodename", "hpk-kubelet", "kubernetes node name")
-
-	flags.Int32Var(&c.ListenAddr, "listen-addr", 10250, "listen for log requests")
-	flags.StringVar(&c.MetricsAddr, "metrics-addr", ":10255", "address to listen for metrics/stats requests")
 
 	flags.StringVar(&c.ContainerRegistry, "registry", "docker://", "container registry")
 
 	flags.IntVar(&c.PodSyncWorkers, "pod-sync-workers", 1, `set the number of pod synchronization workers`)
 	flags.DurationVar(&c.InformerResyncPeriod, "full-resync-period", 1*time.Minute, "how often to perform a full resync of pods between kubernetes and the provider")
 
-	flags.BoolVar(&c.EnableNodeLease, "enable-node-lease", true, `use node leases (1.13) for node heartbeats`)
-
-	flags.DurationVar(&c.StartupTimeout, "startup-timeout", 0, "How long to wait for the virtual-kubelet to start")
+	flags.DurationVar(&c.StartupTimeout, "startup-timeout", 30*time.Second, "How long to wait for the virtual-kubelet to start")
 
 	flags.BoolVar(&c.DisableTaint, "disable-taint", false, "disable the virtual-kubelet node taint")
 	flags.StringVar(&c.TaintKey, "taint-key", "virtual-kubelet.io/provider", "Set node taint key")

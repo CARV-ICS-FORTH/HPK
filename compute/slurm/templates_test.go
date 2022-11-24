@@ -20,6 +20,7 @@ import (
 	"testing"
 	"text/template"
 
+	"github.com/Masterminds/sprig"
 	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/compute/slurm"
 	"github.com/pkg/errors"
@@ -27,6 +28,7 @@ import (
 )
 
 // Run with: go clean -testcache && go test ./ -v  -run TestApptainer
+/*
 func TestApptainer(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -74,7 +76,10 @@ docker://alpine:3.7 "sh" "-c" "echo" "hello world"`,
 		},
 	}
 
-	submitTpl, err := template.New("test").Option("missingkey=error").Parse(slurm.ApptainerTemplate)
+	submitTpl, err := template.New("test").
+		Funcs(sprig.FuncMap()).
+		Option("missingkey=error").
+		Parse(slurm.ApptainerTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +88,7 @@ docker://alpine:3.7 "sh" "-c" "echo" "hello world"`,
 		var apptainerCmd strings.Builder
 
 		if err := submitTpl.Execute(&apptainerCmd, tt.fields); err != nil {
-			/*-- since both the template and fields are internal to the code, the evaluation should always succeed	--*/
+			/*-- since both the template and fields are internal to the code, the evaluation should always succeed	--* /
 			panic(errors.Wrapf(err, "failed to evaluate apptainer cmd"))
 		}
 
@@ -95,6 +100,7 @@ docker://alpine:3.7 "sh" "-c" "echo" "hello world"`,
 		}
 	}
 }
+*/
 
 // Run with: go clean -testcache && go test ./ -v  -run TestSBatch
 func TestSBatch(t *testing.T) {
@@ -103,40 +109,40 @@ func TestSBatch(t *testing.T) {
 		Name:      "dummier",
 	}
 
-	podDir := slurm.PodRuntimeDir(podKey)
+	podDir := compute.PodRuntimeDir(podKey)
 
 	tests := []struct {
 		name   string
-		fields slurm.SBatchTemplateFields
+		fields slurm.SbatchScriptFields
 	}{
 		{
 			name: "noenv",
-			fields: slurm.SBatchTemplateFields{
+			fields: slurm.SbatchScriptFields{
 				ComputeEnv: compute.HPCEnvironment{
-					KubeMaster:        "6.6.6.6",
+					KubeServiceHost:   "6.6.6.6",
+					KubeServicePort:   "666",
 					KubeDNS:           "6.6.6.6",
 					ContainerRegistry: "none",
 				},
 				Pod: podKey,
-				VirtualEnv: slurm.VirtualEnvironment{
+				VirtualEnv: slurm.VirtualEnvironmentPaths{
 					ConstructorPath: podDir.ConstructorPath(),
 					IPAddressPath:   podDir.IPAddressPath(),
-					IDPath:          podDir.IDPath(),
+					JobIDPath:       podDir.IDPath(),
 					StdoutPath:      podDir.StdoutPath(),
 					StderrPath:      podDir.StderrPath(),
 					ExitCodePath:    podDir.ExitCodePath(),
 				},
-				Options: slurm.SbatchOptions{},
-				InitContainers: func() (containers []slurm.Process) {
+				Options: slurm.RequestOptions{},
+				InitContainers: func() (containers []slurm.Container) {
 					containerName := []string{"a", "b", "c", "d"}
 					delays := []string{"5", "10", "8", "5"}
 
 					for i, cname := range containerName {
-						containers = append(containers, slurm.Process{
-							Command:      "sleep " + delays[i] + " && echo " + cname,
-							IDPath:       podDir.Container(cname).IDPath(),
-							StdoutPath:   podDir.Container(cname).StdoutPath(),
-							StderrPath:   podDir.Container(cname).StderrPath(),
+						containers = append(containers, slurm.Container{
+							Command:      []string{"sleep " + delays[i], "echo " + cname},
+							JobIDPath:    podDir.Container(cname).IDPath(),
+							LogsPath:     podDir.Container(cname).LogsPath(),
 							ExitCodePath: podDir.Container(cname).ExitCodePath(),
 						})
 					}
@@ -144,16 +150,15 @@ func TestSBatch(t *testing.T) {
 					return containers
 				}(),
 
-				Containers: func() (containers []slurm.Process) {
+				Containers: func() (containers []slurm.Container) {
 					containerName := []string{"server", "client"}
 					args := []string{"-s", "-c iperf-server \n \n"}
 
 					for i, cname := range containerName {
-						containers = append(containers, slurm.Process{
-							Command:      "# Some random comment " + "\n" + "sleep 10; " + args[i],
-							IDPath:       podDir.Container(cname).IDPath(),
-							StdoutPath:   podDir.Container(cname).StdoutPath(),
-							StderrPath:   podDir.Container(cname).StderrPath(),
+						containers = append(containers, slurm.Container{
+							Command:      []string{"# Some random comment ", "\n", "sleep 10; " + args[i]},
+							JobIDPath:    podDir.Container(cname).IDPath(),
+							LogsPath:     podDir.Container(cname).LogsPath(),
 							ExitCodePath: podDir.Container(cname).ExitCodePath(),
 						})
 					}
@@ -164,7 +169,10 @@ func TestSBatch(t *testing.T) {
 		},
 	}
 
-	submitTpl, err := template.New("test").Option("missingkey=error").Parse(slurm.SBatchTemplate)
+	submitTpl, err := template.New("test").
+		Funcs(sprig.FuncMap()).
+		Option("missingkey=error").
+		Parse(slurm.SbatchScriptTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +182,7 @@ func TestSBatch(t *testing.T) {
 
 		if err := submitTpl.Execute(&sbatchScript, tt.fields); err != nil {
 			/*-- since both the template and fields are internal to the code, the evaluation should always succeed	--*/
-			panic(errors.Wrapf(err, "failed to evaluate apptainer cmd"))
+			panic(errors.Wrapf(err, "failed to evaluate sbatch"))
 		}
 
 		actual := sbatchScript.String() // strings.TrimSpace(sbatchScript.String())

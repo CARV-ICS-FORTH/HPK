@@ -17,14 +17,19 @@ package provider
 import (
 	"context"
 	"io"
+	"os"
 
+	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/compute/slurm"
+	"github.com/fsnotify/fsnotify"
 	"github.com/go-logr/logr"
 	"github.com/niemeyer/pretty"
+	"github.com/pkg/errors"
 	"github.com/virtual-kubelet/virtual-kubelet/errdefs"
 	vkapi "github.com/virtual-kubelet/virtual-kubelet/node/api"
 	"github.com/virtual-kubelet/virtual-kubelet/node/api/statsv1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
@@ -34,6 +39,9 @@ type Provider struct {
 	InitConfig
 
 	Logger logr.Logger
+
+	inotify                *fsnotify.Watcher
+	virtualKubeletNotifier func(*corev1.Pod)
 }
 
 // InitConfig is the config passed to initialize a registered provider.
@@ -47,9 +55,15 @@ type InitConfig struct {
 
 // NewProvider creates a new Provider, which implements the PodNotifier interface
 func NewProvider(config InitConfig) (*Provider, error) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil, errors.Wrapf(err, "add watcher on fsnotify failed")
+	}
+
 	return &Provider{
 		InitConfig: config,
 		Logger:     zap.New(zap.UseDevMode(true)),
+		inotify:    watcher,
 	}, nil
 }
 
@@ -57,9 +71,16 @@ func NewProvider(config InitConfig) (*Provider, error) {
 
 		Implements node.PodLifecycleHandler
 
+
+PodLifecycleHandler defines the interface used by the PodController to react
+to new and changed pods scheduled to the node that is being managed.
+
+Errors produced by these methods should implement an interface from
+github.com/virtual-kubelet/virtual-kubelet/errdefs package in order for the
+core logic to be able to understand the type of failure.
 ************************************************************/
 
-// CreatePod accepts a VirtualEnvironment definition and stores it in memory.
+// CreatePod takes a Kubernetes Pod and deploys it within the provider.
 func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	podKey := client.ObjectKeyFromObject(pod)
 	logger := p.Logger.WithValues("obj", podKey)
@@ -67,10 +88,10 @@ func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	logger.Info("-> CreatePod")
+	logger.Info("K8s -> CreatePod")
 
 	defer func() {
-		logger.Info("<- CreatePod")
+		logger.Info("K8s <- CreatePod")
 	}()
 
 	/*---------------------------------------------------
@@ -90,10 +111,16 @@ func (p *Provider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 		depending on the pod.RestartPolicy.
 		In both cases, it will	wrap the reason into "podStatusReasonProviderFailed"
 	*/
-	return slurm.CreatePod(ctx, pod)
+	if err := slurm.CreatePod(ctx, pod, p.inotify); err != nil {
+		return err
+	}
+
+	logger.Info("Create pod success")
+
+	return nil
 }
 
-// UpdatePod accepts a VirtualEnvironment definition and updates its reference.
+// UpdatePod takes a Kubernetes Pod and updates it within the provider.
 func (p *Provider) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	podKey := client.ObjectKeyFromObject(pod)
 	logger := p.Logger.WithValues("obj", podKey)
@@ -101,21 +128,27 @@ func (p *Provider) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	logger.Info("-> UpdatePod", "phase", pod.Status.Phase)
+	logger.Info("K8s -> UpdatePod",
+		"version", pod.GetResourceVersion(),
+		"phase", pod.Status.Phase,
+	)
 
-	defer func() {
-		logger.Info("<- UpdatePod", "phase", pod.Status.Phase)
-	}()
+	defer logger.Info("K8s <- UpdatePod")
 
 	/*---------------------------------------------------
 	 * Ensure that received pod is newer than the local
 	 *---------------------------------------------------*/
-	oldPod := slurm.LoadPod(podKey)
-	if oldPod == nil {
+	localPod := slurm.LoadPod(podKey)
+	if localPod == nil {
 		return errdefs.NotFoundf("object not found")
 	}
 
-	if oldPod.ResourceVersion >= pod.ResourceVersion {
+	logger.Info("Local Pod ",
+		"version", localPod.GetResourceVersion(),
+		"phase", localPod.Status.Phase,
+	)
+
+	if localPod.ResourceVersion >= pod.ResourceVersion {
 		/*-- The received pod is old, so we can safely discard it --*/
 		logger.Info("Discard update since its ResourceVersion is older than the local")
 
@@ -125,30 +158,27 @@ func (p *Provider) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Identify any intermediate actions that must taken
 	 *---------------------------------------------------*/
-	if metaDiff := pretty.Diff(oldPod.ObjectMeta, pod.ObjectMeta); len(metaDiff) > 0 {
+	if metaDiff := pretty.Diff(localPod.ObjectMeta, pod.ObjectMeta); len(metaDiff) > 0 {
 		/* ... */
 	}
 
-	if specDiff := pretty.Diff(oldPod.Spec, pod.Spec); len(specDiff) > 0 {
+	if specDiff := pretty.Diff(localPod.Spec, pod.Spec); len(specDiff) > 0 {
 		/* ... */
 	}
 
-	if statusDiff := pretty.Diff(oldPod.Status, pod.Status); len(statusDiff) > 0 {
+	if statusDiff := pretty.Diff(localPod.Status, pod.Status); len(statusDiff) > 0 {
 		/* ... */
 	}
 
-	/*
-		WARNING: We should never replace the old version with the newer
-		since it may lead to race conditions.
-
-		It is possible to Slurm to trigger a local event, that will
-		be lost if we replace the version.
-	*/
+	/*-- Update the local status of Pod --*/
+	slurm.SavePod(ctx, pod)
 
 	return nil
 }
 
-// DeletePod deletes the specified pod out of memory.
+// DeletePod takes a Kubernetes Pod and deletes it from the provider. Once a pod is deleted, the provider is
+// expected to call the NotifyPods callback with a terminal pod status where all the containers are in a terminal
+// state, as well as the pod. DeletePod may be called multiple times for the same pod.
 func (p *Provider) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 	podKey := client.ObjectKeyFromObject(pod)
 	logger := p.Logger.WithValues("obj", podKey)
@@ -156,24 +186,47 @@ func (p *Provider) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	logger.Info("-> DeletePod")
-	defer logger.Info("<- DeletePod")
+	logger.Info("K8s -> DeletePod")
+	defer logger.Info("K8s <- DeletePod")
 
-	return slurm.DeletePod(podKey)
-}
+	if pod.Namespace == "kube-system" {
+		return nil
+	}
 
-// GetPods returns a list of all pods known to be "running".
-func (p *Provider) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
+	slurm.DeletePod(podKey)
+
 	/*---------------------------------------------------
-	 * Preamble used for Request tracing on the logs
+	 * Mark Containers and Pod as Terminated
 	 *---------------------------------------------------*/
-	p.Logger.Info("-> GetPods")
-	defer p.Logger.Info("<- GetPods")
+	pod.Status.Phase = corev1.PodSucceeded
 
-	return slurm.GetPods()
+	for i := range pod.Status.InitContainerStatuses {
+		pod.Status.InitContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
+			Reason:     "PodIsDeleted",
+			Message:    "Pod is being deleted",
+			FinishedAt: metav1.Now(),
+		}
+	}
+
+	for i := range pod.Status.ContainerStatuses {
+		pod.Status.ContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
+			Reason:     "PodIsDeleted",
+			Message:    "Pod is being deleted",
+			FinishedAt: metav1.Now(),
+		}
+	}
+
+	p.virtualKubeletNotifier(pod)
+
+	logger.Info("Delete pod success")
+
+	return nil
 }
 
-// GetPod returns a pod by name that is stored in memory.
+// GetPod retrieves a pod by name from the provider (can be cached).
+// The Pod returned is expected to be immutable, and may be accessed
+// concurrently outside the calling goroutine. Therefore, it is recommended
+// to return a version after DeepCopy.
 func (p *Provider) GetPod(ctx context.Context, namespace, name string) (*corev1.Pod, error) {
 	podKey := client.ObjectKey{Namespace: namespace, Name: name}
 	logger := p.Logger.WithValues("obj", podKey)
@@ -181,18 +234,27 @@ func (p *Provider) GetPod(ctx context.Context, namespace, name string) (*corev1.
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	logger.Info("-> GetPod")
-	defer logger.Info("<- GetPod")
+	logger.Info("K8s -> GetPod")
 
-	/*
-		From Virtual-Kubelet doc.
-		... Hence, we ignore the error and just act upon the pod if it is non-nil ...
-	*/
-	return slurm.LoadPod(podKey), nil
+	pod := slurm.LoadPod(podKey)
+	if pod == nil {
+		logger.Info("K8s <- GetPod (POD NOT FOUND)")
+
+		return nil, errdefs.NotFoundf("object not found")
+	}
+
+	logger.Info("K8s <- GetPod",
+		"version", pod.GetResourceVersion(),
+		"phase", pod.Status.Phase,
+	)
+
+	return pod.DeepCopy(), nil
 }
 
-// GetPodStatus returns the status of a pod by name that is "running".
-// returns nil if a pod by that name is not found.
+// GetPodStatus retrieves the status of a pod by name from the provider.
+// The PodStatus returned is expected to be immutable, and may be accessed
+// concurrently outside the calling goroutine. Therefore, it is recommended
+// to return a version after DeepCopy.
 func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*corev1.PodStatus, error) {
 	podKey := client.ObjectKey{Namespace: namespace, Name: name}
 	logger := p.Logger.WithValues("obj", podKey)
@@ -200,16 +262,85 @@ func (p *Provider) GetPodStatus(ctx context.Context, namespace, name string) (*c
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	logger.Info("-> GetPodStatus")
+	logger.Info("K8s -> GetPodStatus")
 
 	pod := slurm.LoadPod(podKey)
 	if pod == nil {
+		logger.Info("K8s <- GetPodStatus (POD NOT FOUND)")
+
 		return nil, errdefs.NotFoundf("object not found")
 	}
 
-	logger.Info("<- GetPodStatus", "phase", pod.Status.Phase)
+	logger.Info("K8s <- GetPodStatus",
+		"version", pod.GetResourceVersion(),
+		"phase", pod.Status.Phase,
+	)
 
-	return &pod.Status, nil
+	return pod.Status.DeepCopy(), nil
+}
+
+// GetPods retrieves a list of all pods running on the provider (can be cached).
+// The Pods returned are expected to be immutable, and may be accessed
+// concurrently outside the calling goroutine. Therefore, it is recommended
+// to return a version after DeepCopy.
+func (p *Provider) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
+	/*---------------------------------------------------
+	 * Preamble used for Request tracing on the logs
+	 *---------------------------------------------------*/
+	p.Logger.Info("K8s -> GetPods")
+	defer p.Logger.Info("K8s <- GetPods")
+
+	return slurm.GetPods()
+}
+
+// NotifyPods instructs the notifier to call the passed in function when
+// the pod status changes. It should be called when a pod's status changes.
+//
+// The provided pointer to a Pod is guaranteed to be used in a read-only
+// fashion. The provided pod's PodStatus should be up to date when
+// this function is called.
+//
+// NotifyPods must not block the caller since it is only used to register the callback.
+// The callback passed into `NotifyPods` may block when called.
+func (p *Provider) NotifyPods(_ context.Context, f func(*corev1.Pod)) {
+	/*---------------------------------------------------
+	 * Preamble used for Request tracing on the logs
+	 *---------------------------------------------------*/
+	p.Logger.Info("K8s -> NotifyPods")
+	defer p.Logger.Info("K8s <- NotifyPods")
+
+	/*---------------------------------------------------
+	 * Listen for Slurm Events caused by Pods.
+	 *---------------------------------------------------*/
+	p.virtualKubeletNotifier = f
+
+	/*-- start event handler --*/
+	eh := slurm.NewEventHandler(slurm.Options{
+		MaxWorkers:   1,
+		MaxQueueSize: 10,
+	})
+
+	go eh.Run(context.Background(), f)
+
+	/*-- add inotify events to queue to be processed asynchronously --*/
+	go func() {
+		for {
+			select {
+			case event, ok := <-p.inotify.Events:
+				if !ok {
+					return
+				}
+				eh.Push(event)
+
+			case err, ok := <-p.inotify.Errors:
+				if !ok {
+					return
+				}
+
+				panic(errors.Wrapf(err, "fsnotify failed"))
+			}
+		}
+	}()
 }
 
 /************************************************************
@@ -226,10 +357,20 @@ func (p *Provider) GetContainerLogs(ctx context.Context, namespace, podName, con
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	logger.Info("-> GetContainerLogs", "container", containerName)
-	defer logger.Info("<- GetContainerLogs", "container", containerName)
+	logger.Info("K8s -> GetContainerLogs", "container", containerName)
 
-	panic("not yet supported")
+	pod := slurm.LoadPod(podKey)
+	if pod == nil {
+		logger.Info("K8s <- GetContainerLogs (POD NOT FOUND)")
+
+		return nil, errdefs.NotFoundf("object not found")
+	}
+
+	logfile := compute.PodRuntimeDir(podKey).Container(containerName).LogsPath()
+
+	logger.Info("K8s <- GetContainerLogs", "logfile", logfile)
+
+	return os.Open(logfile)
 }
 
 // RunInContainer executes a command in a container in the pod, copying data
@@ -241,18 +382,61 @@ func (p *Provider) RunInContainer(ctx context.Context, namespace, podName, conta
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	logger.Info("-> RunInContainer", "container", containerName)
-	defer logger.Info("<- RunInContainer", "container", containerName)
+	logger.Info("K8s -> RunInContainer", "container", containerName)
+	defer logger.Info("K8s <- RunInContainer", "container", containerName)
 
-	panic("not yet supported")
+	/*
+		defer func() {
+			if attach.Stdout() != nil {
+				attach.Stdout().Close()
+			}
+			if attach.Stderr() != nil {
+				attach.Stderr().Close()
+			}
+		}()
+		req := v.client.CoreV1().RESTClient().
+			Post().
+			Namespace(namespace).
+			Resource("pods").
+			Name(podName).
+			SubResource("exec").
+			Timeout(0).
+			VersionedParams(&corev1.PodExecOptions{
+				Container: containerName,
+				Command:   cmd,
+				Stdin:     attach.Stdin() != nil,
+				Stdout:    attach.Stdout() != nil,
+				Stderr:    attach.Stderr() != nil,
+				TTY:       attach.TTY(),
+			}, scheme.ParameterCodec)
+
+		exec, err := remotecommand.NewSPDYExecutor(v.config, "POST", req.URL())
+		if err != nil {
+			return fmt.Errorf("could not make remote command: %v", err)
+		}
+
+		ts := &termSize{attach: attach}
+
+		err = exec.Stream(remotecommand.StreamOptions{
+			Stdin:             attach.Stdin(),
+			Stdout:            attach.Stdout(),
+			Stderr:            attach.Stderr(),
+			Tty:               attach.TTY(),
+			TerminalSizeQueue: ts,
+		})
+		if err != nil {
+			return err
+		}
+	*/
+	return nil
 }
 
 func (p *Provider) ConfigureNode(_ context.Context, _ corev1.Node) {
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	p.Logger.Info("-> ConfigureNode")
-	defer p.Logger.Info("<- ConfigureNode")
+	p.Logger.Info("K8s -> ConfigureNode")
+	defer p.Logger.Info("K8s <- ConfigureNode")
 
 	panic("not yet supported")
 }
@@ -261,8 +445,8 @@ func (p *Provider) GetStatsSummary(context.Context) (*statsv1alpha1.Summary, err
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	p.Logger.Info("-> GetStatsSummary")
-	defer p.Logger.Info("<- GetStatsSummary")
+	p.Logger.Info("K8s -> GetStatsSummary")
+	defer p.Logger.Info("K8s <- GetStatsSummary")
 
 	panic("not yet supported")
 }
