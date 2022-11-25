@@ -47,6 +47,7 @@ type Opts struct {
 	// Node name to use when creating a node in Kubernetes
 	NodeName string
 
+	ApptainerBin      string
 	ContainerRegistry string
 
 	// Number of workers to use to handle pod notifications
@@ -80,6 +81,7 @@ func installFlags(flags *pflag.FlagSet, c *Opts) {
 	flags.StringVar(&c.KubeNamespace, "namespace", corev1.NamespaceAll, "kubernetes namespace (default is 'all')")
 	flags.StringVar(&c.NodeName, "nodename", "hpk-kubelet", "kubernetes node name")
 
+	flags.StringVar(&c.ApptainerBin, "apptainer", "apptainer", "path to Apptainer bin")
 	flags.StringVar(&c.ContainerRegistry, "registry", "docker://", "container registry")
 
 	flags.IntVar(&c.PodSyncWorkers, "pod-sync-workers", 1, `set the number of pod synchronization workers`)

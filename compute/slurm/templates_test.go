@@ -89,7 +89,7 @@ docker://alpine:3.7 "sh" "-c" "echo" "hello world"`,
 
 		if err := submitTpl.Execute(&apptainerCmd, tt.fields); err != nil {
 			/*-- since both the template and fields are internal to the code, the evaluation should always succeed	--* /
-			panic(errors.Wrapf(err, "failed to evaluate apptainer cmd"))
+			panic(errors.Wrapf(err, "failed to evaluate Apptainer cmd"))
 		}
 
 		actual := apptainerCmd.String() // strings.TrimSpace(apptainerCmd.String())
@@ -119,8 +119,7 @@ func TestSBatch(t *testing.T) {
 			name: "noenv",
 			fields: slurm.SbatchScriptFields{
 				ComputeEnv: compute.HPCEnvironment{
-					KubeServiceHost:   "6.6.6.6",
-					KubeServicePort:   "666",
+					ApptainerBin:      "apptainer",
 					KubeDNS:           "6.6.6.6",
 					ContainerRegistry: "none",
 				},

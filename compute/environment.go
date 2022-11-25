@@ -22,22 +22,18 @@ import (
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 type HPCEnvironment struct {
-	KubeServiceHost string
-	KubeServicePort string
-
 	KubeDNS           string
 	ContainerRegistry string
+	ApptainerBin      string
 }
 
 var Environment HPCEnvironment
 
-var ClientSet *kubernetes.Clientset
 var K8SClient client.Client
 
 var DefaultLogger = zap.New(zap.UseDevMode(true))
@@ -56,6 +52,9 @@ const (
 
 const (
 	RuntimeDir = ".hpk"
+
+	// Slurm-Related Extensions
+	ExtensionSysError = ".syserror"
 
 	// Pod-Related Extensions
 	ExtensionIP     = ".ip"
@@ -78,13 +77,14 @@ func PodRuntimeDir(podRef client.ObjectKey) PodPath {
 	return PodPath(path)
 }
 
-func (p PodPath) EncodedJSONPath() string {
-	return filepath.Join(string(p), ExtensionCRD)
-}
+/*
+	Pod-Related paths captured by Slurm Notifier.
+	They are necessary to drive the lifecycle of a Pod.
+*/
 
-// Mountpaths returns .hpk/namespace/podName/mountName:mountPath
-func (p PodPath) Mountpaths(mount corev1.VolumeMount) string {
-	return filepath.Join(string(p), mount.Name+":"+mount.MountPath)
+// SysErrorPath .hpk/namespace/podName/.syserror
+func (p PodPath) SysErrorPath() string {
+	return filepath.Join(string(p), ExtensionSysError)
 }
 
 // IDPath .hpk/namespace/podName/.jid
@@ -102,9 +102,24 @@ func (p PodPath) IPAddressPath() string {
 	return filepath.Join(string(p), ExtensionIP)
 }
 
+/*
+	Pod-Related paths not captured by Slurm Notifier.
+	They are needed for HPK to bootstrap a pod.
+*/
+
 // VirtualEnvironmentDir .hpk/namespace/podName/.virtualenv
 func (p PodPath) VirtualEnvironmentDir() PodPath {
 	return PodPath(filepath.Join(string(p), ".virtualenv"))
+}
+
+// Mountpaths returns .hpk/namespace/podName/.virtualenv/mountName:mountPath
+func (p PodPath) Mountpaths(mount corev1.VolumeMount) string {
+	return filepath.Join(string(p.VirtualEnvironmentDir()), mount.Name+":"+mount.MountPath)
+}
+
+// EncodedJSONPath .hpk/namespace/podName/.virtualenv/pod.crd
+func (p PodPath) EncodedJSONPath() string {
+	return filepath.Join(string(p.VirtualEnvironmentDir()), "pod"+ExtensionCRD)
 }
 
 // ConstructorPath .hpk/namespace/podName/.virtualenv/constructor.sh
@@ -127,6 +142,10 @@ func (p PodPath) StderrPath() string {
 	return filepath.Join(string(p.VirtualEnvironmentDir()), "pod"+ExtensionStderr)
 }
 
+/*
+	Pod-Related functions
+*/
+
 func (p PodPath) CreateSubDirectory(name string) (string, error) {
 	fullPath := filepath.Join(string(p), name)
 
@@ -136,6 +155,32 @@ func (p PodPath) CreateSubDirectory(name string) (string, error) {
 
 	return fullPath, nil
 }
+
+func (p PodPath) CreateFile(name string) (string, error) {
+	fullPath := filepath.Join(string(p), name)
+
+	f, err := os.Create(fullPath)
+	if err != nil {
+		return fullPath, errors.Wrapf(err, "cannot create file '%s'", fullPath)
+	}
+
+	if err := f.Close(); err != nil {
+		return fullPath, errors.Wrapf(err, "cannot close file '%s'", fullPath)
+	}
+
+	return fullPath, nil
+}
+
+func (p PodPath) PathExists(name string) (os.FileInfo, error) {
+	fullPath := filepath.Join(string(p), name)
+
+	return os.Stat(fullPath)
+}
+
+/*
+	Container-Related paths captured by Slurm Notifier.
+	They are necessary to drive the lifecycle of a Container.
+*/
 
 func (p PodPath) Container(containerName string) ContainerPath {
 	return ContainerPath(filepath.Join(string(p), containerName))
@@ -155,6 +200,11 @@ func (c ContainerPath) ExitCodePath() string {
 	return filepath.Join(string(c) + ExtensionExitCode)
 }
 
+/*
+	Container-Related paths not captured by Slurm Notifier.
+	They are needed for HPK to bootstrap a container.
+*/
+
 func (c ContainerPath) EnvFilePath() string {
 	return filepath.Join(string(c) + ExtensionEnvironment)
 }
@@ -162,13 +212,14 @@ func (c ContainerPath) EnvFilePath() string {
 // ParsePath parses the path according to the expected HPK format, and returns
 // the corresponding fields.
 // Validated through: https://regex101.com/r/s4tb8x/1
-func ParsePath(path string) (podKey types.NamespacedName, fileName string) {
+func ParsePath(path string) (podKey types.NamespacedName, fileName string, invalid bool) {
 	re := regexp.MustCompile(`^.hpk/(?P<namespace>\w+)/(?P<pod>.*?)(/.virtualenv)*/(?P<file>.*)$`)
 
 	match := re.FindStringSubmatch(path)
 
 	if len(match) == 0 {
-		panic(errors.Errorf("path '%s' does not follow the HPC convention", path))
+		invalid = true
+		return
 	}
 
 	for i, name := range re.SubexpNames() {
@@ -183,6 +234,8 @@ func ParsePath(path string) (podKey types.NamespacedName, fileName string) {
 			}
 		}
 	}
+
+	invalid = false
 
 	return
 }

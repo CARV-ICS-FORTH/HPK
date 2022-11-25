@@ -151,6 +151,7 @@ func runRootCommand(parentCtx context.Context, c Opts) error {
 	compute.ClientSet = clientset
 	compute.K8SClient = modernClient
 	compute.Environment.ContainerRegistry = c.ContainerRegistry
+	compute.Environment.ApptainerBin = c.ApptainerBin
 
 	compute.Environment.KubeServiceHost = u.Hostname()
 	compute.Environment.KubeServicePort = u.Port()

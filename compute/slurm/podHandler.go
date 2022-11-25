@@ -260,7 +260,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher *fsnotify.Watcher) 
 	/*---------------------------------------------------
 	 * Build Container Commands for Init Containers
 	 *---------------------------------------------------*/
-	logger.Info(" * Setting apptainer for init containers")
+	logger.Info(" * Setting Apptainer for init containers")
 
 	var initContainers []Container
 
@@ -271,7 +271,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher *fsnotify.Watcher) 
 	/*---------------------------------------------------
 	 * Build Container Commands for Containers
 	 *---------------------------------------------------*/
-	logger.Info(" * Setting apptainer for containers")
+	logger.Info(" * Setting Apptainer for containers")
 
 	var containers []Container
 
@@ -295,6 +295,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher *fsnotify.Watcher) 
 			StdoutPath:      h.podDirectory.StdoutPath(),
 			StderrPath:      h.podDirectory.StderrPath(),
 			ExitCodePath:    h.podDirectory.ExitCodePath(),
+			SysErrorPath:    h.podDirectory.SysErrorPath(),
 		},
 		InitContainers: initContainers,
 		Containers:     containers,
