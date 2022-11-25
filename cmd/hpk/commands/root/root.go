@@ -145,6 +145,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 
 	compute.K8SClient = k8sclient
 	compute.Environment.ContainerRegistry = c.ContainerRegistry
+	compute.Environment.ApptainerBin = c.ApptainerBin
 
 	DefaultLogger.Info(" ... Done ...",
 		"KubernetesURL", restConfig.Host,

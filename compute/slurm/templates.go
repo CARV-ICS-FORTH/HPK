@@ -39,8 +39,9 @@ const SbatchScriptTemplate = `#!/bin/bash
 {{.Options.CustomFlags}}
 {{end}}
 
-set -eum pipeline
 
+apptainer={{.ComputeEnv.ApptainerBin}}
+echo "Using ApptainerBin: ${apptainer}"
 
 
 #### BEGIN SECTION: VirtualEnvironment Builder ####
@@ -48,7 +49,13 @@ set -eum pipeline
 # 	Builds a script for running a Virtual Environment
 # 	that resembles the semantics of a Pause Environment.
 cat > {{.VirtualEnv.ConstructorPath}} << "PAUSE_EOF"
-#!/bin/sh
+#!/bin/bash
+
+# exit when any command fails
+set -eum pipeline
+
+# echo an error message before exiting
+trap 'echo "\"${BASH_COMMAND}\" command filed with exit code $?.";' EXIT
 
 
 debug_info() {
@@ -69,7 +76,7 @@ options ndots:5
 DNS_EOF
 }
 
-# If not removed, Flags will be consumed by the nested singularity and overwrite paths.
+# If not removed, Flags will be consumed by the nested Apptainer and overwrite paths.
 # https://apptainer.org/user-docs/master/environment_and_metadata.html#environment-from-the-singularity-runtime
 unset_env() {
 	unset SINGULARITY_COMMAND
@@ -90,7 +97,7 @@ handle_init_containers() {
 {{ range $index, $container := .InitContainers}}
 	echo "* Running init container {{$index}}"
 	
-	$(apptainer {{ $container.ApptainerMode }} --compat --cleanenv --pid --no-mount tmp,home  \ 
+	$(${apptainer} {{ $container.ApptainerMode }} --compat --cleanenv --pid --no-mount tmp,home  \ 
 	{{- if $container.EnvFilePath}}
 	--env-file {{$container.EnvFilePath}} \
 	{{- end}}
@@ -112,7 +119,7 @@ spinup_instances() {
 {{ range $index, $container := .Containers}}
 	echo "* Preparing instance://{{$container.InstanceName}}"
 
-	apptainer instance start --no-init --no-umask --no-eval --no-mount tmp,home --unsquash --writable-tmpfs \
+	${apptainer} instance start --no-init --no-umask --no-eval --no-mount tmp,home --unsquash --writable-tmpfs \
 	{{- if $container.Binds}}
 	--bind {{join "," $container.Binds}} \
 	{{- end}}
@@ -122,7 +129,6 @@ spinup_instances() {
 
 return
 }
-
 
 	# Store IP
 	echo $(hostname -I) > {{.VirtualEnv.IPAddressPath}}
@@ -155,33 +161,68 @@ PAUSE_EOF
 # Description
 # 	Stuff to run outside the virtual environment
 
+cleanup() {
+		# continue despite errors
+        echo "* Clean up the Virtual Environment ..."
+        echo "** Stopping Apptainer instances ..."
+
+		{{ range $index, $container := .Containers}}
+		echo "* Stopping instance://{{$container.InstanceName}}"
+		${apptainer} instance stop {{$container.InstanceName}} &
+
+		{{- end}}
+
+		wait
+}
+
+aborted_shutdown() {
+        echo -e "\n ** The Virtual Environment has been aborted ** \n"
+        cleanup
+
+		echo "Create a virtual environment dump file"
+
+		echo "Explain the Situations " >> {{.VirtualEnv.SysErrorPath}} 
+
+		exit -1
+}
+
+graceful_shutdown() {
+        echo -e "\n ** Graceful shutdown the Virtual Environment \n"
+        cleanup
+
+        echo "** Exiting the Virtual Environment. ..."
+        kill ${VPID}
+        wait ${VPID}
+}
+
 run_virtual_environment() {
 	chmod +x  {{.VirtualEnv.ConstructorPath}}
 
-	apptainer exec --net --network=flannel --fakeroot \
+	VirtualEnvironmentReady=false
+
+	${apptainer} exec --net --network=flannel --fakeroot \
 	--bind /bin,/etc/apptainer,/var/lib/apptainer,/lib,/lib64,/usr,/etc/passwd,$HOME \
 	docker://alpine {{.VirtualEnv.ConstructorPath}} &
 
-	# return the PID of apptainer running the virtual environment
+	# return the PID of Apptainer running the virtual environment
 	VPID=$!
 
-	echo "* Waiting 5 seconds for the virtual environment to become ready ..."
-	sleep 5
-}
+	echo "* Waiting for the virtual environment to become ready ..."
+	while [[ "${VirtualEnvironmentReady}" == false ]]; do 
+		echo "* Waiting for virtual-environment to become ready ..."
+		sleep 3 
+	done
+} 
 
-teardown() {
-	echo "* Tearing download the Virtual Environment ..."
-	
-{{- if .Containers}}
-	echo "** Stopping apptainer instances. ..."
-	{{- range $index, $container := .Containers}} 
-	apptainer instance stop {{$container.InstanceName}}
-	{{- end}}
+wait_instance_ready() {
+{{ range $index, $container := .Containers}}
+	echo "* Verify instance://{{$container.InstanceName}}"
+	while !  ${apptainer} instance list | grep "{{$container.InstanceName}}"; do 
+		echo "retry for {{$container.InstanceName}}"
+		${apptainer} instance list
+		sleep 3
+	done
 {{- end}}
-	
-	echo "** Exiting the Virtual Environment. ..."
-	kill ${VPID}
-	wait ${VPID}
 }
 
 exec_containers() {
@@ -190,7 +231,7 @@ exec_containers() {
 	
 	echo instance://{{$container.InstanceName}} > {{$container.JobIDPath}}
 	
-	$(apptainer {{$container.ApptainerMode}} --compat --cleanenv \ 
+	$(${apptainer} {{$container.ApptainerMode}} --compat --cleanenv \ 
 	{{- if $container.EnvFilePath}}
 	--env-file {{$container.EnvFilePath}} \
 	{{- end}}
@@ -203,32 +244,27 @@ exec_containers() {
 }
 
 
+# enable job control and notification
+# When a background process terminates, the parent receives a SIGCHLD signal; that’s the notification.a
+# Any trap on SIGCHLD is executed for each child that exits.
+set -emb 
+
+echo "* Setting up Virtual Environment Traps ..."
+trap aborted_shutdown SIGCHLD
+trap graceful_shutdown EXIT
+
+
 echo "* Initializing the Virtual Environment ..."
 run_virtual_environment
 
-echo "* Setting up Environment cleaner ..."
-trap teardown EXIT
+echo "* Waiting until container instances are ready ..."
+wait_instance_ready
 
+echo "* == Execute Commands on Containers ==="
+exec_containers
 
-# Wait until all containers become ready
-{{- if .Containers}}
- {{ range $index, $container := .Containers}}
- echo "* Verify instance://{{$container.InstanceName}}"
- while !  apptainer instance list | grep "{{$container.InstanceName}}"; do 
-	echo "retry for {{$container.InstanceName}}"
-    apptainer instance list
-	sleep 3
-  done
- {{- end}} # end range
-{{- end}} # end if
-
-
-{{- if .Containers}}
-	exec_containers
-
-	echo "Waiting for Containers to Complete..."
-	wait
-{{- end}}
+echo "* Waiting for Containers to Complete..."
+wait
 #### END SECTION: Host Environment ####
 `
 
@@ -274,6 +310,9 @@ type VirtualEnvironmentPaths struct {
 	// ExitCodePath points to the file where Slurm Job Exit Codeis written.
 	// This is used to know when the job has been completed.
 	ExitCodePath string
+
+	// SysErrorPath indicate a system failure that cause the Pod to fail Immediately, bypassing any other checks.
+	SysErrorPath string
 }
 
 // The Container creates new within the Pod and resemble the "Container" semantics.

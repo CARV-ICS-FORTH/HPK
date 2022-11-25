@@ -160,6 +160,21 @@ func (h *EventHandler) Run(ctx context.Context, notifyVirtualKubelet func(pod *c
 					 * Declare events that warrant Pod reconciliation
 					 *---------------------------------------------------*/
 					switch filepath.Ext(file) {
+					case compute.ExtensionSysError:
+						/*-- Sbatch failed. Pod should fail immediately without other checks --*/
+						logger.Info("SLURM -> Pod initialization error", "op", event.Op, "path", file)
+
+						pod := LoadPod(podkey)
+						if pod == nil {
+							SystemError(errors.Errorf("pod '%s' does not exist", podkey), "ERR")
+						}
+
+						PodError(pod, "SYSERROR", "Here should go the content of the file")
+
+						notifyVirtualKubelet(pod)
+
+						continue
+
 					case compute.ExtensionIP:
 						/*-- Sbatch Started --*/
 						logger.Info("SLURM -> New Pod IP", "op", event.Op, "path", file)

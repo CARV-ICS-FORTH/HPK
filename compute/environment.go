@@ -29,6 +29,7 @@ import (
 type HPCEnvironment struct {
 	KubeDNS           string
 	ContainerRegistry string
+	ApptainerBin      string
 }
 
 var Environment HPCEnvironment
@@ -52,6 +53,9 @@ const (
 const (
 	RuntimeDir = ".hpk"
 
+	// Slurm-Related Extensions
+	ExtensionSysError = ".syserror"
+
 	// Pod-Related Extensions
 	ExtensionIP     = ".ip"
 	ExtensionCRD    = ".crd"
@@ -73,13 +77,14 @@ func PodRuntimeDir(podRef client.ObjectKey) PodPath {
 	return PodPath(path)
 }
 
-func (p PodPath) EncodedJSONPath() string {
-	return filepath.Join(string(p), ExtensionCRD)
-}
+/*
+	Pod-Related paths captured by Slurm Notifier.
+	They are necessary to drive the lifecycle of a Pod.
+*/
 
-// Mountpaths returns .hpk/namespace/podName/mountName:mountPath
-func (p PodPath) Mountpaths(mount corev1.VolumeMount) string {
-	return filepath.Join(string(p), mount.Name+":"+mount.MountPath)
+// SysErrorPath .hpk/namespace/podName/.syserror
+func (p PodPath) SysErrorPath() string {
+	return filepath.Join(string(p), ExtensionSysError)
 }
 
 // IDPath .hpk/namespace/podName/.jid
@@ -97,9 +102,24 @@ func (p PodPath) IPAddressPath() string {
 	return filepath.Join(string(p), ExtensionIP)
 }
 
+/*
+	Pod-Related paths not captured by Slurm Notifier.
+	They are needed for HPK to bootstrap a pod.
+*/
+
 // VirtualEnvironmentDir .hpk/namespace/podName/.virtualenv
 func (p PodPath) VirtualEnvironmentDir() PodPath {
 	return PodPath(filepath.Join(string(p), ".virtualenv"))
+}
+
+// Mountpaths returns .hpk/namespace/podName/.virtualenv/mountName:mountPath
+func (p PodPath) Mountpaths(mount corev1.VolumeMount) string {
+	return filepath.Join(string(p.VirtualEnvironmentDir()), mount.Name+":"+mount.MountPath)
+}
+
+// EncodedJSONPath .hpk/namespace/podName/.virtualenv/pod.crd
+func (p PodPath) EncodedJSONPath() string {
+	return filepath.Join(string(p.VirtualEnvironmentDir()), "pod"+ExtensionCRD)
 }
 
 // ConstructorPath .hpk/namespace/podName/.virtualenv/constructor.sh
@@ -121,6 +141,10 @@ func (p PodPath) StdoutPath() string {
 func (p PodPath) StderrPath() string {
 	return filepath.Join(string(p.VirtualEnvironmentDir()), "pod"+ExtensionStderr)
 }
+
+/*
+	Pod-Related functions
+*/
 
 func (p PodPath) CreateSubDirectory(name string) (string, error) {
 	fullPath := filepath.Join(string(p), name)
@@ -153,6 +177,11 @@ func (p PodPath) PathExists(name string) (os.FileInfo, error) {
 	return os.Stat(fullPath)
 }
 
+/*
+	Container-Related paths captured by Slurm Notifier.
+	They are necessary to drive the lifecycle of a Container.
+*/
+
 func (p PodPath) Container(containerName string) ContainerPath {
 	return ContainerPath(filepath.Join(string(p), containerName))
 }
@@ -170,6 +199,11 @@ func (c ContainerPath) IDPath() string {
 func (c ContainerPath) ExitCodePath() string {
 	return filepath.Join(string(c) + ExtensionExitCode)
 }
+
+/*
+	Container-Related paths not captured by Slurm Notifier.
+	They are needed for HPK to bootstrap a container.
+*/
 
 func (c ContainerPath) EnvFilePath() string {
 	return filepath.Join(string(c) + ExtensionEnvironment)
