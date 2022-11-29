@@ -147,7 +147,7 @@ func (p PodPath) StderrPath() string {
 */
 
 func (p PodPath) CreateSubDirectory(name string) (string, error) {
-	fullPath := filepath.Join(string(p), name)
+	fullPath := filepath.Join(string(p.VirtualEnvironmentDir()), name)
 
 	if err := os.MkdirAll(fullPath, PodGlobalDirectoryPermissions); err != nil {
 		return fullPath, errors.Wrapf(err, "cannot create dir '%s'", fullPath)
@@ -157,7 +157,7 @@ func (p PodPath) CreateSubDirectory(name string) (string, error) {
 }
 
 func (p PodPath) CreateFile(name string) (string, error) {
-	fullPath := filepath.Join(string(p), name)
+	fullPath := filepath.Join(string(p.VirtualEnvironmentDir()), name)
 
 	f, err := os.Create(fullPath)
 	if err != nil {
