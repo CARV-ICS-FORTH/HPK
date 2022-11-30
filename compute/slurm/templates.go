@@ -74,6 +74,7 @@ handle_dns() {
 cat > /etc/resolv.conf << DNS_EOF
 search {{.Pod.Namespace}}.svc.cluster.local svc.cluster.local cluster.local
 nameserver {{.ComputeEnv.KubeDNS}}
+nameserver 8.8.8.8
 options ndots:5
 DNS_EOF
 }
@@ -99,7 +100,7 @@ handle_init_containers() {
 {{- range $index, $container := .InitContainers}}
 	echo "[Virtual] Scheduling Init Container: {{$index}}"
 	
-	${apptainer} {{ $container.ApptainerMode }} --compat --cleanenv --pid --no-mount tmp,home  \ 
+	${apptainer} {{ $container.ApptainerMode }} --compat --no-mount tmp,home --userns \ 
 	{{- if $container.EnvFilePath}}
 	--env-file {{$container.EnvFilePath}} \
 	{{- end}}
@@ -121,7 +122,7 @@ handle_containers() {
 {{- range $index, $container := .Containers}}
 	echo "[Virtual] Scheduling Container: {{$container.InstanceName}}"
 
-	$(${apptainer} {{$container.ApptainerMode}} --compat --cleanenv \ 
+	$(${apptainer} {{$container.ApptainerMode}} --compat --no-mount tmp,home --userns \ 
 	{{- if $container.EnvFilePath}}
 	--env-file {{$container.EnvFilePath}} \
 	{{- end}}
@@ -148,7 +149,7 @@ _teardown() {
 		echo "[Virtual] Gracefully exit the Virtual Environment. All resources will be released."
 	else
 		echo "[Virtual] **SYSTEMERROR** ${lastCommand} command filed with exit code ${exitCode}" | tee {{.VirtualEnv.SysErrorPath}}
-		echo "[Virtual] Signal parent (${PARENT})"
+		echo "[Virtual] Send Signal to parent (${PARENT}) to inform about the failure"
 		echo "env_failed" > /dev/shm/signal_${PARENT}
 
 		echo "[Virtual] Virtual Environment Terminated due to an error. All resources will be released." 
@@ -241,6 +242,7 @@ echo "[Host] Starting the constructor the Virtual Environment ..."
 
 ${apptainer} exec --net --network=flannel --fakeroot \
 --env PARENT=${PPID}								 \
+--hostname {{.Pod.Name}}							 \
 --bind /bin,/etc/apptainer,/var/lib/apptainer,/lib,/lib64,/usr,/etc/passwd,$HOME,/run/shm \
 docker://alpine {{.VirtualEnv.ConstructorPath}} &
 
