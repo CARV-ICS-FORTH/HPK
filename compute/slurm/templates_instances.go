@@ -1,3 +1,6 @@
+//go:build instances
+// +build instances
+
 // Copyright © 2022 FORTH-ICS
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -39,8 +42,6 @@ const SbatchScriptTemplate = `#!/bin/bash
 {{.Options.CustomFlags}}
 {{end}}
 
-# exit when any command fails
-set -eum pipeline
 
 export apptainer={{.ComputeEnv.ApptainerBin}}
 echo "Using ApptainerBin: ${apptainer}"
@@ -56,9 +57,6 @@ cat > {{.VirtualEnv.ConstructorPath}} << "PAUSE_EOF"
 # Auto-Generated Script    #
 # Please do not it. 	   #
 ############################
-
-# exit when any command fails
-set -eum pipeline
 
 debug_info() {
 	echo "== Virtual Environment Info =="
@@ -97,31 +95,9 @@ unset_env() {
 
 handle_init_containers() {
 {{- range $index, $container := .InitContainers}}
-	echo "[Virtual] Scheduling Init Container: {{$index}}"
+	echo "[Virtual]* Running init container {{$index}}"
 	
-	${apptainer} {{ $container.ApptainerMode }} --compat --cleanenv --pid --no-mount tmp,home  \ 
-	{{- if $container.EnvFilePath}}
-	--env-file {{$container.EnvFilePath}} \
-	{{- end}}
-	{{- if $container.Binds}}
-	--bind {{join "," $container.Binds}} \
-	{{- end}}
-	{{$container.Image}}
-	{{- if $container.Command}}{{range $index, $cmd := $container.Command}} '{{$cmd}}'{{end}}{{end -}}
-	{{- if $container.Args}}{{range $index, $arg := $container.Args}} '{{$arg}}'{{end}}{{end -}} \
-	&>> {{$container.LogsPath}}; echo $? > {{$container.ExitCodePath}} &
-
-	echo pid://$! > {{$container.JobIDPath}}
-{{end}}
-
-return 
-}
-
-handle_containers() {
-{{- range $index, $container := .Containers}}
-	echo "[Virtual] Scheduling Container: {{$container.InstanceName}}"
-
-	$(${apptainer} {{$container.ApptainerMode}} --compat --cleanenv \ 
+	$(${apptainer} {{ $container.ApptainerMode }} --compat --cleanenv --pid --no-mount tmp,home  \ 
 	{{- if $container.EnvFilePath}}
 	--env-file {{$container.EnvFilePath}} \
 	{{- end}}
@@ -132,31 +108,46 @@ handle_containers() {
 	{{- if $container.Command}}{{range $index, $cmd := $container.Command}} '{{$cmd}}'{{end}}{{end -}}
 	{{- if $container.Args}}{{range $index, $arg := $container.Args}} '{{$arg}}'{{end}}{{end -}} \
 	&>> {{$container.LogsPath}}; echo $? > {{$container.ExitCodePath}}) &
+	echo $! > {{$container.JobIDPath}}
+{{end}}
 
-	echo pid://$! > {{$container.JobIDPath}}
-{{- end}}
-
-	echo "[Virtual] All containers have been scheduled"
+return 
 }
 
+# Launch an instance with the name you provide it and lets it run in the background.
+spinup_instances() {
+{{- range $index, $container := .Containers}}
+	echo "[Virtual] Starting instance://{{$container.InstanceName}}"
 
-_teardown() {
-	lastCommand=$1
-	exitCode=$2
+	${apptainer}  -d instance start --no-init --no-umask --no-eval --no-mount tmp,home --unsquash --writable-tmpfs \
+	{{- if $container.Binds}}
+	--bind {{join "," $container.Binds}} \
+	{{- end}}
+	{{$container.Image}} {{$container.InstanceName}}
+{{- end}}
+}
 
-	if [[ $exitCode -eq 0 ]]; then
-		echo "[Virtual] Gracefully exit the Virtual Environment. All resources will be released."
-	else
-		echo "[Virtual] **SYSTEMERROR** ${lastCommand} command filed with exit code ${exitCode}" | tee {{.VirtualEnv.SysErrorPath}}
-		echo "[Virtual] Signal parent (${PARENT})"
-		echo "env_failed" > /dev/shm/signal_${PARENT}
+# Destroy all apptainer instances related to this environment
+teardown() {
+	echo "[Virtual] ** Stopping Apptainer instances ..."
 
-		echo "[Virtual] Virtual Environment Terminated due to an error. All resources will be released." 
-	fi
+{{- range $index, $container := .Containers}}
+	echo "[Virtual] Stopping instance://{{$container.InstanceName}}"
+	
+	${apptainer} instance stop {{$container.InstanceName}} &> /dev/null &
+{{- end}}
+
+	wait
+	
+	echo "[Virtual] ** Signal parent (${PARENT}) that the Virtual Environment has Failed"
+	echo "env_failed" > /dev/shm/signal_${PARENT}
 }
 
 # echo an error message before exiting
-trap '_teardown "${BASH_COMMAND}" "$?"'  EXIT
+trap 'echo -e "\n[Virtual] **TEARDOWN** \n **Reason**: \"${BASH_COMMAND}\" command filed with exit code $?.\n"; teardown' EXIT
+
+# exit when any command fails
+set -eum pipeline
 
 # Store IP
 echo $(hostname -I) > {{.VirtualEnv.IPAddressPath}}
@@ -168,30 +159,24 @@ unset_env
 handle_dns
 
 {{- if .InitContainers}}
-echo "[Virtual] Scheduling Init Containers ..."
+echo "Handle Init Containers"
 
 handle_init_containers
 
-echo "[Virtual] Waiting for init containers to complete"
+echo "waiting for init containers to complete"
 wait
 {{- end}}
-
 
 {{- if .Containers}}
-echo "[Virtual] Scheduling Containers ..."
+spinup_instances
+{{- end}}
 
-handle_containers
-
-echo "[Virtual] == Listing Scheduled Jobs =="
-jobs
-echo "[Virtual] ============================"
-
-echo "[Virtual] Signal parent (${PARENT}) that the Virtual Environment is Running"
+echo " ** Signal parent (${PARENT}) that the Virtual Environment is Running"
 echo "env_running" > /dev/shm/signal_${PARENT}
 
-echo "[Virtual] ... Waiting for containers to complete...."
-wait
-{{- end}}
+# Do not return as it would release the namespace
+echo "[Virtual]... Looping ...."
+sleep infinity
 PAUSE_EOF
 #### END SECTION: VirtualEnvironment Builder ####
 
@@ -199,35 +184,82 @@ PAUSE_EOF
 #### BEGIN SECTION: Host Environment ####
 # Description
 # 	Stuff to run outside the virtual environment
+
+
+wait_instance_ready() {
+{{- range $index, $container := .Containers}}
+	echo -n "[Host] ** Waiting for instance://{{$container.InstanceName}}"
+	while !  ${apptainer} instance list | grep "{{$container.InstanceName}}"; do 
+		echo "[... Retry {{$container.InstanceName}}"
+		${apptainer} instance list
+		sleep 3
+	done
+	echo "... Ready"
+{{- end}}
+}
+
+exec_containers() {
+{{- range $index, $container := .Containers}}
+	echo "[Host]* Running instance://{{$container.InstanceName}}"
+	
+	echo instance://{{$container.InstanceName}} > {{$container.JobIDPath}}
+	
+	$(${apptainer} {{$container.ApptainerMode}} --compat --cleanenv \ 
+	{{- if $container.EnvFilePath}}
+	--env-file {{$container.EnvFilePath}} \
+	{{- end}}
+	instance://{{$container.InstanceName}}
+	{{- if $container.Command}}{{range $index, $cmd := $container.Command}} '{{$cmd}}'{{end}}{{end -}}
+	{{- if $container.Args}}{{range $index, $arg := $container.Args}} '{{$arg}}'{{end}}{{end -}}
+	 &>> {{$container.LogsPath}}; echo $? > {{$container.ExitCodePath}}) &
+
+{{- end}}
+}
+
+
 env_abort() {
-	echo -e "\n[Host] Shutdown the Virtual Environment \n"
+	echo -e "\n[Host] Forcibly shutdown the Virtual Environment \n"
+
+	echo "[HOST] Cleanup Signal files"
+	rm /dev/shm/signal_${PPID}
+
 
 	echo -e "\n[Host] Kill Virtual Environment \n"
-	kill -TERM ${VPID} 
+	kill ${VPID} && wait ${VPID}
+
+	exit -1
 }
 
 env_failed() {
-	echo -e "\n[Host] Signal received: Virtual Environment Has Failed\n"
+	echo -e "\n[Host] ** Virtual Environment Has Failed\n"
+
+	echo "[HOST] Cleanup Signal files"
+	rm /dev/shm/signal_${PPID}
+
+	echo "Explain the Situations " >> {{.VirtualEnv.SysErrorPath}}
 
 	echo "[HOST] Waiting for the Virtual Environment to Exit"
 	wait ${VPID}
 
-	echo "[HOST] Cleanup Signal files"
-	rm /dev/shm/signal_${PPID}
-
-	echo "-- Exit with 1--"
 	exit -1
 }
 
 env_running() {
-	echo -e "\n[Host] ** Environment Is Running.  **\n"
+	trap env_failed SIGCHLD
+
+	echo -e "\n[Host] ** Environment Is Running **\n"
+
+	echo "[Host] Waiting until container instances are ready ..."
+	wait_instance_ready
+	
+	echo "[Host] Running Container Commands"
+	exec_containers
+	
+	echo "[Host] Waiting for Containers to Complete..."
 	wait
 
 	echo "[HOST] Cleanup Signal files"
 	rm /dev/shm/signal_${PPID}
-
-	echo "-- Exit with 0 --"
-	exit 0
 }
 
 
@@ -235,7 +267,7 @@ echo "== Submit Environment =="
 chmod +x  {{.VirtualEnv.ConstructorPath}}
 
 echo "[Host] Setting Signal Traps for Virtual Environment [Aborted (TERM,KILL,QUIT,INT), Failed (USR1), Running (USR2)]..."
-trap env_abort SIGTERM
+trap env_abort SIGTERM SIGKILL SIGQUIT INT
 
 echo "[Host] Starting the constructor the Virtual Environment ..."
 
@@ -248,7 +280,7 @@ docker://alpine {{.VirtualEnv.ConstructorPath}} &
 VPID=$!
 
 # Wait on a dummy descriptor. When the signal arrives, the read will get interrupted
-echo "[Host] Waiting for virtual environment to become ready ..."
+echo -n "[Host] Waiting for virtual environment to become ready ..."
 tail -F /dev/shm/signal_${PPID} 2>/dev/null | grep -q "env_"
 
 # dispatch to the appropriate function

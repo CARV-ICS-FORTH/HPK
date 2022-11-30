@@ -332,7 +332,7 @@ func LoadContainerStatuses(pod *corev1.Pod) error {
 
 		/*-- StateRunning: existing jobid, means that the job is running --*/
 		if jobIDExists && containerStatus.State.Running == nil {
-			SetContainerStatusID(containerStatus, JobIDTypeInstance, jobID)
+			SetContainerStatusID(containerStatus, jobID)
 
 			/*-- todo: since we do not support probes, make everything to look ok --*/
 			started := true

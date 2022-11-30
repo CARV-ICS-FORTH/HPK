@@ -17,7 +17,6 @@ package slurm
 import (
 	"strings"
 
-	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -44,14 +43,11 @@ func SetPodID(pod *corev1.Pod, idType JobIDType, value string) {
 	metav1.SetMetaDataAnnotation(&pod.ObjectMeta, "pod.hpk/id", string(idType)+value)
 }
 
-func SetContainerStatusID(status *corev1.ContainerStatus, expectedIDType JobIDType, typedValue string) {
-	idType, value := parseIDType(typedValue)
+func SetContainerStatusID(status *corev1.ContainerStatus, typedValue string) {
+	// ensure that the value follows an expected format.
+	_, _ = parseIDType(typedValue)
 
-	if idType != expectedIDType {
-		panic(errors.Errorf("Expected IDtype '%s' but got '%s'. raw: '%s'", expectedIDType, idType, value))
-	}
-
-	status.ContainerID = value
+	status.ContainerID = typedValue
 }
 
 func ParsePodID(pod *corev1.Pod) (idType JobIDType, value string) {

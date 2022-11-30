@@ -27,6 +27,7 @@ import (
 )
 
 type HPCEnvironment struct {
+	KubeMasterHost    string
 	KubeDNS           string
 	ContainerRegistry string
 	ApptainerBin      string
