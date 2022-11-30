@@ -29,7 +29,6 @@ import (
 	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/json"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -134,7 +133,7 @@ func DeletePod(podKey client.ObjectKey) bool {
 
 	pod := LoadPod(podKey)
 	if pod == nil {
-		logger.Info("[WARN]: Tried to delete pod, but it dod not exist in the cluster")
+		logger.Info("[WARN]: Tried to delete pod, but it does not exist in the cluster")
 
 		return false
 	}
@@ -211,21 +210,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher *fsnotify.Watcher) 
 		}
 
 	*/
-	var serviceList corev1.ServiceList
-
-	if err := compute.K8SClient.List(ctx, &serviceList, &client.ListOptions{
-		LabelSelector: labels.Everything(),
-	}); err != nil {
-		SystemError(err, "failed to list services when setting up env vars")
-	}
-
-	var slist []*corev1.Service
-
-	for i := range serviceList.Items {
-		slist = append(slist, &serviceList.Items[i])
-	}
-
-	podEnvVariables := FromServices(slist)
+	podEnvVariables := FromServices(ctx, pod.GetNamespace())
 
 	/*---------------------------------------------------
 	 * Set tha Pod Handler
@@ -388,12 +373,12 @@ func (h *podHandler) buildContainer(container *corev1.Container) Container {
 
 	/*-- Set pod-wide variables --*/
 	for _, envVar := range h.podEnvVariables {
-		envfile.WriteString(fmt.Sprintf("%s=%s\n", envVar.Name, envVar.Value))
+		envfile.WriteString(fmt.Sprintf("%s='%s'\n", envVar.Name, envVar.Value))
 	}
 
 	/*-- Set container-specific variables --*/
 	for _, envVar := range container.Env {
-		envfile.WriteString(fmt.Sprintf("%s=%s\n", envVar.Name, envVar.Value))
+		envfile.WriteString(fmt.Sprintf("%s='%s'\n", envVar.Name, envVar.Value))
 	}
 
 	if err := os.WriteFile(envfilePath, []byte(envfile.String()), compute.PodGlobalDirectoryPermissions); err != nil {

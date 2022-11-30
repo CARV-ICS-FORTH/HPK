@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/carv-ics-forth/hpk/cmd/hpk/commands"
@@ -151,6 +152,12 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		"KubernetesURL", restConfig.Host,
 		"registry", compute.Environment.ContainerRegistry,
 	)
+
+	kubemaster, err := url.Parse(restConfig.Host)
+	if err != nil {
+		return errors.Wrapf(err, "failed to extract hostname from url '%s'", restConfig.Host)
+	}
+	compute.Environment.KubeMasterHost = kubemaster.Hostname()
 
 	/*---------------------------------------------------
 	 * Discover Kubernetes DNS server

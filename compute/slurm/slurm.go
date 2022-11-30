@@ -172,6 +172,11 @@ func (h *EventHandler) Run(ctx context.Context, notifyVirtualKubelet func(pod *c
 						PodError(pod, "SYSERROR", "Here should go the content of the file")
 
 						notifyVirtualKubelet(pod)
+						
+						logger.Info("** K8s Status Updated **",
+							"version", pod.ResourceVersion,
+							"phase", pod.Status.Phase,
+						)
 
 						continue
 
