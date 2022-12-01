@@ -46,9 +46,9 @@ var DefaultLogger = zap.New(zap.UseDevMode(true))
 ************************************************************/
 
 const (
-	PodGlobalDirectoryPermissions = 0o777
-	PodSpecJsonFilePermissions    = 0o600
-	ContainerJobPermissions       = 0o777
+	PodGlobalDirectoryPermissions = 0777
+	PodSpecJsonFilePermissions    = 0600
+	ContainerJobPermissions       = 0777
 )
 
 const (

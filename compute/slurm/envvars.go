@@ -18,14 +18,10 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"strconv"
 	"strings"
 
 	"github.com/carv-ics-forth/hpk/compute"
-	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
-
 	// discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -65,46 +61,35 @@ func FromServices(ctx context.Context, namespace string) []corev1.EnvVar {
 	 *---------------------------------------------------*/
 	var result []corev1.EnvVar
 	for _, service := range services {
-		// Host
-		name := makeEnvVariableName(service.Name) + "_SERVICE_HOST"
-		if service.GetNamespace() == metav1.NamespaceDefault && service.GetName() == "kubernetes" {
-			// because kubernetes is not managed by HPK, we must create the entry manually.
-			result = append(result, corev1.EnvVar{Name: name, Value: compute.Environment.KubeMasterHost})
-			service.Spec.ClusterIP = compute.Environment.KubeMasterHost
-		} else {
-			result = append(result, corev1.EnvVar{Name: name, Value: service.GetName() /* Look it up by DNS name*/})
-		}
-
 		// some headless services do not have ports.
 		if len(service.Spec.Ports) == 0 {
 			continue
 		}
 
+		// Host
+		name := makeEnvVariableName(service.Name) + "_SERVICE_HOST"
+		if service.GetNamespace() == metav1.NamespaceDefault && service.GetName() == "kubernetes" {
+			/* because kubernetes is not managed by HPK, we must create the entry manually. */
+			service.Spec.ClusterIP = compute.Environment.KubeMasterHost
+		} else {
+			/* Look it up by DNS name*/
+			service.Spec.ClusterIP = service.GetName()
+		}
+		result = append(result, corev1.EnvVar{Name: name, Value: service.Spec.ClusterIP})
+
 		// First port - give it the backwards-compatible name
 		name = makeEnvVariableName(service.Name) + "_SERVICE_PORT"
-
-		logrus.Warn("PORT ", service.GetName(), " aa ", service.Spec.Ports)
-		if tp := service.Spec.Ports[0].TargetPort; tp.Type == intstr.Int {
-			result = append(result, corev1.EnvVar{Name: name, Value: tp.String()})
-		} else {
-			result = append(result, corev1.EnvVar{Name: name, Value: tp.String()})
-			// SystemError(errors.New("Unsupported Feature"), "Named TargetPorts are not yet supported")
-		}
+		result = append(result, corev1.EnvVar{Name: name, Value: service.Spec.Ports[0].TargetPort.String()})
 
 		// All named ports (only the first may be unnamed, checked in validation)
 		for i := range service.Spec.Ports {
 			sp := &service.Spec.Ports[i]
 			if sp.Name != "" {
 				pn := name + "_" + makeEnvVariableName(sp.Name)
-
-				if tp := sp.TargetPort; tp.Type == intstr.Int {
-					result = append(result, corev1.EnvVar{Name: pn, Value: tp.String()})
-				} else {
-					result = append(result, corev1.EnvVar{Name: pn, Value: tp.String()})
-					// SystemError(errors.New("Unsupported Feature"), "Named TargetPorts are not yet supported")
-				}
+				result = append(result, corev1.EnvVar{Name: pn, Value: sp.TargetPort.String()})
 			}
 		}
+
 		// Docker-compatible vars.
 		result = append(result, makeLinkVariables(service)...)
 	}
@@ -122,6 +107,7 @@ func makeEnvVariableName(str string) string {
 func makeLinkVariables(service *corev1.Service) []corev1.EnvVar {
 	prefix := makeEnvVariableName(service.Name)
 	all := []corev1.EnvVar{}
+
 	for i := range service.Spec.Ports {
 		sp := &service.Spec.Ports[i]
 
@@ -130,13 +116,7 @@ func makeLinkVariables(service *corev1.Service) []corev1.EnvVar {
 			protocol = string(sp.Protocol)
 		}
 
-		var hostPort string
-
-		if service.GetNamespace() == metav1.NamespaceDefault && service.GetName() == "kubernetes" {
-			hostPort = net.JoinHostPort(service.Spec.ClusterIP, strconv.Itoa(sp.TargetPort.IntValue()))
-		} else {
-			hostPort = net.JoinHostPort(service.GetName(), strconv.Itoa(sp.TargetPort.IntValue()))
-		}
+		hostPort := net.JoinHostPort(service.Spec.ClusterIP, sp.TargetPort.String())
 
 		if i == 0 {
 			// Docker special-cases the first port.
@@ -157,7 +137,7 @@ func makeLinkVariables(service *corev1.Service) []corev1.EnvVar {
 			},
 			{
 				Name:  portPrefix + "_PORT",
-				Value: strconv.Itoa(sp.TargetPort.IntValue()),
+				Value: sp.TargetPort.String(),
 			},
 			{
 				Name:  portPrefix + "_ADDR",

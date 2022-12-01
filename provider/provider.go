@@ -190,7 +190,7 @@ func (v *VirtualK8S) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 	 *---------------------------------------------------*/
 	logger.Info("K8s -> DeletePod")
 
-	if !slurm.DeletePod(podKey) {
+	if !slurm.DeletePod(podKey, v.inotify) {
 		logger.Info("K8s <- DeletePod (POD NOT FOUND)")
 
 		return errdefs.NotFoundf("object not found")
@@ -328,7 +328,13 @@ func (v *VirtualK8S) NotifyPods(_ context.Context, f func(*corev1.Pod)) {
 		MaxQueueSize: 10,
 	})
 
-	go eh.Run(context.Background(), f)
+	go eh.Run(context.Background(), func(pod *corev1.Pod) {
+		if pod == nil {
+			panic("this should not happen")
+		}
+
+		f(pod)
+	})
 
 	/*-- add inotify events to queue to be processed asynchronously --*/
 	go func() {
