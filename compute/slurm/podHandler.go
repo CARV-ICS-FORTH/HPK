@@ -24,7 +24,7 @@ import (
 
 	"github.com/Masterminds/sprig"
 	"github.com/carv-ics-forth/hpk/compute"
-	"github.com/fsnotify/fsnotify"
+	"github.com/carv-ics-forth/hpk/pkg/filenotify"
 	"github.com/go-logr/logr"
 	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
@@ -128,7 +128,7 @@ Notice that by using the reference, we operate on the local copy instead of the 
 1) We can extract updated information from .spec (Kubernetes only fetches .Status)
 2) We can have "fresh" information that is not yet propagated to Kubernetes
 */
-func DeletePod(podKey client.ObjectKey, watcher *fsnotify.Watcher) bool {
+func DeletePod(podKey client.ObjectKey, watcher filenotify.FileWatcher) bool {
 	logger := compute.DefaultLogger.WithValues("pod", podKey)
 
 	podDir := compute.PodRuntimeDir(podKey)
@@ -177,7 +177,7 @@ func DeletePod(podKey client.ObjectKey, watcher *fsnotify.Watcher) bool {
 	return true
 }
 
-func CreatePod(ctx context.Context, pod *corev1.Pod, watcher *fsnotify.Watcher) error {
+func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatcher) error {
 	podKey := client.ObjectKeyFromObject(pod)
 	logger := compute.DefaultLogger.WithValues("pod", podKey)
 

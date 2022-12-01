@@ -50,6 +50,8 @@ type Opts struct {
 	ApptainerBin      string
 	ContainerRegistry string
 
+	FSPollingInterval time.Duration
+
 	// Number of workers to use to handle pod notifications
 	PodSyncWorkers       int
 	InformerResyncPeriod time.Duration
@@ -83,6 +85,8 @@ func installFlags(flags *pflag.FlagSet, c *Opts) {
 
 	flags.StringVar(&c.ApptainerBin, "apptainer", "apptainer", "path to Apptainer bin")
 	flags.StringVar(&c.ContainerRegistry, "registry", "docker://", "container registry")
+
+	flags.DurationVar(&c.FSPollingInterval, "poll", 5*time.Second, "if greater than 0, it will use a poll based approach to watch for file system changes")
 
 	flags.IntVar(&c.PodSyncWorkers, "pod-sync-workers", 1, `set the number of pod synchronization workers`)
 	flags.DurationVar(&c.InformerResyncPeriod, "full-resync-period", 1*time.Minute, "how often to perform a full resync of pods between kubernetes and the provider")

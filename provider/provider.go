@@ -18,10 +18,11 @@ import (
 	"context"
 	"io"
 	"os"
+	"time"
 
 	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/compute/slurm"
-	"github.com/fsnotify/fsnotify"
+	"github.com/carv-ics-forth/hpk/pkg/filenotify"
 	"github.com/go-logr/logr"
 	"github.com/niemeyer/pretty"
 	"github.com/pkg/errors"
@@ -39,8 +40,8 @@ type VirtualK8S struct {
 
 	Logger logr.Logger
 
-	inotify    *fsnotify.Watcher
-	updatedPod func(*corev1.Pod)
+	fileWatcher filenotify.FileWatcher
+	updatedPod  func(*corev1.Pod)
 }
 
 // InitConfig is the config passed to initialize a registered provider.
@@ -50,20 +51,30 @@ type InitConfig struct {
 	DaemonPort int32
 
 	BuildVersion string
+
+	FSPollingInterval time.Duration
 }
 
 // NewVirtualK8S reads a kubeconfig file and sets up a client to interact
 // with Slurm cluster.
 func NewVirtualK8S(config InitConfig) (*VirtualK8S, error) {
-	watcher, err := fsnotify.NewWatcher()
+	var err error
+	var watcher filenotify.FileWatcher
+
+	if config.FSPollingInterval > 0 {
+		watcher = filenotify.NewPollingWatcher(config.FSPollingInterval)
+	} else {
+		watcher, err = filenotify.NewEventWatcher()
+	}
+
 	if err != nil {
 		return nil, errors.Wrapf(err, "add watcher on fsnotify failed")
 	}
 
 	return &VirtualK8S{
-		InitConfig: config,
-		Logger:     zap.New(zap.UseDevMode(true)),
-		inotify:    watcher,
+		InitConfig:  config,
+		Logger:      zap.New(zap.UseDevMode(true)),
+		fileWatcher: watcher,
 	}, nil
 }
 
@@ -111,7 +122,7 @@ func (v *VirtualK8S) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 		depending on the pod.RestartPolicy.
 		In both cases, it will	wrap the reason into "podStatusReasonProviderFailed"
 	*/
-	if err := slurm.CreatePod(ctx, pod, v.inotify); err != nil {
+	if err := slurm.CreatePod(ctx, pod, v.fileWatcher); err != nil {
 		return err
 	}
 
@@ -190,7 +201,7 @@ func (v *VirtualK8S) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 	 *---------------------------------------------------*/
 	logger.Info("K8s -> DeletePod")
 
-	if !slurm.DeletePod(podKey, v.inotify) {
+	if !slurm.DeletePod(podKey, v.fileWatcher) {
 		logger.Info("K8s <- DeletePod (POD NOT FOUND)")
 
 		return errdefs.NotFoundf("object not found")
@@ -336,17 +347,17 @@ func (v *VirtualK8S) NotifyPods(_ context.Context, f func(*corev1.Pod)) {
 		f(pod)
 	})
 
-	/*-- add inotify events to queue to be processed asynchronously --*/
+	/*-- add fileWatcher events to queue to be processed asynchronously --*/
 	go func() {
 		for {
 			select {
-			case event, ok := <-v.inotify.Events:
+			case event, ok := <-v.fileWatcher.Events():
 				if !ok {
 					return
 				}
 				eh.Push(event)
 
-			case err, ok := <-v.inotify.Errors:
+			case err, ok := <-v.fileWatcher.Errors():
 				if !ok {
 					return
 				}
