@@ -142,12 +142,17 @@ func (h *EventHandler) Run(ctx context.Context, notifyVirtualKubelet func(pod *c
 
 					return
 				case event := <-h.Queue:
-					podkey, file := compute.ParsePath(event.Name)
+					podkey, file, invalid := compute.ParsePath(event.Name)
+					if invalid {
+						compute.DefaultLogger.Info("SLURM: omit unknown event", "op", event.Op, "event", event.Name)
+						continue
+					}
+
 					logger := compute.DefaultLogger.WithValues("pod", podkey)
 
 					/*-- Skip events that are not related to pod changes driven by Slurm --*/
 					if !event.Op.Has(fsnotify.Write) {
-						logger.Info("SLURM: omit event", "op", event.Op, "file", file)
+						logger.Info("SLURM: omit known event", "op", event.Op, "file", file)
 						continue
 					}
 
@@ -157,7 +162,7 @@ func (h *EventHandler) Run(ctx context.Context, notifyVirtualKubelet func(pod *c
 					switch filepath.Ext(file) {
 					case compute.ExtensionSysError:
 						/*-- Sbatch failed. Pod should fail immediately without other checks --*/
-						logger.Info("SLURM -> Pod initialization error", "op", event.Op, "path", file)
+						logger.Info("SLURM -> Pod initialization error", "op", event.Op, "file", file)
 
 						pod := LoadPod(podkey)
 						if pod == nil {
@@ -166,8 +171,9 @@ func (h *EventHandler) Run(ctx context.Context, notifyVirtualKubelet func(pod *c
 
 						PodError(pod, "SYSERROR", "Here should go the content of the file")
 
+						/*-- Update the remote Copy --*/
 						notifyVirtualKubelet(pod)
-						
+
 						logger.Info("** K8s Status Updated **",
 							"version", pod.ResourceVersion,
 							"phase", pod.Status.Phase,
@@ -177,15 +183,15 @@ func (h *EventHandler) Run(ctx context.Context, notifyVirtualKubelet func(pod *c
 
 					case compute.ExtensionIP:
 						/*-- Sbatch Started --*/
-						logger.Info("SLURM -> New Pod IP", "op", event.Op, "path", file)
+						logger.Info("SLURM -> New Pod IP", "op", event.Op, "file", file)
 
 					case compute.ExtensionJobID:
 						/*-- Container Started --*/
-						logger.Info("SLURM -> Job Has Started", "op", event.Op, "path", file, )
+						logger.Info("SLURM -> Job Has Started", "op", event.Op, "file", file)
 
 					case compute.ExtensionExitCode:
 						/*-- Container Terminated --*/
-						logger.Info("SLURM -> Job Is Complete", "op", event.Op, "path", file, )
+						logger.Info("SLURM -> Job Is Complete", "op", event.Op, "file", file)
 
 					default:
 						/*-- Any other file gnored --*/

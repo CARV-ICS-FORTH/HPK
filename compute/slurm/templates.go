@@ -69,14 +69,19 @@ debug_info() {
 	echo "=============================="
 }
 
-# Rewire /etc/resolv.conf to point to KubeDNS
+
 handle_dns() {
+# Rewire /etc/resolv.conf to point to KubeDNS
 cat > /etc/resolv.conf << DNS_EOF
 search {{.Pod.Namespace}}.svc.cluster.local svc.cluster.local cluster.local
 nameserver {{.ComputeEnv.KubeDNS}}
 nameserver 8.8.8.8
 options ndots:5
 DNS_EOF
+
+# Add hostname to known hosts
+cp /etc/hosts /tmp/hosts
+echo "$(hostname -I) $(hostname)" >> /tmp/hosts
 }
 
 # If not removed, Flags will be consumed by the nested Apptainer and overwrite paths.
@@ -100,12 +105,10 @@ handle_init_containers() {
 {{- range $index, $container := .InitContainers}}
 	echo "[Virtual] Scheduling Init Container: {{$index}}"
 	
-	${apptainer} {{ $container.ApptainerMode }} --compat --no-mount tmp,home --userns \ 
+	${apptainer} {{ $container.ApptainerMode }} --compat --no-mount tmp,home --userns \
+	--bind /tmp/hosts:/etc/hosts,{{join "," $container.Binds}} \ 
 	{{- if $container.EnvFilePath}}
 	--env-file {{$container.EnvFilePath}} \
-	{{- end}}
-	{{- if $container.Binds}}
-	--bind {{join "," $container.Binds}} \
 	{{- end}}
 	{{$container.Image}}
 	{{- if $container.Command}}{{range $index, $cmd := $container.Command}} '{{$cmd}}'{{end}}{{end -}}
@@ -122,12 +125,10 @@ handle_containers() {
 {{- range $index, $container := .Containers}}
 	echo "[Virtual] Scheduling Container: {{$container.InstanceName}}"
 
-	$(${apptainer} {{$container.ApptainerMode}} --compat --no-mount tmp,home --userns \ 
+	$(${apptainer} {{$container.ApptainerMode}} --compat --no-mount tmp,home --userns \
+	--bind /tmp/hosts:/etc/hosts,{{join "," $container.Binds}} \ 
 	{{- if $container.EnvFilePath}}
 	--env-file {{$container.EnvFilePath}} \
-	{{- end}}
-	{{- if $container.Binds}}
-	--bind {{join "," $container.Binds}} \
 	{{- end}}
 	{{$container.Image}}
 	{{- if $container.Command}}{{range $index, $cmd := $container.Command}} '{{$cmd}}'{{end}}{{end -}}
@@ -240,7 +241,7 @@ trap env_abort SIGTERM
 
 echo "[Host] Starting the constructor the Virtual Environment ..."
 
-${apptainer} exec --net --network=flannel --fakeroot \
+${apptainer} exec --net --network=flannel 			 \
 --env PARENT=${PPID}								 \
 --hostname {{.Pod.Name}}							 \
 --bind /bin,/etc/apptainer,/var/lib/apptainer,/lib,/lib64,/usr,/etc/passwd,$HOME,/run/shm \

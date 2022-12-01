@@ -128,11 +128,13 @@ Notice that by using the reference, we operate on the local copy instead of the 
 1) We can extract updated information from .spec (Kubernetes only fetches .Status)
 2) We can have "fresh" information that is not yet propagated to Kubernetes
 */
-func DeletePod(podKey client.ObjectKey) bool {
+func DeletePod(podKey client.ObjectKey, watcher *fsnotify.Watcher) bool {
 	logger := compute.DefaultLogger.WithValues("pod", podKey)
 
-	pod := LoadPod(podKey)
-	if pod == nil {
+	podDir := compute.PodRuntimeDir(podKey)
+
+	localPod := LoadPod(podKey)
+	if localPod == nil {
 		logger.Info("[WARN]: Tried to delete pod, but it does not exist in the cluster")
 
 		return false
@@ -141,7 +143,7 @@ func DeletePod(podKey client.ObjectKey) bool {
 	/*---------------------------------------------------
 	 * Cancel Slurm Job
 	 *---------------------------------------------------*/
-	idType, podID := ParsePodID(pod)
+	idType, podID := ParsePodID(localPod)
 
 	if idType != JobIDTypeEmpty {
 		logger.Info(" * Cancelling Slurm Job", "job", podID)
@@ -155,11 +157,18 @@ func DeletePod(podKey client.ObjectKey) bool {
 	}
 
 	/*---------------------------------------------------
+	 * Remove watcher for Pod Directory
+	 *---------------------------------------------------*/
+	// because fswatch does not work recursively, we cannot have the container directories nested within the pod.
+	// instead, we use a flat directory in the format "podir/containername.{jid,stdout,stdour,...}"
+	if err := watcher.Remove(string(podDir)); err != nil {
+		SystemError(err, "register to fsnotify has failed for path '%s'", podDir)
+	}
+
+	/*---------------------------------------------------
 	 * Remove Pod Directory
 	 *---------------------------------------------------*/
 	logger.Info(" * Removing Pod Directory")
-
-	podDir := compute.PodRuntimeDir(podKey)
 
 	if err := os.RemoveAll(string(podDir)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		SystemError(err, "failed to delete pod directory %s'", podDir)
