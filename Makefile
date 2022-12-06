@@ -40,10 +40,10 @@ help: ## Display this help.
 ##@ Build
 
 build: ## Build HPK binary.
-	GOOS=linux GOARCH=amd64 go build $(VERSION_FLAGS) -ldflags '-extldflags "-static"' -o bin/$(*) ./cmd/hpk/$(*)
+	GOOS=linux GOARCH=amd64 go build $(VERSION_FLAGS) -ldflags '-extldflags "-static"' -o bin/hpk-kubelet ./cmd/hpk
 
 build-race: ## Build HPK binary with race condition detector.
-	GOOS=linux GOARCH=amd64 go build $(VERSION_FLAGS) -race -o bin/$(*) ./cmd/hpk/$(*)
+	GOOS=linux GOARCH=amd64 go build $(VERSION_FLAGS) -race -o bin/hpk-kubelet ./cmd/hpk
 
 
 ##@ Deployment
@@ -57,16 +57,15 @@ run-kube: ## Run Lightweight Kubernetes from your host.
     --no-mount tmp,home --unsquash --writable \
     --env K8SFS_MOCK_KUBELET=0 \
     --bind .k8sfs:/usr/local/etc \
-    docker://chazapis/kubernetes-from-scratch:20221115
+    docker://chazapis/kubernetes-from-scratch:20221206
 
 
 run-hpk: ## Run HPK from your host.
-	echo "===> Setting HPK Certificates  <==="
+	echo "===> Generate HPK Certificates <==="
 
 	mkdir -p ./bin
 
 	openssl genrsa -out bin/kubelet.key 2048
-
 	openssl req -x509 -key bin/kubelet.key -CA ${KUBEPATH}/pki/ca.crt -CAkey ${KUBEPATH}/pki/ca.key \
         -days 365 -nodes -out bin/kubelet.crt -subj "/CN=hpk-kubelet" \
         -addext "basicConstraints=CA:FALSE" \
@@ -74,12 +73,12 @@ run-hpk: ## Run HPK from your host.
         -addext "extendedKeyUsage=serverAuth,clientAuth" \
         -addext "subjectAltName=IP:127.0.0.1,IP:${HOST_ADDRESS}"
 
-	echo "===> Run HPK  <==="
+	echo "===> Run HPK <==="
 	KUBECONFIG=${KUBEPATH}/admin.conf				\
 	APISERVER_KEY_LOCATION=bin/kubelet.key          \
 	APISERVER_CERT_LOCATION=bin/kubelet.crt         \
 	VKUBELET_ADDRESS=${HOST_ADDRESS}                \
-	./bin/hpk
+	./bin/hpk-kubelet
 
 
 
