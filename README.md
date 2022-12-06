@@ -23,7 +23,7 @@ apptainer run --net --dns 8.8.8.8 --fakeroot \
 --no-mount tmp,home --unsquash --writable \
 --env K8SFS_MOCK_KUBELET=0 \
 --bind .k8sfs:/usr/local/etc \
-docker://chazapis/kubernetes-from-scratch:20221115
+docker://chazapis/kubernetes-from-scratch:20221206
 
 # Generate key and certificate
 export IP_ADDRESS=`ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p'`
@@ -38,6 +38,7 @@ openssl req -x509 -key bin/kubelet.key -CA $HOME/.k8sfs/kubernetes/pki/ca.crt -C
 export KUBECONFIG=$HOME/.k8sfs/kubernetes/admin.conf
 export APISERVER_KEY_LOCATION=bin/kubelet.key
 export APISERVER_CERT_LOCATION=bin/kubelet.crt
+export VKUBELET_ADDRESS=$IP_ADDRESS
 ./bin/hpk-kubelet
 ```
 

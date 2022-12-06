@@ -54,7 +54,7 @@ func logo() string {
 
 	banner.InitString(buf, true, true, `
 {{ .AnsiColor.BrightGreen }}
-{{ .Title "HaPaKi" "" 4 }}
+{{ .Title "HPK" "" 4 }}
 {{ .AnsiColor.Default }}
 	`)
 
