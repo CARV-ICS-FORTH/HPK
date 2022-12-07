@@ -44,7 +44,7 @@
       }
     },
     {
-      "text": "%spark.conf\nmaster k8s://https://kubernetes.default.svc\nspark.submit.deployMode client\nspark.kubernetes.container.image carvicsforth/spark-py:2.4.5\nspark.executor.instances 2",
+      "text": "%spark.conf\nspark.master k8s://https://kubernetes.default.svc\nspark.submit.deployMode client\nspark.kubernetes.container.image carvicsforth/spark-py:2.4.5\nspark.executor.instances 2",
       "user": "anonymous",
       "dateUpdated": "2020-06-02T13:15:38+0000",
       "config": {
