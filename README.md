@@ -10,36 +10,28 @@ In contrast to a "typical" Kubernetes installation at the Cloud:
 * HPK uses a pass-through scheduler, which assigns all pods to the single `hpk-kubelet` that represents the cluster. In practice, this means that all scheduling is delegated to Slurm.
 * All Kubernetes services are converted to [headless](https://kubernetes.io/docs/concepts/services-networking/service/#headless-services). This avoids the need for internal, virtual cluster IPs that would need special handling at the network level. As a side effect, HPK services that map to multiple pods are load-balanced at the DNS level if clients support it.
 
+
+## Compile
+
+Compile using `make`.
+
+```
+make build
+```
+
 ## Running
 
-Compile using `make`. To run:
+HPK consists of two components. The Kubernetes Master and the Virtual Kubelet.
+These components must start separately.
 
-```bash
-# Start the control plane
-mkdir -p .k8sfs
-apptainer run --net --dns 8.8.8.8 --fakeroot \
---cleanenv --pid --containall \
---no-init --no-umask --no-eval \
---no-mount tmp,home --unsquash --writable \
---env K8SFS_MOCK_KUBELET=0 \
---bind .k8sfs:/usr/local/etc \
-docker://chazapis/kubernetes-from-scratch:20221206
+To run the Kubernetes Master:
+```
+make run-kubemaster
+```
 
-# Generate key and certificate
-export IP_ADDRESS=`ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p'`
-openssl genrsa -out bin/kubelet.key 2048
-openssl req -x509 -key bin/kubelet.key -CA $HOME/.k8sfs/kubernetes/pki/ca.crt -CAkey $HOME/.k8sfs/kubernetes/pki/ca.key -days 365 -nodes -out bin/kubelet.crt -subj "/CN=hpk-kubelet" \
-  -addext "basicConstraints=CA:FALSE" \
-  -addext "keyUsage=digitalSignature,keyEncipherment" \
-  -addext "extendedKeyUsage=serverAuth,clientAuth" \
-  -addext "subjectAltName=IP:127.0.0.1,IP:${IP_ADDRESS}"
-
-# Run hpk-kubelet
-export KUBECONFIG=$HOME/.k8sfs/kubernetes/admin.conf
-export APISERVER_KEY_LOCATION=bin/kubelet.key
-export APISERVER_CERT_LOCATION=bin/kubelet.crt
-export VKUBELET_ADDRESS=$IP_ADDRESS
-./bin/hpk-kubelet
+Once the installation is complete, you can start the Virtual Kubelet
+```
+make run-kubelet
 ```
 
 ## Acknowledgements

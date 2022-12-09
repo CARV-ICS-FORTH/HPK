@@ -26,7 +26,6 @@ import (
 	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/pkg/filenotify"
 	"github.com/go-logr/logr"
-	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/json"
@@ -90,13 +89,32 @@ func SavePod(_ context.Context, pod *corev1.Pod) {
 	)
 }
 
+func WalkPodDirectories(f compute.WalkPodFunc) error {
+	rootDir := compute.RuntimeDir
+	maxDepth := 2 // expect path .hpk/namespace/pod
+
+	return filepath.WalkDir(rootDir, func(path string, info os.DirEntry, err error) error {
+		if err != nil {
+			SystemError(err, "Pod traversal error")
+		}
+
+		// account only paths in the form ~/.hpk/namespace/pod
+		if info.IsDir() && strings.Count(path, string(os.PathSeparator)) == maxDepth {
+			return f(compute.PodPath(path))
+		}
+
+		return nil
+	})
+}
+
+/*
 func GetPods() ([]*corev1.Pod, error) {
 	var pods []*corev1.Pod
 	var merr *multierror.Error
 
 	/*---------------------------------------------------
 	 * Iterate the filesystem and extract local pods
-	 *---------------------------------------------------*/
+	 *---------------------------------------------------* /
 	filepath.Walk(compute.RuntimeDir, func(path string, info os.FileInfo, err error) error {
 		encodedPod, err := os.ReadFile(path)
 		if err != nil {
@@ -109,7 +127,7 @@ func GetPods() ([]*corev1.Pod, error) {
 			merr = multierror.Append(merr, errors.Wrapf(err, "cannot decode pod description file '%s'", path))
 		}
 
-		/*-- return only the pods that are known to be running --*/
+		/*-- return only the pods that are known to be running --* /
 		if pod.Status.Phase == corev1.PodRunning {
 			pods = append(pods, &pod)
 		}
@@ -119,6 +137,8 @@ func GetPods() ([]*corev1.Pod, error) {
 
 	return pods, merr.ErrorOrNil()
 }
+
+*/
 
 /*
 DeletePod takes a Pod Reference and deletes the Pod from the provider.
@@ -162,7 +182,7 @@ func DeletePod(podKey client.ObjectKey, watcher filenotify.FileWatcher) bool {
 	// because fswatch does not work recursively, we cannot have the container directories nested within the pod.
 	// instead, we use a flat directory in the format "podir/containername.{jid,stdout,stdour,...}"
 	if err := watcher.Remove(string(podDir)); err != nil {
-		SystemError(err, "register to fsnotify has failed for path '%s'", podDir)
+		SystemError(err, "deregister watcher for path '%s' has failed", podDir)
 	}
 
 	/*---------------------------------------------------
@@ -250,7 +270,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	// because fswatch does not work recursively, we cannot have the container directories nested within the pod.
 	// instead, we use a flat directory in the format "podir/containername.{jid,stdout,stdour,...}"
 	if err := watcher.Add(string(h.podDirectory)); err != nil {
-		SystemError(err, "register to fsnotify has failed for path '%s'", h.podDirectory)
+		SystemError(err, "register watcher for path '%s' has failed", h.podDirectory)
 	}
 
 	/*---------------------------------------------------

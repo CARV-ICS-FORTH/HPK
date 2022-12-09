@@ -48,7 +48,7 @@ build-race: ## Build HPK binary with race condition detector.
 
 ##@ Deployment
 
-run-kube: ## Run Lightweight Kubernetes from your host.
+run-kubemaster: ## Run the Kubernetes Master
 	mkdir -p .k8sfs
 
 	apptainer run --net --dns 8.8.8.8 --fakeroot \
@@ -60,7 +60,7 @@ run-kube: ## Run Lightweight Kubernetes from your host.
     docker://chazapis/kubernetes-from-scratch:20221206
 
 
-run-hpk: ## Run HPK from your host.
+run-kubelet: ## Run the the Kubernetes virtual kubelet
 	echo "===> Generate HPK Certificates <==="
 
 	mkdir -p ./bin

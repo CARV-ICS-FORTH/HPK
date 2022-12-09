@@ -30,6 +30,7 @@ import (
 	vkapi "github.com/virtual-kubelet/virtual-kubelet/node/api"
 	"github.com/virtual-kubelet/virtual-kubelet/node/api/statsv1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/json"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
@@ -60,6 +61,7 @@ type InitConfig struct {
 func NewVirtualK8S(config InitConfig) (*VirtualK8S, error) {
 	var err error
 	var watcher filenotify.FileWatcher
+	logger := zap.New(zap.UseDevMode(true))
 
 	if config.FSPollingInterval > 0 {
 		watcher = filenotify.NewPollingWatcher(config.FSPollingInterval)
@@ -71,9 +73,24 @@ func NewVirtualK8S(config InitConfig) (*VirtualK8S, error) {
 		return nil, errors.Wrapf(err, "add watcher on fsnotify failed")
 	}
 
+	/*---------------------------------------------------
+	 * Restore missing state after a restart
+	 *---------------------------------------------------*/
+	// create the ~/.hpk directory, if it does not exist.
+	if err := os.MkdirAll(compute.RuntimeDir, compute.PodGlobalDirectoryPermissions); err != nil {
+		return nil, errors.Wrapf(err, "Failed to create RuntimeDir '%s'", compute.RuntimeDir)
+	}
+
+	// iterate the filesystem and restore fsnotify watchers
+	if err := slurm.WalkPodDirectories(func(path compute.PodPath) error {
+		return watcher.Add(path.String())
+	}); err != nil {
+		return nil, errors.Wrapf(err, "failed to restore watchers")
+	}
+
 	return &VirtualK8S{
 		InitConfig:  config,
-		Logger:      zap.New(zap.UseDevMode(true)),
+		Logger:      logger,
 		fileWatcher: watcher,
 	}, nil
 }
@@ -309,7 +326,34 @@ func (v *VirtualK8S) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
 	v.Logger.Info("K8s -> GetPods")
 	defer v.Logger.Info("K8s <- GetPods")
 
-	return slurm.GetPods()
+	/*---------------------------------------------------
+	 * Iterate the filesystem and extract local pods
+	 *---------------------------------------------------*/
+	var pods []*corev1.Pod
+
+	if err := slurm.WalkPodDirectories(func(path compute.PodPath) error {
+		encodedPod, err := os.ReadFile(path.EncodedJSONPath())
+		if err != nil {
+			return errors.Wrapf(err, "cannot read pod description file '%s'", path)
+		}
+
+		var pod corev1.Pod
+
+		if err := json.Unmarshal(encodedPod, &pod); err != nil {
+			return errors.Wrapf(err, "cannot decode pod description file '%s'", path)
+		}
+
+		/*-- return only the pods that are known to be running --*/
+		if pod.Status.Phase == corev1.PodRunning {
+			pods = append(pods, &pod)
+		}
+
+		return nil
+	}); err != nil {
+		return nil, errors.Wrapf(err, "failed to traverse pods")
+	}
+
+	return pods, nil
 }
 
 // NotifyPods instructs the notifier to call the passed in function when
@@ -391,11 +435,27 @@ func (v *VirtualK8S) GetContainerLogs(ctx context.Context, namespace, podName, c
 		return nil, errdefs.NotFoundf("object not found")
 	}
 
-	logfile := compute.PodRuntimeDir(podKey).Container(containerName).LogsPath()
+	podDir := compute.PodRuntimeDir(podKey)
+
+	logfile := podDir.Container(containerName).LogsPath()
 
 	logger.Info("K8s <- GetContainerLogs", "logfile", logfile)
 
-	return os.Open(logfile)
+	// if it fails to open the container's logfile, then may be something with the pod.
+	// in this case, try return the pod stderr
+	containerLog, err := os.Open(logfile)
+	if err != nil {
+		logger.Info("Unable to find container's log. Fallback to pod's stderr")
+
+		podStderr, err := os.Open(podDir.StderrPath())
+		if err != nil {
+			return nil, errors.Wrapf(err, "unable to load either container's or pod's logs")
+		}
+
+		return podStderr, nil
+	}
+
+	return containerLog, nil
 }
 
 // RunInContainer executes a command in a container in the pod, copying data

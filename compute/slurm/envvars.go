@@ -46,7 +46,7 @@ func FromServices(ctx context.Context, namespace string) []corev1.EnvVar {
 	var services []*corev1.Service
 
 	for i, service := range serviceList.Items {
-		// We always want to add environment variabled for master services
+		// We always want to add environment variable for master services
 		// from the master service namespace, even if enableServiceLinks is false.
 		// We also add environment variables for other services in the same
 		// namespace, if enableServiceLinks is true.

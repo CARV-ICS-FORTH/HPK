@@ -75,13 +75,12 @@ handle_dns() {
 cat > /etc/resolv.conf << DNS_EOF
 search {{.Pod.Namespace}}.svc.cluster.local svc.cluster.local cluster.local
 nameserver {{.ComputeEnv.KubeDNS}}
-nameserver 8.8.8.8
 options ndots:5
 DNS_EOF
 
 # Add hostname to known hosts
-cp /etc/hosts /tmp/hosts
-echo "$(hostname -I) $(hostname)" >> /tmp/hosts
+cp /etc/hosts /scratch/hosts
+echo "$(hostname -I) $(hostname)" >> /scratch/hosts
 }
 
 # If not removed, Flags will be consumed by the nested Apptainer and overwrite paths.
@@ -106,7 +105,7 @@ handle_init_containers() {
 	echo "[Virtual] Scheduling Init Container: {{$index}}"
 	
 	${apptainer} {{ $container.ApptainerMode }} --compat --no-mount tmp,home --userns \
-	--bind /tmp/hosts:/etc/hosts,{{join "," $container.Binds}} \ 
+	--bind /scratch/hosts:/etc/hosts,{{join "," $container.Binds}} \ 
 	{{- if $container.EnvFilePath}}
 	--env-file {{$container.EnvFilePath}} \
 	{{- end}}
@@ -126,7 +125,7 @@ handle_containers() {
 	echo "[Virtual] Scheduling Container: {{$container.InstanceName}}"
 
 	$(${apptainer} {{$container.ApptainerMode}} --compat --no-mount tmp,home --userns \
-	--bind /tmp/hosts:/etc/hosts,{{join "," $container.Binds}} \ 
+	--bind /scratch/hosts:/etc/hosts,{{join "," $container.Binds}} \ 
 	{{- if $container.EnvFilePath}}
 	--env-file {{$container.EnvFilePath}} \
 	{{- end}}
@@ -201,47 +200,50 @@ PAUSE_EOF
 #### BEGIN SECTION: Host Environment ####
 # Description
 # 	Stuff to run outside the virtual environment
-env_abort() {
-	echo -e "\n[Host] Shutdown the Virtual Environment \n"
-
-	echo -e "\n[Host] Kill Virtual Environment \n"
-	kill -TERM ${VPID} 
-}
 
 env_failed() {
 	echo -e "\n[Host] Signal received: Virtual Environment Has Failed\n"
 
-	echo "[HOST] Waiting for the Virtual Environment to Exit"
-	wait ${VPID}
-
-	echo "[HOST] Cleanup Signal files"
-	rm /dev/shm/signal_${PPID}
+	reap
 
 	echo "-- Exit with 1--"
 	exit -1
 }
 
 env_running() {
-	echo -e "\n[Host] ** Environment Is Running.  **\n"
-	wait
+	echo -e "\n[Host] Signal received: Virtual Environment is Running\n"
 
-	echo "[HOST] Cleanup Signal files"
-	rm /dev/shm/signal_${PPID}
+	reap
 
 	echo "-- Exit with 0 --"
 	exit 0
+}
+
+reap() {
+	echo "[HOST] Waiting for the Virtual Environment to Exit"
+	wait ${VPID}
+
+	echo "[HOST] Cleanup Signal files"
+	rm /dev/shm/signal_${PPID}
+}
+
+sigdown() {
+	echo -e "\n[Host] Shutting down the Virtual Environment, got signal \n"
+
+	echo -e "\n[Host] Kill Virtual Environment \n"
+	kill -TERM ${VPID} 
 }
 
 
 echo "== Submit Environment =="
 chmod +x  {{.VirtualEnv.ConstructorPath}}
 
-echo "[Host] Setting Signal Traps for Virtual Environment [Aborted (TERM,KILL,QUIT,INT), Failed (USR1), Running (USR2)]..."
-trap env_abort SIGTERM
+echo "[Host] Setting Signal Traps for Virtual Environment [Abort (TERM,INT), Failed (USR1), Running (USR2)]..."
+trap sigdown SIGTERM SIGINT
 
 echo "[Host] Starting the constructor the Virtual Environment ..."
 
-${apptainer} exec --net --network=flannel 			 \
+${apptainer} exec --net --network=flannel --scratch /scratch \
 --env PARENT=${PPID}								 \
 --hostname {{.Pod.Name}}							 \
 --bind /bin,/etc/apptainer,/var/lib/apptainer,/lib,/lib64,/usr,/etc/passwd,$HOME,/run/shm \

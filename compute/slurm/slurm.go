@@ -36,7 +36,7 @@ import (
 ************************************************************/
 
 // ExcludeNodes EXISTS ONLY FOR DEBUGGING PURPOSES of Inotify on NFS.
-var ExcludeNodes = "--exclude=jedi2"
+var ExcludeNodes = "--exclude="
 
 func init() {
 	Slurm.SubmitCmd = "sbatch"  // path.GetPathOrDie("sbatch")

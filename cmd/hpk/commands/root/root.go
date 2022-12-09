@@ -421,7 +421,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 func rateLimiter() workqueue.RateLimiter {
 	return workqueue.NewMaxOfRateLimiter(
 		workqueue.NewItemExponentialFailureRateLimiter(5*time.Millisecond, 10*time.Second),
-		// 100 qps, 1000 bucket size.  This is only for retry speed and its only the overall factor (not per item)
+		// 100 qps, 1000 bucket size.  This is only for retry speed, and it's only the overall factor (not per item)
 		&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(100), 1000)},
 	)
 }
@@ -432,11 +432,11 @@ func setNodeReady(n *corev1.Node) {
 			continue
 		}
 
-		c.Message = "systemk is ready"
-		c.Reason = "KubeletReady"
-		c.Status = corev1.ConditionTrue
 		c.LastHeartbeatTime = metav1.Now()
 		c.LastTransitionTime = metav1.Now()
+		c.Reason = "KubeletReady"
+		c.Message = "HPK is successfully connected to Slurm"
+		c.Status = corev1.ConditionTrue
 		n.Status.Conditions[i] = c
 		return
 	}
