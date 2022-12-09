@@ -35,6 +35,9 @@ import (
 
 ************************************************************/
 
+// ExcludeNodes EXISTS ONLY FOR DEBUGGING PURPOSES of Inotify on NFS.
+var ExcludeNodes = "--exclude=jedi2"
+
 func init() {
 	Slurm.SubmitCmd = "sbatch"  // path.GetPathOrDie("sbatch")
 	Slurm.CancelCmd = "scancel" // path.GetPathOrDie("scancel")
@@ -47,7 +50,7 @@ var Slurm struct {
 }
 
 func SubmitJob(scriptFile string) (string, error) {
-	out, err := process.Execute(Slurm.SubmitCmd, scriptFile)
+	out, err := process.Execute(Slurm.SubmitCmd, ExcludeNodes, scriptFile)
 	if err != nil {
 		SystemError(err, "sbatch submission error. out : '%s'", out)
 	}
@@ -144,14 +147,19 @@ func (h *EventHandler) Run(ctx context.Context, notifyVirtualKubelet func(pod *c
 				case event := <-h.Queue:
 					podkey, file, invalid := compute.ParsePath(event.Name)
 					if invalid {
-						compute.DefaultLogger.Info("SLURM: omit unknown event", "op", event.Op, "path", event.Name)
+						compute.DefaultLogger.Info("SLURM: omit unknown event", "op", event.Op, "event", event.Name)
 						continue
 					}
 
 					logger := compute.DefaultLogger.WithValues("pod", podkey)
 
 					/*-- Skip events that are not related to pod changes driven by Slurm --*/
-					if !event.Op.Has(fsnotify.Write) {
+					/* In previous versions, this condition was fsnotify.Write, with the goal to avoid race
+					conditions between creating a file and writing a file. However, this does not seem to work
+					with the Polling watcher, and we can only capture Create events. In turn, that means that
+					file readers must retry if there are no contents in the file.
+					*/
+					if !(event.Op.Has(fsnotify.Create) || event.Op.Has(fsnotify.Write)) {
 						logger.Info("SLURM: omit known event", "op", event.Op, "file", file)
 						continue
 					}
@@ -160,17 +168,38 @@ func (h *EventHandler) Run(ctx context.Context, notifyVirtualKubelet func(pod *c
 					 * Declare events that warrant Pod reconciliation
 					 *---------------------------------------------------*/
 					switch filepath.Ext(file) {
+					case compute.ExtensionSysError:
+						/*-- Sbatch failed. Pod should fail immediately without other checks --*/
+						logger.Info("SLURM -> Pod initialization error", "op", event.Op, "file", file)
+
+						pod := LoadPod(podkey)
+						if pod == nil {
+							SystemError(errors.Errorf("pod '%s' does not exist", podkey), "ERR")
+						}
+
+						PodError(pod, "SYSERROR", "Here should go the content of the file")
+
+						/*-- Update the remote Copy --*/
+						notifyVirtualKubelet(pod)
+
+						logger.Info("** K8s Status Updated **",
+							"version", pod.ResourceVersion,
+							"phase", pod.Status.Phase,
+						)
+
+						continue
+
 					case compute.ExtensionIP:
 						/*-- Sbatch Started --*/
-						logger.Info("SLURM -> New Pod IP", "op", event.Op, "path", file)
+						logger.Info("SLURM: New Pod IP", "op", event.Op, "file", file)
 
 					case compute.ExtensionJobID:
 						/*-- Container Started --*/
-						logger.Info("SLURM -> Job Has Started", "op", event.Op, "path", file)
+						logger.Info("SLURM: Job Has Started", "op", event.Op, "file", file)
 
 					case compute.ExtensionExitCode:
 						/*-- Container Terminated --*/
-						logger.Info("SLURM -> Job Is Complete", "op", event.Op, "path", file)
+						logger.Info("SLURM: Job Is Complete", "op", event.Op, "file", file)
 
 					default:
 						/*-- Any other file gnored --*/

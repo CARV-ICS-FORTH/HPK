@@ -24,12 +24,11 @@ import (
 
 	"github.com/Masterminds/sprig"
 	"github.com/carv-ics-forth/hpk/compute"
-	"github.com/fsnotify/fsnotify"
+	"github.com/carv-ics-forth/hpk/pkg/filenotify"
 	"github.com/go-logr/logr"
 	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/json"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -129,12 +128,14 @@ Notice that by using the reference, we operate on the local copy instead of the 
 1) We can extract updated information from .spec (Kubernetes only fetches .Status)
 2) We can have "fresh" information that is not yet propagated to Kubernetes
 */
-func DeletePod(podKey client.ObjectKey) bool {
+func DeletePod(podKey client.ObjectKey, watcher filenotify.FileWatcher) bool {
 	logger := compute.DefaultLogger.WithValues("pod", podKey)
 
-	pod := LoadPod(podKey)
-	if pod == nil {
-		logger.Info("[WARN]: Tried to delete pod, but it dod not exist in the cluster")
+	podDir := compute.PodRuntimeDir(podKey)
+
+	localPod := LoadPod(podKey)
+	if localPod == nil {
+		logger.Info("[WARN]: Tried to delete pod, but it does not exist in the cluster")
 
 		return false
 	}
@@ -142,7 +143,7 @@ func DeletePod(podKey client.ObjectKey) bool {
 	/*---------------------------------------------------
 	 * Cancel Slurm Job
 	 *---------------------------------------------------*/
-	idType, podID := ParsePodID(pod)
+	idType, podID := ParsePodID(localPod)
 
 	if idType != JobIDTypeEmpty {
 		logger.Info(" * Cancelling Slurm Job", "job", podID)
@@ -156,11 +157,18 @@ func DeletePod(podKey client.ObjectKey) bool {
 	}
 
 	/*---------------------------------------------------
+	 * Remove watcher for Pod Directory
+	 *---------------------------------------------------*/
+	// because fswatch does not work recursively, we cannot have the container directories nested within the pod.
+	// instead, we use a flat directory in the format "podir/containername.{jid,stdout,stdour,...}"
+	if err := watcher.Remove(string(podDir)); err != nil {
+		SystemError(err, "register to fsnotify has failed for path '%s'", podDir)
+	}
+
+	/*---------------------------------------------------
 	 * Remove Pod Directory
 	 *---------------------------------------------------*/
 	logger.Info(" * Removing Pod Directory")
-
-	podDir := compute.PodRuntimeDir(podKey)
 
 	if err := os.RemoveAll(string(podDir)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		SystemError(err, "failed to delete pod directory %s'", podDir)
@@ -169,7 +177,7 @@ func DeletePod(podKey client.ObjectKey) bool {
 	return true
 }
 
-func CreatePod(ctx context.Context, pod *corev1.Pod, watcher *fsnotify.Watcher) error {
+func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatcher) error {
 	podKey := client.ObjectKeyFromObject(pod)
 	logger := compute.DefaultLogger.WithValues("pod", podKey)
 
@@ -211,21 +219,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher *fsnotify.Watcher) 
 		}
 
 	*/
-	var serviceList corev1.ServiceList
-
-	if err := compute.K8SClient.List(ctx, &serviceList, &client.ListOptions{
-		LabelSelector: labels.Everything(),
-	}); err != nil {
-		SystemError(err, "failed to list services when setting up env vars")
-	}
-
-	var slist []*corev1.Service
-
-	for i := range serviceList.Items {
-		slist = append(slist, &serviceList.Items[i])
-	}
-
-	podEnvVariables := FromServices(slist)
+	podEnvVariables := FromServices(ctx, pod.GetNamespace())
 
 	/*---------------------------------------------------
 	 * Set tha Pod Handler
@@ -262,7 +256,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher *fsnotify.Watcher) 
 	/*---------------------------------------------------
 	 * Build Container Commands for Init Containers
 	 *---------------------------------------------------*/
-	logger.Info(" * Setting apptainer for init containers")
+	logger.Info(" * Setting Apptainer for init containers")
 
 	var initContainers []Container
 
@@ -273,7 +267,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher *fsnotify.Watcher) 
 	/*---------------------------------------------------
 	 * Build Container Commands for Containers
 	 *---------------------------------------------------*/
-	logger.Info(" * Setting apptainer for containers")
+	logger.Info(" * Setting Apptainer for containers")
 
 	var containers []Container
 
@@ -297,6 +291,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher *fsnotify.Watcher) 
 			StdoutPath:      h.podDirectory.StdoutPath(),
 			StderrPath:      h.podDirectory.StderrPath(),
 			ExitCodePath:    h.podDirectory.ExitCodePath(),
+			SysErrorPath:    h.podDirectory.SysErrorPath(),
 		},
 		InitContainers: initContainers,
 		Containers:     containers,
@@ -387,12 +382,12 @@ func (h *podHandler) buildContainer(container *corev1.Container) Container {
 
 	/*-- Set pod-wide variables --*/
 	for _, envVar := range h.podEnvVariables {
-		envfile.WriteString(fmt.Sprintf("%s=%s\n", envVar.Name, envVar.Value))
+		envfile.WriteString(fmt.Sprintf("%s='%s'\n", envVar.Name, envVar.Value))
 	}
 
 	/*-- Set container-specific variables --*/
 	for _, envVar := range container.Env {
-		envfile.WriteString(fmt.Sprintf("%s=%s\n", envVar.Name, envVar.Value))
+		envfile.WriteString(fmt.Sprintf("%s='%s'\n", envVar.Name, envVar.Value))
 	}
 
 	if err := os.WriteFile(envfilePath, []byte(envfile.String()), compute.PodGlobalDirectoryPermissions); err != nil {

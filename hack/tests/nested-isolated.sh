@@ -7,9 +7,9 @@ set -eum pipeline
 cat > /tmp/start_nested_isolated_pod.sh << "EOF"
   echo "Starting Pod $(hostname -I)"
 
-  # Remove Singularity/Apptainer flags.
-  # If not removed, they will be consumed by the nested singularity and overwrite paths.
-  echo "Reset Singularity/Apptainer Flags"
+  # Remove Apptainer flags.
+  # If not removed, they will be consumed by the nested Apptainer and overwrite paths.
+  echo "Reset Apptainer Flags"
 
   unset SINGULARITY_BIND
   unset SINGULARITY_CONTAINER

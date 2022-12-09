@@ -19,11 +19,13 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/carv-ics-forth/hpk/cmd/hpk/commands"
 	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/pkg/resourcemanager"
+	"github.com/hashicorp/go-multierror"
 	"github.com/sirupsen/logrus"
 	"github.com/virtual-kubelet/virtual-kubelet/node/api"
 	"golang.org/x/time/rate"
@@ -34,10 +36,10 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/carv-ics-forth/hpk/provider"
 	"github.com/dimiro1/banner"
-	"github.com/hashicorp/go-multierror"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 	"github.com/virtual-kubelet/virtual-kubelet/node"
@@ -45,7 +47,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubeinformers "k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 func logo() string {
@@ -53,7 +54,7 @@ func logo() string {
 
 	banner.InitString(buf, true, true, `
 {{ .AnsiColor.BrightGreen }}
-{{ .Title "HaPaKi" "" 4 }}
+{{ .Title "HPK" "" 4 }}
 {{ .AnsiColor.Default }}
 	`)
 
@@ -145,11 +146,18 @@ func runRootCommand(ctx context.Context, c Opts) error {
 
 	compute.K8SClient = k8sclient
 	compute.Environment.ContainerRegistry = c.ContainerRegistry
+	compute.Environment.ApptainerBin = c.ApptainerBin
 
 	DefaultLogger.Info(" ... Done ...",
 		"KubernetesURL", restConfig.Host,
 		"registry", compute.Environment.ContainerRegistry,
 	)
+
+	kubemaster, err := url.Parse(restConfig.Host)
+	if err != nil {
+		return errors.Wrapf(err, "failed to extract hostname from url '%s'", restConfig.Host)
+	}
+	compute.Environment.KubeMasterHost = kubemaster.Hostname()
 
 	/*---------------------------------------------------
 	 * Discover Kubernetes DNS server
@@ -225,10 +233,11 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	DefaultLogger.Info("* Creating the Provisioner of Virtual Nodes")
 
 	virtualk8s, err := provider.NewVirtualK8S(provider.InitConfig{
-		NodeName:     c.NodeName,
-		InternalIP:   c.KubeletAddress,
-		DaemonPort:   c.KubeletPort,
-		BuildVersion: commands.BuildVersion,
+		NodeName:          c.NodeName,
+		InternalIP:        c.KubeletAddress,
+		DaemonPort:        c.KubeletPort,
+		BuildVersion:      commands.BuildVersion,
+		FSPollingInterval: c.FSPollingInterval,
 	})
 	if err != nil {
 		return err

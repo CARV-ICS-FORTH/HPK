@@ -1,0 +1,169 @@
+﻿{
+  "paragraphs": [
+    {
+      "text": "%md\n\n# Spark Pi Calculator\n\nSimple example to showcase Spark integration with Zeppelin. You can run just the Spark code and it will run in the context of the Zeppelin container instance. If you run the configuration paragraph, Zeppelin will submit the Spark job to Kubernetes, using the specified executor image and number of instances. To switch configurations, you need to restart the interpreter (see all interpreters by selecting the respective option from the user menu on the upper-right corner of the screen).",
+      "user": "anonymous",
+      "dateUpdated": "2020-06-02T13:17:49+0000",
+      "config": {
+        "colWidth": 12,
+        "fontSize": 9,
+        "enabled": true,
+        "results": {},
+        "editorSetting": {
+          "language": "text",
+          "editOnDblClick": false,
+          "completionKey": "TAB",
+          "completionSupport": true
+        },
+        "editorMode": "ace/mode/text",
+        "editorHide": true
+      },
+      "settings": {
+        "params": {},
+        "forms": {}
+      },
+      "apps": [],
+      "runtimeInfos": {},
+      "progressUpdateIntervalMs": 500,
+      "jobName": "paragraph_1591103292237_-1054328822",
+      "id": "paragraph_1591103292237_-1054328822",
+      "dateCreated": "2020-06-02T13:08:12+0000",
+      "status": "FINISHED",
+      "focus": true,
+      "$$hashKey": "object:949",
+      "dateFinished": "2020-06-02T13:12:02+0000",
+      "dateStarted": "2020-06-02T13:12:02+0000",
+      "results": {
+        "code": "SUCCESS",
+        "msg": [
+          {
+            "type": "HTML",
+            "data": "<div class=\"markdown-body\">\n<h1>Spark Pi Calculator</h1>\n<p>Simple example to showcase Spark integration with Zeppelin. You can run just the Spark code and it will run in the context of the Zeppelin container instance. If you run the configuration paragraph, Zeppelin will submit the Spark job to Kubernetes, using the specified executor image and number of instances. To switch configurations, you need to restart the interpreter (see all interpreters by selecting the respective option from the user menu on the upper-right corner of the screen).</p>\n\n</div>"
+          }
+        ]
+      }
+    },
+    {
+      "text": "%spark.conf\nspark.master k8s://https://kubernetes.default.svc\nspark.submit.deployMode client\nspark.kubernetes.container.image carvicsforth/spark-py:2.4.5\nspark.executor.instances 2",
+      "user": "anonymous",
+      "dateUpdated": "2020-06-02T13:15:38+0000",
+      "config": {
+        "editorSetting": {
+          "language": "text",
+          "editOnDblClick": false,
+          "completionKey": "TAB",
+          "completionSupport": true
+        },
+        "colWidth": 12,
+        "editorMode": "ace/mode/text",
+        "fontSize": 9,
+        "results": {},
+        "enabled": true
+      },
+      "settings": {
+        "params": {},
+        "forms": {}
+      },
+      "results": {
+        "code": "SUCCESS",
+        "msg": []
+      },
+      "apps": [],
+      "runtimeInfos": {},
+      "progressUpdateIntervalMs": 500,
+      "jobName": "paragraph_1591103202940_-327617372",
+      "id": "paragraph_1591085492607_1920447527",
+      "dateCreated": "2020-06-02T13:06:42+0000",
+      "status": "FINISHED",
+      "focus": true,
+      "$$hashKey": "object:705",
+      "dateFinished": "2020-06-02T13:15:38+0000",
+      "dateStarted": "2020-06-02T13:15:38+0000"
+    },
+    {
+      "text": "%spark\n\nimport scala.math.random\n\nimport org.apache.spark.sql.SparkSession\n\nval slices = 10000\n\nval n = math.min(100000L * slices, Int.MaxValue).toInt // avoid overflow\nval count = spark.sparkContext.parallelize(1 until n, slices).map { i =>\n    val x = random * 2 - 1 \n    val y = random * 2 - 1 \n    if (x*x + y*y <= 1) 1 else 0\n}.reduce(_ + _)\n\nprintln(s\"Pi is roughly ${4.0 * count / (n - 1)}\")",
+      "user": "anonymous",
+      "dateUpdated": "2020-06-02T13:16:02+0000",
+      "config": {
+        "editorSetting": {
+          "language": "scala",
+          "editOnDblClick": false,
+          "completionKey": "TAB",
+          "completionSupport": true
+        },
+        "colWidth": 12,
+        "editorMode": "ace/mode/scala",
+        "fontSize": 9,
+        "results": {},
+        "enabled": true
+      },
+      "settings": {
+        "params": {},
+        "forms": {}
+      },
+      "results": {
+        "code": "SUCCESS",
+        "msg": [
+          {
+            "type": "TEXT",
+            "data": "Pi is roughly 3.1416018031416018\nimport scala.math.random\nimport org.apache.spark.sql.SparkSession\n\u001b[1m\u001b[34mslices\u001b[0m: \u001b[1m\u001b[32mInt\u001b[0m = 10000\n\u001b[1m\u001b[34mn\u001b[0m: \u001b[1m\u001b[32mInt\u001b[0m = 1000000000\n\u001b[1m\u001b[34mcount\u001b[0m: \u001b[1m\u001b[32mInt\u001b[0m = 785400450\n"
+          }
+        ]
+      },
+      "apps": [],
+      "runtimeInfos": {},
+      "progressUpdateIntervalMs": 500,
+      "jobName": "paragraph_1591103202940_-500571050",
+      "id": "paragraph_1591087611772_-853391918",
+      "dateCreated": "2020-06-02T13:06:42+0000",
+      "status": "FINISHED",
+      "$$hashKey": "object:706",
+      "dateFinished": "2020-06-02T13:17:26+0000",
+      "dateStarted": "2020-06-02T13:16:02+0000"
+    },
+    {
+      "text": "%spark\n",
+      "user": "anonymous",
+      "dateUpdated": "2020-06-02T13:06:42+0000",
+      "config": {
+        "editorSetting": {
+          "language": "scala",
+          "editOnDblClick": false,
+          "completionKey": "TAB",
+          "completionSupport": true
+        },
+        "colWidth": 12,
+        "editorMode": "ace/mode/scala",
+        "fontSize": 9,
+        "results": {},
+        "enabled": true
+      },
+      "settings": {
+        "params": {},
+        "forms": {}
+      },
+      "apps": [],
+      "runtimeInfos": {},
+      "progressUpdateIntervalMs": 500,
+      "jobName": "paragraph_1591103202941_812890113",
+      "id": "paragraph_1591087693336_-204788775",
+      "dateCreated": "2020-06-02T13:06:42+0000",
+      "status": "READY",
+      "$$hashKey": "object:707"
+    }
+  ],
+  "name": "Spark Pi Calculator",
+  "id": "2FA68QAYV",
+  "defaultInterpreterGroup": "spark",
+  "version": "0.9.0-preview1",
+  "noteParams": {},
+  "noteForms": {},
+  "angularObjects": {},
+  "config": {
+    "isZeppelinNotebookCronEnable": false,
+    "looknfeel": "default",
+    "personalizedMode": "false"
+  },
+  "info": {},
+  "path": "/Spark Pi Calculator"
+}
