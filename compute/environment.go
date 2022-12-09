@@ -70,7 +70,13 @@ const (
 	ExtensionLogs        = ".logs"
 )
 
+type WalkPodFunc func(path PodPath) error
+
 type PodPath string
+
+func (p PodPath) String() string {
+	return string(p)
+}
 
 func PodRuntimeDir(podRef client.ObjectKey) PodPath {
 	path := filepath.Join(RuntimeDir, podRef.Namespace, podRef.Name)

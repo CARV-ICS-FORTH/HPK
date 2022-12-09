@@ -35,28 +35,29 @@ func (v *VirtualK8S) CreateVirtualNode(ctx context.Context, nodename string, tai
 	}
 
 	resources := corev1.ResourceList{
-		"cpu":    resource.MustParse("30"),
+		"cpu":    *resource.NewQuantity(int64(runtime.NumCPU()), resource.DecimalSI),
 		"memory": resource.MustParse("10Gi"),
-		"pods":   resource.MustParse("100"),
+		"pods":   resource.MustParse("110"),
 	}
 
 	return &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: nodename,
 			Labels: map[string]string{
-				"type":                   "hpk-kubelet",
+				"kubernetes.io/hostname": nodename,
 				"kubernetes.io/role":     "agent",
 				"kubernetes.io/os":       runtime.GOOS,
-				"kubernetes.io/hostname": nodename,
-				"alpha.service-controller.kubernetes.io/exclude-balancer": "true",
-				"node.kubernetes.io/exclude-from-external-load-balancers": "true",
+				"kubernetes.io/arch":     runtime.GOARCH,
+				// "type":                   "hpk-kubelet",
+				// "alpha.service-controller.kubernetes.io/exclude-balancer": "true",
+				// "node.kubernetes.io/exclude-from-external-load-balancers": "true",
 			},
 			Annotations: map[string]string{
-				"alpha.service-controller.kubernetes.io/exclude-balancer": "true",
+				// "alpha.service-controller.kubernetes.io/exclude-balancer": "true",
 			},
 		},
 		Spec: corev1.NodeSpec{
-			Taints: taints,
+			// Taints: taints,
 		},
 		Status: corev1.NodeStatus{
 			NodeInfo:        v.NodeSystemInfo(ctx),
@@ -136,6 +137,7 @@ func NodeConditions(_ context.Context) []corev1.NodeCondition {
 func (v *VirtualK8S) NodeAddresses(_ context.Context) []corev1.NodeAddress {
 	return []corev1.NodeAddress{
 		{
+			// Used to server webhook traffic for logs / exec
 			Type:    corev1.NodeExternalIP,
 			Address: v.InitConfig.InternalIP,
 		},
@@ -147,8 +149,8 @@ func (v *VirtualK8S) NodeAddresses(_ context.Context) []corev1.NodeAddress {
 }
 
 func (v *VirtualK8S) NodeDaemonEndpoints(_ context.Context) corev1.NodeDaemonEndpoints {
-	v.Logger.Info("-> NodeDaemonEndpoints")
-	defer v.Logger.Info("<- NodeDaemonEndpoints")
+	v.Logger.Info("K8s -> NodeDaemonEndpoints")
+	defer v.Logger.Info("K8s <- NodeDaemonEndpoints")
 
 	return corev1.NodeDaemonEndpoints{
 		KubeletEndpoint: corev1.DaemonEndpoint{
@@ -186,9 +188,9 @@ func (v *VirtualK8S) NodeSystemInfo(_ context.Context) corev1.NodeSystemInfo {
 		BootID:                  "",
 		KernelVersion:           kernelVersion,
 		OSImage:                 "hpk",
-		ContainerRuntimeVersion: "vkubelet://6.6.6.6",
+		KubeProxyVersion:        "v1.24.7", // fixme: find it automatically
 		KubeletVersion:          v.InitConfig.BuildVersion,
-		KubeProxyVersion:        "",
+		ContainerRuntimeVersion: "singularity://1.1.3", // fixme: find it automatically
 		OperatingSystem:         operatingSystem,
 		Architecture:            architecture,
 	}
