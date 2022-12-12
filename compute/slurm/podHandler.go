@@ -220,8 +220,6 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	/*---------------------------------------------------
 	 * Create the shared directory of Virtual Environment
 	 *---------------------------------------------------*/
-	logger.Info("== Building New Virtual Environment ==")
-
 	virtualEnvironmentDir := compute.PodRuntimeDir(podKey).VirtualEnvironmentDir()
 
 	if err := os.MkdirAll(string(virtualEnvironmentDir), compute.PodGlobalDirectoryPermissions); err != nil {
@@ -265,7 +263,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	/*---------------------------------------------------
 	 * Set listeners for async changes on the Pod
 	 *---------------------------------------------------*/
-	logger.Info(" * Setting Filesystem Notifiers", "watchPath", h.podDirectory)
+	logger.Info(" * Setting Filesystem Notifiers")
 
 	// because fswatch does not work recursively, we cannot have the container directories nested within the pod.
 	// instead, we use a flat directory in the format "podir/containername.{jid,stdout,stdour,...}"
@@ -276,8 +274,6 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	/*---------------------------------------------------
 	 * Build Container Commands for Init Containers
 	 *---------------------------------------------------*/
-	logger.Info(" * Setting Apptainer for init containers")
-
 	var initContainers []Container
 
 	for i := range pod.Spec.InitContainers {
@@ -287,8 +283,6 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	/*---------------------------------------------------
 	 * Build Container Commands for Containers
 	 *---------------------------------------------------*/
-	logger.Info(" * Setting Apptainer for containers")
-
 	var containers []Container
 
 	for i := range pod.Spec.Containers {
@@ -347,9 +341,9 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	/*---------------------------------------------------
 	 * Generate Pod sbatchScript from Sbatch SubmitTemplate + Fields
 	 *---------------------------------------------------*/
-	sbatchScriptPath := h.podDirectory.SubmitJobPath()
+	logger.Info(" * Generating Sbatch script")
 
-	logger.Info(" * Generating Sbatch script", "path", sbatchScriptPath)
+	sbatchScriptPath := h.podDirectory.SubmitJobPath()
 
 	sbatchScript := strings.Builder{}
 
@@ -365,20 +359,20 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	/*---------------------------------------------------
 	 * Submit job to Slurm, and store the JobID
 	 *---------------------------------------------------*/
-	logger.Info(" * Submitting sbatch to Slurm", "scriptPath", fields.VirtualEnv.ConstructorPath)
+	logger.Info(" * Submitting sbatch to Slurm")
 
 	jobID, err := SubmitJob(sbatchScriptPath)
 	if err != nil {
 		SystemError(err, "failed to submit job")
 	}
 
+	h.logger.Info(" * Setting Slurm Job ID to Pod ", "jobID", jobID)
+
 	/*-- Update Pod with the JobID --*/
 	SetPodID(h.Pod, JobIDTypeSlurm, jobID)
 	if err != nil {
-		SystemError(err, "failed to submit job")
+		SystemError(err, "failed to set job id for pod")
 	}
-
-	h.logger.Info(" * Associating Slurm Jod ID to Pod ", "jobID", jobID)
 
 	/*-- Needed as it will follow a GetPod()--*/
 	SavePod(ctx, h.Pod)
@@ -387,16 +381,12 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 }
 
 func (h *podHandler) buildContainer(container *corev1.Container) Container {
-	h.logger.Info(" == Apptainer ==", "container", container.Name)
-
 	containerPath := h.podDirectory.Container(container.Name)
 
 	/*---------------------------------------------------
 	 * Prepare Environment Variables
 	 *---------------------------------------------------*/
 	envfilePath := containerPath.EnvFilePath()
-
-	h.logger.Info(" * Preparing env-file", "path", envfilePath)
 
 	var envfile strings.Builder
 
@@ -417,8 +407,6 @@ func (h *podHandler) buildContainer(container *corev1.Container) Container {
 	/*---------------------------------------------------
 	 * Prepare fields for Container Template
 	 *---------------------------------------------------*/
-	h.logger.Info(" * Setting Template Args")
-
 	return Container{
 		InstanceName: fmt.Sprintf("%s_%s_%s", h.Pod.GetNamespace(), h.Pod.GetName(), container.Name),
 		Image:        compute.Environment.ContainerRegistry + container.Image,
