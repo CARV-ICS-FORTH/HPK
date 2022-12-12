@@ -19,6 +19,7 @@ import (
 	"context"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"sync"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 /************************************************************
@@ -72,6 +74,34 @@ func CancelJob(args string) (string, error) {
 	}
 
 	return string(out), nil
+}
+
+/************************************************************
+
+			Slurm Stats
+
+************************************************************/
+
+// ConnectionOK return true if HPK maintains connection with the Slurm manager.
+// Otherwise, it returns false.
+func ConnectionOK() bool {
+	return true
+}
+
+func TotalResources(ctx context.Context) corev1.ResourceList {
+	return corev1.ResourceList{
+		"cpu":    *resource.NewQuantity(int64(runtime.NumCPU()), resource.DecimalSI),
+		"memory": resource.MustParse("10Gi"),
+		"pods":   resource.MustParse("110"),
+	}
+}
+
+func AllocatableResources(ctx context.Context) corev1.ResourceList {
+	return corev1.ResourceList{
+		"cpu":    *resource.NewQuantity(int64(runtime.NumCPU()), resource.DecimalSI),
+		"memory": resource.MustParse("10Gi"),
+		"pods":   resource.MustParse("110"),
+	}
 }
 
 /************************************************************
@@ -147,7 +177,7 @@ func (h *EventHandler) Run(ctx context.Context, notifyVirtualKubelet func(pod *c
 				case event := <-h.Queue:
 					podkey, file, invalid := compute.ParsePath(event.Name)
 					if invalid {
-						compute.DefaultLogger.Info("SLURM: omit unknown event", "op", event.Op, "event", event.Name)
+						compute.DefaultLogger.Info("SLURM: omit unexpected event", "event", event.Name)
 						continue
 					}
 

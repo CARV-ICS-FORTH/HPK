@@ -148,7 +148,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	compute.Environment.ContainerRegistry = c.ContainerRegistry
 	compute.Environment.ApptainerBin = c.ApptainerBin
 
-	DefaultLogger.Info(" ... Done ...",
+	DefaultLogger.Info("Kubernetes Client is ready",
 		"KubernetesURL", restConfig.Host,
 		"registry", compute.Environment.ContainerRegistry,
 	)
@@ -162,7 +162,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	/*---------------------------------------------------
 	 * Discover Kubernetes DNS server
 	 *---------------------------------------------------*/
-	DefaultLogger.Info("* Discovering Kubernetes DNS Server")
+	DefaultLogger.Info("* Discovering Kubernetes DNS Server ...")
 	{
 		dnsEndpoint, err := k8sclientset.CoreV1().Endpoints("kube-system").Get(ctx, "kube-dns", metav1.GetOptions{})
 		if err != nil && !errors.Is(err, context.Canceled) {
@@ -179,17 +179,13 @@ func runRootCommand(ctx context.Context, c Opts) error {
 
 		compute.Environment.KubeDNS = dnsEndpoint.Subsets[0].Addresses[0].IP
 
-		DefaultLogger.Info(" ... Done ...", "dnsIP", compute.Environment.KubeDNS)
+		DefaultLogger.Info("DNS connection is ready", "dnsIP", compute.Environment.KubeDNS)
 	}
 
 	/*---------------------------------------------------
 	 * Create Informers for Kubernetes CRDs
 	 *---------------------------------------------------*/
-	DefaultLogger.Info("* Starting Kubernetes Informers",
-		"namespace", c.KubeNamespace,
-		"crds", []string{
-			"pods", "secrets", "configMap", "service", "serviceAccount",
-		})
+	DefaultLogger.Info("* Starting Kubernetes Informers ...")
 
 	// Create a shared informer factory for Kubernetes Pods assigned to this Node.
 	podInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(
@@ -222,18 +218,22 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	// Finally, start the informers.
 	podInformerFactory.Start(ctx.Done())
 	podInformerFactory.WaitForCacheSync(ctx.Done())
+
 	informerFactory.Start(ctx.Done())
 	informerFactory.WaitForCacheSync(ctx.Done())
 
-	DefaultLogger.Info(" ... Done ...")
+	DefaultLogger.Info("Informers are ready",
+		"namespace", c.KubeNamespace,
+		"crds", []string{
+			"pods", "secrets", "configMap", "service", "serviceAccount",
+		})
 
 	/*---------------------------------------------------
 	 * Register the Provisioner of Virtual Nodes
 	 *---------------------------------------------------*/
-	DefaultLogger.Info("* Creating the Provisioner of Virtual Nodes")
+	DefaultLogger.Info("* Starting Virtual Node Provisioner...")
 
 	virtualk8s, err := provider.NewVirtualK8S(provider.InitConfig{
-		NodeName:          c.NodeName,
 		InternalIP:        c.KubeletAddress,
 		DaemonPort:        c.KubeletPort,
 		BuildVersion:      commands.BuildVersion,
@@ -243,8 +243,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		return err
 	}
 
-	DefaultLogger.Info(" ... Done ...",
-		"nodeName", virtualk8s.NodeName,
+	DefaultLogger.Info("Virtual Node Provisioner is ready",
 		"internalIP", virtualk8s.InternalIP,
 		"daemonPort", virtualk8s.DaemonPort,
 	)
@@ -252,7 +251,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	/*---------------------------------------------------
 	 * Start an HTTPs server for serving metrics/logs
 	 *---------------------------------------------------*/
-	DefaultLogger.Info("* Initializing HTTP(s) server")
+	DefaultLogger.Info("* Initializing HTTP(s) server ...")
 	{
 		mux := http.NewServeMux()
 
@@ -283,7 +282,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 			}
 		}()
 
-		DefaultLogger.Info("... Done ...",
+		DefaultLogger.Info("HTTP(s) server is ready",
 			"address", advertisedAddr,
 			"cert", c.K8sAPICertFilepath,
 			"key", c.K8sAPIKeyFilepath,
@@ -293,7 +292,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	/*---------------------------------------------------
 	 * Create Pod Controller
 	 *---------------------------------------------------*/
-	DefaultLogger.Info("* Starting the Pod Controller")
+	DefaultLogger.Info("* Starting Pod Controller ...")
 	{
 		eb := record.NewBroadcaster()
 		eb.StartLogging(logrus.Infof)
@@ -341,13 +340,13 @@ func runRootCommand(ctx context.Context, c Opts) error {
 			}
 		}
 
-		DefaultLogger.Info(" ... Done ...")
+		DefaultLogger.Info("Pod Controller is Ready")
 	}
 
 	/*---------------------------------------------------
 	 * Create Node Controller
 	 *---------------------------------------------------*/
-	DefaultLogger.Info("* Starting the Node Controller")
+	DefaultLogger.Info("* Starting Node Controller ...")
 
 	np := node.NewNaiveNodeProvider()
 	{
@@ -359,31 +358,29 @@ func runRootCommand(ctx context.Context, c Opts) error {
 			}
 		}
 
-		virtualNode := virtualk8s.CreateVirtualNode(ctx, c.NodeName, taint)
-
-		ncOpts := []node.NodeControllerOpt{
-			node.WithNodeEnableLeaseV1(k8sclientset.CoordinationV1().Leases(corev1.NamespaceNodeLease), 0),
-			node.WithNodeStatusUpdateErrorHandler(func(ctx context.Context, err error) error {
-				if !k8serrors.IsNotFound(err) {
-					return err
-				}
-				DefaultLogger.Info("node not found")
-				newNode := virtualNode.DeepCopy()
-				newNode.ResourceVersion = ""
-				_, err = k8sclientset.CoreV1().Nodes().Create(ctx, newNode, metav1.CreateOptions{})
-				if err != nil {
-					return err
-				}
-				DefaultLogger.Info("registered node")
-				return nil
-			}),
-		}
+		virtualNode := virtualk8s.NewVirtualNode(ctx, c.NodeName, taint)
 
 		nc, err := node.NewNodeController(
 			np,
 			virtualNode,
 			k8sclientset.CoreV1().Nodes(),
-			ncOpts...,
+			node.WithNodeEnableLeaseV1(k8sclientset.CoordinationV1().Leases(corev1.NamespaceNodeLease), 0),
+			node.WithNodeStatusUpdateErrorHandler(func(ctx context.Context, err error) error {
+				if !k8serrors.IsNotFound(err) {
+					return err
+				}
+
+				DefaultLogger.Info("node not found")
+				newNode := virtualNode.DeepCopy()
+				newNode.ResourceVersion = ""
+
+				if _, err = k8sclientset.CoreV1().Nodes().Create(ctx, newNode, metav1.CreateOptions{}); err != nil {
+					return err
+				}
+
+				DefaultLogger.Info("created new node")
+				return nil
+			}),
 		)
 		if err != nil {
 			return err
@@ -407,7 +404,9 @@ func runRootCommand(ctx context.Context, c Opts) error {
 			return errors.Wrap(err, "error marking the node as ready")
 		}
 
-		DefaultLogger.Info("... HPK initialized....")
+		DefaultLogger.Info("Node Controller is Ready")
+
+		DefaultLogger.Info("... HPK is successfully initialized and waiting for jobs....")
 
 		// wait for as long the app is running
 		<-nc.Done()
@@ -428,7 +427,7 @@ func rateLimiter() workqueue.RateLimiter {
 
 func setNodeReady(n *corev1.Node) {
 	for i, c := range n.Status.Conditions {
-		if c.Type != "Ready" {
+		if c.Type != corev1.NodeReady {
 			continue
 		}
 

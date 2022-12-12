@@ -218,9 +218,9 @@ func (c ContainerPath) EnvFilePath() string {
 
 // ParsePath parses the path according to the expected HPK format, and returns
 // the corresponding fields.
-// Validated through: https://regex101.com/r/s4tb8x/1
+// Validated through: https://regex101.com/r/5gRXwJ/1
 func ParsePath(path string) (podKey types.NamespacedName, fileName string, invalid bool) {
-	re := regexp.MustCompile(`^.hpk/(?P<namespace>\w+)/(?P<pod>.*?)(/.virtualenv)*/(?P<file>.*)$`)
+	re := regexp.MustCompile(`^.hpk/(?P<namespace>\S+)/(?P<pod>\S+?)(/.virtualenv)*/(?P<file>.*)$`)
 
 	match := re.FindStringSubmatch(path)
 

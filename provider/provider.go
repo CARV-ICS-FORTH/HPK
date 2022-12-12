@@ -47,7 +47,6 @@ type VirtualK8S struct {
 
 // InitConfig is the config passed to initialize a registered provider.
 type InitConfig struct {
-	NodeName   string
 	InternalIP string
 	DaemonPort int32
 
@@ -142,8 +141,6 @@ func (v *VirtualK8S) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	if err := slurm.CreatePod(ctx, pod, v.fileWatcher); err != nil {
 		return err
 	}
-
-	logger.Info("Create pod success")
 
 	return nil
 }

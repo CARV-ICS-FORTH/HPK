@@ -19,25 +19,19 @@ import (
 	"fmt"
 	"runtime"
 
+	"github.com/carv-ics-forth/hpk/compute/slurm"
 	"github.com/matishsiao/goInfo"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// CreateVirtualNode builds a kubernetes node object from a provider
+// NewVirtualNode builds a kubernetes node object from a provider
 // This is a temporary solution until node stuff actually split off from the provider interface itself.
-func (v *VirtualK8S) CreateVirtualNode(ctx context.Context, nodename string, taint *corev1.Taint) *corev1.Node {
+func (v *VirtualK8S) NewVirtualNode(ctx context.Context, nodename string, taint *corev1.Taint) *corev1.Node {
 	taints := make([]corev1.Taint, 0)
 
 	if taint != nil {
 		taints = append(taints, *taint)
-	}
-
-	resources := corev1.ResourceList{
-		"cpu":    *resource.NewQuantity(int64(runtime.NumCPU()), resource.DecimalSI),
-		"memory": resource.MustParse("10Gi"),
-		"pods":   resource.MustParse("110"),
 	}
 
 	return &corev1.Node{
@@ -48,25 +42,24 @@ func (v *VirtualK8S) CreateVirtualNode(ctx context.Context, nodename string, tai
 				"kubernetes.io/role":     "agent",
 				"kubernetes.io/os":       runtime.GOOS,
 				"kubernetes.io/arch":     runtime.GOARCH,
-				// "type":                   "hpk-kubelet",
-				// "alpha.service-controller.kubernetes.io/exclude-balancer": "true",
-				// "node.kubernetes.io/exclude-from-external-load-balancers": "true",
-			},
-			Annotations: map[string]string{
-				// "alpha.service-controller.kubernetes.io/exclude-balancer": "true",
 			},
 		},
 		Spec: corev1.NodeSpec{
-			// Taints: taints,
+			Taints: taints,
 		},
 		Status: corev1.NodeStatus{
 			NodeInfo:        v.NodeSystemInfo(ctx),
-			Capacity:        resources,
-			Allocatable:     resources,
-			Conditions:      NodeConditions(ctx),
 			Addresses:       v.NodeAddresses(ctx),
 			DaemonEndpoints: v.NodeDaemonEndpoints(ctx),
-			Phase:           corev1.NodeRunning,
+			Conditions:      NodeConditions(ctx),
+			Phase: func() corev1.NodePhase {
+				if slurm.ConnectionOK() {
+					return corev1.NodeRunning
+				}
+				return corev1.NodePending
+			}(),
+			Capacity:    slurm.TotalResources(ctx),
+			Allocatable: slurm.AllocatableResources(ctx),
 		},
 	}
 }
