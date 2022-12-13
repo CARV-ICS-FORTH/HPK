@@ -13,6 +13,7 @@ require (
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.9.0
+	github.com/slok/kubewebhook/v2 v2.5.0
 	github.com/spf13/cobra v1.6.1
 	github.com/spf13/pflag v1.0.5
 	github.com/virtual-kubelet/virtual-kubelet v1.7.0
@@ -80,6 +81,8 @@ require (
 	golang.org/x/sys v0.2.0 // indirect
 	golang.org/x/term v0.2.0 // indirect
 	golang.org/x/text v0.4.0 // indirect
+	gomodules.xyz/jsonpatch/v3 v3.0.1 // indirect
+	gomodules.xyz/orderedmap v0.1.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/protobuf v1.28.1 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect

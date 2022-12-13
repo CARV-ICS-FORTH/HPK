@@ -46,9 +46,9 @@ var DefaultLogger = zap.New(zap.UseDevMode(true))
 ************************************************************/
 
 const (
-	PodGlobalDirectoryPermissions = 0777
-	PodSpecJsonFilePermissions    = 0600
-	ContainerJobPermissions       = 0777
+	PodGlobalDirectoryPermissions = 0o777
+	PodSpecJsonFilePermissions    = 0o600
+	ContainerJobPermissions       = 0o777
 )
 
 const (
@@ -97,11 +97,6 @@ func (p PodPath) SysErrorPath() string {
 // IDPath .hpk/namespace/podName/.jid
 func (p PodPath) IDPath() string {
 	return filepath.Join(string(p), ExtensionJobID)
-}
-
-// ExitCodePath .hpk/namespace/podName/.exitCode
-func (p PodPath) ExitCodePath() string {
-	return filepath.Join(string(p), ExtensionExitCode)
 }
 
 // IPAddressPath .hpk/namespace/podName/.ip

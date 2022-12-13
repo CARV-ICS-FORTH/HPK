@@ -61,19 +61,25 @@ run-kubemaster: ## Run the Kubernetes Master
 
 
 run-kubelet: ## Run the the Kubernetes virtual kubelet
-	echo "===> Generate HPK Certificates <==="
-
+	@echo "===> Generate HPK Certificates <==="
 	mkdir -p ./bin
 
 	openssl genrsa -out bin/kubelet.key 2048
-	openssl req -x509 -key bin/kubelet.key -CA ${KUBEPATH}/pki/ca.crt -CAkey ${KUBEPATH}/pki/ca.key \
-        -days 365 -nodes -out bin/kubelet.crt -subj "/CN=hpk-kubelet" \
-        -addext "basicConstraints=CA:FALSE" \
-        -addext "keyUsage=digitalSignature,keyEncipherment" \
-        -addext "extendedKeyUsage=serverAuth,clientAuth" \
-        -addext "subjectAltName=IP:127.0.0.1,IP:${HOST_ADDRESS}"
 
-	echo "===> Run HPK <==="
+	openssl req -x509 -key bin/kubelet.key -CA ${KUBEPATH}/pki/ca.crt -CAkey ${KUBEPATH}/pki/ca.key \
+	  -days 365 -nodes -out bin/kubelet.crt -subj "/CN=hpk-kubelet" \
+	  -addext "basicConstraints=CA:FALSE" \
+	  -addext "keyUsage=digitalSignature,keyEncipherment" \
+	  -addext "extendedKeyUsage=serverAuth,clientAuth" \
+	  -addext "subjectAltName=IP:127.0.0.1,IP:${HOST_ADDRESS}"
+
+
+	@echo "===> Register Webhook <==="
+	VKUBELET_ADDRESS=${HOST_ADDRESS}                \
+	./hack/webhooks/apply-mutating-webhook.sh ./hack/webhooks/mutating-webhook.yaml
+
+
+	@echo "===> Run HPK <==="
 	KUBECONFIG=${KUBEPATH}/admin.conf				\
 	APISERVER_KEY_LOCATION=bin/kubelet.key          \
 	APISERVER_CERT_LOCATION=bin/kubelet.crt         \

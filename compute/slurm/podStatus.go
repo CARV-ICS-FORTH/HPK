@@ -103,34 +103,23 @@ func podStateMapper(pod *corev1.Pod) {
 	podDir := compute.PodRuntimeDir(podKey)
 	logger := compute.DefaultLogger.WithValues("pod", podKey)
 
+	logger.Info(" * Checking Job-level Status")
+
 	/*---------------------------------------------------
 	 * Handle Initialization and Finals States
 	 *---------------------------------------------------*/
-	/*-- If met for first time, check for unsupported fields --*/
-	if pod.Status.Phase == "" {
+	switch pod.Status.Phase {
+	case "":
+		/*-- If met for first time, check for unsupported fields --*/
 		if PodWithExplicitlyUnsupportedFields(logger, pod) {
 			return
 		}
-	}
-
-	/*-- If on final states, there is nothing else to do --*/
-	if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+	case corev1.PodSucceeded, corev1.PodFailed:
+		/*-- If on final states, there is nothing else to do --*/
 		return
 	}
 
-	/*---------------------------------------------------
-	 * Load Job-related Information (e.g, sbatch code, IP)
-	 *---------------------------------------------------*/
-	/*-- Get Exit Code of the Virtual Environment --*/
-	exitCodePath := podDir.ExitCodePath()
-	exitCode, exitCodeExists := readIntFromFile(exitCodePath)
-	if exitCodeExists && exitCode != 0 {
-		PodError(pod, ReasonExecutionError, "More info at: %s", podDir.StderrPath())
-
-		return
-	}
-
-	/*-- Get IP of the Virtual Environment --*/
+	/*-- Initialization of virtual environment (e.g, sbatch code, IP, ...)  --*/
 	if pod.Status.PodIP == "" {
 		podIPPath := podDir.IPAddressPath()
 		ip, ok := readStringFromFile(podIPPath)
@@ -151,7 +140,7 @@ func podStateMapper(pod *corev1.Pod) {
 	 * Check status of Init Containers
 	 *---------------------------------------------------*/
 	if pod.Status.Phase == corev1.PodPending {
-		logger.Info(" O Checking Init Container Status")
+		logger.Info(" * Checking Init Container Statuses")
 
 		for _, initContainer := range pod.Status.InitContainerStatuses {
 			if initContainer.State.Terminated == nil {
@@ -181,7 +170,7 @@ func podStateMapper(pod *corev1.Pod) {
 	/*---------------------------------------------------
 	 * Classify container statuses
 	 *---------------------------------------------------*/
-	logger.Info(" O Checking Container Status")
+	logger.Info(" * Checking Container Statuses")
 
 	var state Classifier
 	state.Reset()
@@ -208,7 +197,6 @@ func podStateMapper(pod *corev1.Pod) {
 		{ /*-- SUCCESS: all jobs are successfully completed --*/
 			expression: state.NumSuccessfulJobs() == totalJobs,
 			change: func(status *corev1.PodStatus) {
-
 				logrus.Warnf("POD SUCCESS. pod '%s', succesful containers '%s', total '%d' ",
 					podKey, state.ListSuccessfulJobs(), totalJobs)
 
