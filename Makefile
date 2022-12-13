@@ -49,7 +49,7 @@ build-race: ## Build HPK binary with race condition detector.
 ##@ Deployment
 
 run-kubemaster: ## Run the Kubernetes Master
-	mkdir -p .k8sfs
+	mkdir -p .k8sfs/log
 
 	apptainer run --net --dns 8.8.8.8 --fakeroot \
     --cleanenv --pid --containall \
@@ -57,6 +57,7 @@ run-kubemaster: ## Run the Kubernetes Master
     --no-mount tmp,home --unsquash --writable \
     --env K8SFS_MOCK_KUBELET=0 \
     --bind .k8sfs:/usr/local/etc \
+    --bind .k8sfs/log:/var/log \
     docker://chazapis/kubernetes-from-scratch:20221206
 
 
