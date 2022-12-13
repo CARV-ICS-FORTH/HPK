@@ -304,7 +304,6 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 			IPAddressPath:   h.podDirectory.IPAddressPath(),
 			StdoutPath:      h.podDirectory.StdoutPath(),
 			StderrPath:      h.podDirectory.StderrPath(),
-			ExitCodePath:    h.podDirectory.ExitCodePath(),
 			SysErrorPath:    h.podDirectory.SysErrorPath(),
 		},
 		InitContainers: initContainers,
@@ -345,14 +344,14 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 
 	sbatchScriptPath := h.podDirectory.SubmitJobPath()
 
-	sbatchScript := strings.Builder{}
+	sbatchScriptContent := strings.Builder{}
 
-	if err := sbatchTemplate.Execute(&sbatchScript, fields); err != nil {
+	if err := sbatchTemplate.Execute(&sbatchScriptContent, fields); err != nil {
 		/*-- since both the template and fields are internal to the code, the evaluation should always succeed	--*/
 		SystemError(err, "failed to evaluate sbatch template")
 	}
 
-	if err := os.WriteFile(sbatchScriptPath, []byte(sbatchScript.String()), compute.ContainerJobPermissions); err != nil {
+	if err := os.WriteFile(sbatchScriptPath, []byte(sbatchScriptContent.String()), compute.ContainerJobPermissions); err != nil {
 		SystemError(err, "unable to write sbatch sbatchScript in file '%s'", fields.VirtualEnv.ConstructorPath)
 	}
 
@@ -384,23 +383,28 @@ func (h *podHandler) buildContainer(container *corev1.Container) Container {
 	containerPath := h.podDirectory.Container(container.Name)
 
 	/*---------------------------------------------------
-	 * Prepare Environment Variables
+	 * Generate Environment Variables
 	 *---------------------------------------------------*/
 	envfilePath := containerPath.EnvFilePath()
+	envFileContent := strings.Builder{}
 
-	var envfile strings.Builder
-
-	/*-- Set pod-wide variables --*/
-	for _, envVar := range h.podEnvVariables {
-		envfile.WriteString(fmt.Sprintf("%s='%s'\n", envVar.Name, envVar.Value))
+	fields := GenerateEnvFields{
+		Variables: append(h.podEnvVariables, container.Env...),
 	}
 
-	/*-- Set container-specific variables --*/
-	for _, envVar := range container.Env {
-		envfile.WriteString(fmt.Sprintf("%s='%s'\n", envVar.Name, envVar.Value))
+	generateEnvTemplate, err := template.New(h.Name).
+		Funcs(sprig.FuncMap()).
+		Option("missingkey=error").Parse(GenerateEnvTemplate)
+	if err != nil {
+		SystemError(err, "generate env template error")
 	}
 
-	if err := os.WriteFile(envfilePath, []byte(envfile.String()), compute.PodGlobalDirectoryPermissions); err != nil {
+	if err := generateEnvTemplate.Execute(&envFileContent, fields); err != nil {
+		/*-- since both the template and fields are internal to the code, the evaluation should always succeed	--*/
+		SystemError(err, "failed to evaluate sbatch template")
+	}
+
+	if err := os.WriteFile(envfilePath, []byte(envFileContent.String()), compute.PodGlobalDirectoryPermissions); err != nil {
 		SystemError(err, "cannot write env file for container '%s' of pod '%s'", container, h.podKey)
 	}
 

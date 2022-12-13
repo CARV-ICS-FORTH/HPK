@@ -16,6 +16,7 @@ package slurm
 
 import (
 	"github.com/carv-ics-forth/hpk/compute"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -104,10 +105,14 @@ handle_init_containers() {
 {{- range $index, $container := .InitContainers}}
 	echo "[Virtual] Scheduling Init Container: {{$index}}"
 	
+	{{- if $container.EnvFilePath}}
+	sh -c {{$container.EnvFilePath}} > {{$container.EnvFilePath}}.tmp
+	{{- end}}
+
 	${apptainer} {{ $container.ApptainerMode }} --compat --no-mount tmp,home --userns \
 	--bind /scratch/hosts:/etc/hosts,{{join "," $container.Binds}} \ 
 	{{- if $container.EnvFilePath}}
-	--env-file {{$container.EnvFilePath}} \
+	--env-file {{$container.EnvFilePath}}.tmp \
 	{{- end}}
 	{{$container.Image}}
 	{{- if $container.Command}}{{range $index, $cmd := $container.Command}} '{{$cmd}}'{{end}}{{end -}}
@@ -124,10 +129,14 @@ handle_containers() {
 {{- range $index, $container := .Containers}}
 	echo "[Virtual] Scheduling Container: {{$container.InstanceName}}"
 
+	{{- if $container.EnvFilePath}}
+	sh -c {{$container.EnvFilePath}} > {{$container.EnvFilePath}}.tmp
+	{{- end}}
+
 	$(${apptainer} {{$container.ApptainerMode}} --compat --no-mount tmp,home --userns \
 	--bind /scratch/hosts:/etc/hosts,{{join "," $container.Binds}} \ 
 	{{- if $container.EnvFilePath}}
-	--env-file {{$container.EnvFilePath}} \
+	--env-file {{$container.EnvFilePath}}.tmp \
 	{{- end}}
 	{{$container.Image}}
 	{{- if $container.Command}}{{range $index, $cmd := $container.Command}} '{{$cmd}}'{{end}}{{end -}}
@@ -262,11 +271,8 @@ $(cat /dev/shm/signal_${PPID})
 #### END SECTION: Host Environment ####
 `
 
-// SbatchScriptFields container the supported fields for the submission template.
+// SbatchScriptFields provide the inputs to SbatchScriptTemplate.
 type SbatchScriptFields struct {
-	/*--
-		Mandatory Fields
-	--*/
 	Pod types.NamespacedName
 
 	// VirtualEnv is the equivalent of a Pod.
@@ -300,10 +306,6 @@ type VirtualEnvironmentPaths struct {
 
 	// StdoutPath instruct Slurm to write stderr into the specified path.
 	StderrPath string
-
-	// ExitCodePath points to the file where Slurm Job Exit Codeis written.
-	// This is used to know when the job has been completed.
-	ExitCodePath string
 
 	// SysErrorPath indicate a system failure that cause the Pod to fail Immediately, bypassing any other checks.
 	SysErrorPath string
@@ -354,4 +356,23 @@ type RequestOptions struct {
 
 	// CustomFlags are sbatch that are directly given by the end-user.
 	CustomFlags []string
+}
+
+// GenerateEnvTemplate is used to generate environment variables.
+// This is needed for variables that consume information from the downward API (like .status.podIP)
+const GenerateEnvTemplate = `
+{{- range $index, $variable := .Variables}}
+
+{{- if eq $variable.Value ".status.podIP"}}
+echo {{$variable.Name}}=$(ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p')
+{{ else }}
+echo {{$variable.Name}}='{{$variable.Value}}'
+{{- end}}
+
+{{- end}}
+`
+
+// GenerateEnvFields provide the inputs to GenerateEnvTemplate.
+type GenerateEnvFields = struct {
+	Variables []corev1.EnvVar
 }

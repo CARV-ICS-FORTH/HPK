@@ -130,7 +130,6 @@ func TestSBatch(t *testing.T) {
 					JobIDPath:       podDir.IDPath(),
 					StdoutPath:      podDir.StdoutPath(),
 					StderrPath:      podDir.StderrPath(),
-					ExitCodePath:    podDir.ExitCodePath(),
 				},
 				Options: slurm.RequestOptions{},
 				InitContainers: func() (containers []slurm.Container) {

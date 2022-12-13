@@ -18,19 +18,17 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"net/http"
 	"net/url"
 	"time"
 
 	"github.com/carv-ics-forth/hpk/cmd/hpk/commands"
 	"github.com/carv-ics-forth/hpk/compute"
-	"github.com/carv-ics-forth/hpk/pkg/resourcemanager"
 	"github.com/hashicorp/go-multierror"
 	"github.com/sirupsen/logrus"
-	"github.com/virtual-kubelet/virtual-kubelet/node/api"
+	vklog "github.com/virtual-kubelet/virtual-kubelet/log"
+	"github.com/virtual-kubelet/virtual-kubelet/log/klogv2"
 	"golang.org/x/time/rate"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
@@ -45,7 +43,6 @@ import (
 	"github.com/virtual-kubelet/virtual-kubelet/node"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	kubeinformers "k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -112,6 +109,11 @@ var DefaultLogger = zap.New(zap.UseDevMode(true))
 
 // https://medium.com/microsoftazure/virtual-kubelet-turns-1-0-deep-dive-b64056061b18
 func runRootCommand(ctx context.Context, c Opts) error {
+	/*--
+	Don't ask .... Just believe that this is the only way to dump logs from the virtual kubelet to the terminal
+	*/
+	vklog.L = klogv2.New(vklog.Fields{})
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -185,48 +187,10 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	/*---------------------------------------------------
 	 * Create Informers for Kubernetes CRDs
 	 *---------------------------------------------------*/
-	DefaultLogger.Info("* Starting Kubernetes Informers ...")
-
-	// Create a shared informer factory for Kubernetes Pods assigned to this Node.
-	podInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(
-		k8sclientset,
-		c.InformerResyncPeriod,
-		kubeinformers.WithTweakListOptions(func(options *metav1.ListOptions) {
-			options.FieldSelector = fields.OneTermEqualSelector("spec.nodeName", c.NodeName).String()
-		}),
-	)
-	podInformer := podInformerFactory.Core().V1().Pods()
-
-	// Create another shared informer factory for Kubernetes secrets and configmaps (not subject to any selectors).
-	informerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(k8sclientset, c.InformerResyncPeriod)
-	secretInformer := informerFactory.Core().V1().Secrets()
-	configMapInformer := informerFactory.Core().V1().ConfigMaps()
-	serviceInformer := informerFactory.Core().V1().Services()
-	serviceAccountInformer := informerFactory.Core().V1().ServiceAccounts()
-
-	// Setup the known Pods related resources manager.
-	if _, err := resourcemanager.NewResourceManager(
-		podInformer.Lister(),
-		secretInformer.Lister(),
-		configMapInformer.Lister(),
-		serviceInformer.Lister(),
-		serviceAccountInformer.Lister(),
-	); err != nil {
-		return errors.Wrap(err, "could not create resource manager")
+	podInformer, secretInformer, configMapInformer, serviceInformer, err := AddInformers(ctx, c, k8sclientset)
+	if err != nil {
+		return errors.Wrapf(err, "failed to add informers")
 	}
-
-	// Finally, start the informers.
-	podInformerFactory.Start(ctx.Done())
-	podInformerFactory.WaitForCacheSync(ctx.Done())
-
-	informerFactory.Start(ctx.Done())
-	informerFactory.WaitForCacheSync(ctx.Done())
-
-	DefaultLogger.Info("Informers are ready",
-		"namespace", c.KubeNamespace,
-		"crds", []string{
-			"pods", "secrets", "configMap", "service", "serviceAccount",
-		})
 
 	/*---------------------------------------------------
 	 * Register the Provisioner of Virtual Nodes
@@ -243,51 +207,12 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		return err
 	}
 
+	AddWebhook(c, virtualk8s)
+
 	DefaultLogger.Info("Virtual Node Provisioner is ready",
 		"internalIP", virtualk8s.InternalIP,
 		"daemonPort", virtualk8s.DaemonPort,
 	)
-
-	/*---------------------------------------------------
-	 * Start an HTTPs server for serving metrics/logs
-	 *---------------------------------------------------*/
-	DefaultLogger.Info("* Initializing HTTP(s) server ...")
-	{
-		mux := http.NewServeMux()
-
-		api.AttachPodRoutes(api.PodHandlerConfig{
-			RunInContainer:   virtualk8s.RunInContainer,
-			GetContainerLogs: virtualk8s.GetContainerLogs,
-			GetPods:          virtualk8s.GetPods,
-			// GetPodsFromKubernetes: func(context.Context) ([]*corev1.Pod, error) {
-			//	return k8sclientset.CoreV1().Pods(c.KubeNamespace).List(ctx, labels.Everything())
-			// },
-			// GetStatsSummary:       virtualk8s.GetStatsSummary,
-			// StreamIdleTimeout:     0,
-			// StreamCreationTimeout: 0,
-		}, mux, true)
-
-		allAddr := fmt.Sprintf(":%d", c.KubeletPort)
-		advertisedAddr := fmt.Sprintf("%s:%d", c.KubeletAddress, c.KubeletPort)
-
-		go func() {
-			if err := http.ListenAndServeTLS(
-				allAddr,
-				c.K8sAPICertFilepath,
-				c.K8sAPIKeyFilepath,
-				mux,
-			); err != nil && !errors.Is(err, context.Canceled) {
-				logrus.Fatal("API Server has failed. Err:", err)
-				// handle error
-			}
-		}()
-
-		DefaultLogger.Info("HTTP(s) server is ready",
-			"address", advertisedAddr,
-			"cert", c.K8sAPICertFilepath,
-			"key", c.K8sAPIKeyFilepath,
-		)
-	}
 
 	/*---------------------------------------------------
 	 * Create Pod Controller
