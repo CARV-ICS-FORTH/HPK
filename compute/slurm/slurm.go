@@ -177,7 +177,7 @@ func (h *EventHandler) Run(ctx context.Context, notifyVirtualKubelet func(pod *c
 				case event := <-h.Queue:
 					podkey, file, invalid := compute.ParsePath(event.Name)
 					if invalid {
-						compute.DefaultLogger.Info("SLURM: omit unexpected event", "event", event.Name)
+						compute.DefaultLogger.Info("SLURM: omit unexpected event", "op", event.Op, "event", event.Name)
 						continue
 					}
 
@@ -225,11 +225,11 @@ func (h *EventHandler) Run(ctx context.Context, notifyVirtualKubelet func(pod *c
 
 					case compute.ExtensionJobID:
 						/*-- Container Started --*/
-						logger.Info("SLURM: Job Has Started", "op", event.Op, "file", file)
+						logger.Info("SLURM: Container Started", "op", event.Op, "file", file)
 
 					case compute.ExtensionExitCode:
 						/*-- Container Terminated --*/
-						logger.Info("SLURM: Job Is Complete", "op", event.Op, "file", file)
+						logger.Info("SLURM: Container Terminated", "op", event.Op, "file", file)
 
 					default:
 						/*-- Any other file gnored --*/

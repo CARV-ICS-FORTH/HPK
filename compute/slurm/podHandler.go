@@ -108,39 +108,6 @@ func WalkPodDirectories(f compute.WalkPodFunc) error {
 }
 
 /*
-func GetPods() ([]*corev1.Pod, error) {
-	var pods []*corev1.Pod
-	var merr *multierror.Error
-
-	/*---------------------------------------------------
-	 * Iterate the filesystem and extract local pods
-	 *---------------------------------------------------* /
-	filepath.Walk(compute.RuntimeDir, func(path string, info os.FileInfo, err error) error {
-		encodedPod, err := os.ReadFile(path)
-		if err != nil {
-			merr = multierror.Append(merr, errors.Wrapf(err, "cannot read pod description file '%s'", path))
-		}
-
-		var pod corev1.Pod
-
-		if err := json.Unmarshal(encodedPod, &pod); err != nil {
-			merr = multierror.Append(merr, errors.Wrapf(err, "cannot decode pod description file '%s'", path))
-		}
-
-		/*-- return only the pods that are known to be running --* /
-		if pod.Status.Phase == corev1.PodRunning {
-			pods = append(pods, &pod)
-		}
-
-		return nil
-	})
-
-	return pods, merr.ErrorOrNil()
-}
-
-*/
-
-/*
 DeletePod takes a Pod Reference and deletes the Pod from the provider.
 DeletePod may be called multiple times for the same pod.
 
@@ -218,53 +185,33 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	}
 
 	/*---------------------------------------------------
-	 * Create the shared directory of Virtual Environment
+	 * Create the Pod directory and Pod Handlers
 	 *---------------------------------------------------*/
+	logger.Info(" * Creating Host Directory and Pod Handler")
+
 	virtualEnvironmentDir := compute.PodRuntimeDir(podKey).VirtualEnvironmentDir()
 
 	if err := os.MkdirAll(string(virtualEnvironmentDir), compute.PodGlobalDirectoryPermissions); err != nil {
-		SystemError(err, "Cant create sbatch directory '%s'", virtualEnvironmentDir)
+		SystemError(err, "Cant create pod directory '%s'", virtualEnvironmentDir)
 	}
 
-	/*---------------------------------------------------
-	 * Setting a list of Services the pod should see
-	 *---------------------------------------------------*/
-
-	/*
-		podEnvVariables, err := getServiceEnvVarMap(ctx, pod.GetNamespace())
-		if err != nil {
-			SystemError(err, "Cant create environment variables")
-		}
-
-	*/
-	podEnvVariables := FromServices(ctx, pod.GetNamespace())
-
-	/*---------------------------------------------------
-	 * Set tha Pod Handler
-	 *---------------------------------------------------*/
 	h := podHandler{
-		Pod:             pod,
-		podKey:          podKey,
-		podDirectory:    compute.PodRuntimeDir(podKey),
-		podEnvVariables: podEnvVariables,
-		logger:          logger,
+		Pod:          pod,
+		podKey:       podKey,
+		podDirectory: compute.PodRuntimeDir(podKey),
+		logger:       logger,
 	}
 
-	/*-- Kind of Journaling --*/
-	// SavePod(ctx, pod)
-
 	/*---------------------------------------------------
-	 * Prepare Volumes on the Pod
+	 * Prepare the Pod environment
 	 *---------------------------------------------------*/
-	logger.Info(" * Creating Backend Volumes")
+	logger.Info(" * Creating Environment Variables")
+	h.podEnvVariables = FromServices(ctx, pod.GetNamespace())
 
+	logger.Info(" * Mounting Volumes")
 	h.prepareVolumes(ctx)
 
-	/*---------------------------------------------------
-	 * Set listeners for async changes on the Pod
-	 *---------------------------------------------------*/
-	logger.Info(" * Setting Filesystem Notifiers")
-
+	logger.Info(" * Listening for async changes on host directory")
 	// because fswatch does not work recursively, we cannot have the container directories nested within the pod.
 	// instead, we use a flat directory in the format "podir/containername.{jid,stdout,stdour,...}"
 	if err := watcher.Add(string(h.podDirectory)); err != nil {
@@ -272,7 +219,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	}
 
 	/*---------------------------------------------------
-	 * Build Container Commands for Init Containers
+	 * Build Container Commands
 	 *---------------------------------------------------*/
 	var initContainers []Container
 
@@ -280,9 +227,6 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 		initContainers = append(initContainers, h.buildContainer(&pod.Spec.InitContainers[i]))
 	}
 
-	/*---------------------------------------------------
-	 * Build Container Commands for Containers
-	 *---------------------------------------------------*/
 	var containers []Container
 
 	for i := range pod.Spec.Containers {
@@ -292,15 +236,24 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	/*---------------------------------------------------
 	 * Prepare Fields for Sbatch Templates
 	 *---------------------------------------------------*/
-	logger.Info(" * Setting Fields for Sbatch Template")
+	logger.Info(" * Preparing job submission script")
 
-	/*-- Set HPK-defined fields for Sbatch Template --*/
-	fields := SbatchScriptFields{
+	scriptFilePath := h.podDirectory.SubmitJobPath()
+	scriptFileContent := strings.Builder{}
+
+	scriptTemplate, err := template.New(h.Name).
+		Funcs(sprig.FuncMap()).
+		Option("missingkey=error").Parse(SbatchScriptTemplate)
+	if err != nil {
+		/*-- template errors should be expected from the custom fields where users can inject shitty input.	--*/
+		SystemError(err, "sbatch template error")
+	}
+
+	if err := scriptTemplate.Execute(&scriptFileContent, SbatchScriptFields{
 		Pod:        h.podKey,
 		ComputeEnv: compute.Environment,
 		VirtualEnv: VirtualEnvironmentPaths{
 			ConstructorPath: h.podDirectory.ConstructorPath(),
-			JobIDPath:       h.podDirectory.IDPath(),
 			IPAddressPath:   h.podDirectory.IPAddressPath(),
 			StdoutPath:      h.podDirectory.StdoutPath(),
 			StderrPath:      h.podDirectory.StderrPath(),
@@ -309,50 +262,13 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 		InitContainers: initContainers,
 		Containers:     containers,
 		Options:        RequestOptions{},
-	}
-
-	/*-- Set user-defined sbatch flags (e.g, From Argo) --*/
-	if slurmFlags, ok := h.Pod.GetAnnotations()["slurm-job/flags"]; ok {
-		for _, slurmFlag := range strings.Split(slurmFlags, " ") {
-			fields.Options.CustomFlags = append(fields.Options.CustomFlags,
-				"\n#SBATCH "+slurmFlag)
-		}
-	}
-
-	// append mpi-flags to Container
-	/*
-		if mpiFlags, ok := h.Pod.GetAnnotations()["slurm-job/mpi-flags"]; ok {
-			if mpiFlags != "true" {
-				mpi := append([]string{Executables.MpiexecPath(), "-np", "$SLURM_NTASKS"}, strings.Split(mpiFlags, " ")...)
-				singularityCommand = append(mpi, singularityCommand...)
-			}
-		}
-	*/
-
-	sbatchTemplate, err := template.New(h.Name).
-		Funcs(sprig.FuncMap()).
-		Option("missingkey=error").Parse(SbatchScriptTemplate)
-	if err != nil {
-		/*-- template errors should be expected from the custom fields where users can inject shitty input.	--*/
-		SystemError(err, "sbatch template error")
-	}
-
-	/*---------------------------------------------------
-	 * Generate Pod sbatchScript from Sbatch SubmitTemplate + Fields
-	 *---------------------------------------------------*/
-	logger.Info(" * Generating Sbatch script")
-
-	sbatchScriptPath := h.podDirectory.SubmitJobPath()
-
-	sbatchScriptContent := strings.Builder{}
-
-	if err := sbatchTemplate.Execute(&sbatchScriptContent, fields); err != nil {
+	}); err != nil {
 		/*-- since both the template and fields are internal to the code, the evaluation should always succeed	--*/
 		SystemError(err, "failed to evaluate sbatch template")
 	}
 
-	if err := os.WriteFile(sbatchScriptPath, []byte(sbatchScriptContent.String()), compute.ContainerJobPermissions); err != nil {
-		SystemError(err, "unable to write sbatch sbatchScript in file '%s'", fields.VirtualEnv.ConstructorPath)
+	if err := os.WriteFile(scriptFilePath, []byte(scriptFileContent.String()), compute.ContainerJobPermissions); err != nil {
+		SystemError(err, "unable to write sbatch script in file '%s'", scriptFilePath)
 	}
 
 	/*---------------------------------------------------
@@ -360,7 +276,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	 *---------------------------------------------------*/
 	logger.Info(" * Submitting sbatch to Slurm")
 
-	jobID, err := SubmitJob(sbatchScriptPath)
+	jobID, err := SubmitJob(scriptFilePath)
 	if err != nil {
 		SystemError(err, "failed to submit job")
 	}
@@ -388,18 +304,16 @@ func (h *podHandler) buildContainer(container *corev1.Container) Container {
 	envfilePath := containerPath.EnvFilePath()
 	envFileContent := strings.Builder{}
 
-	fields := GenerateEnvFields{
-		Variables: append(h.podEnvVariables, container.Env...),
-	}
-
-	generateEnvTemplate, err := template.New(h.Name).
+	envFileTemplate, err := template.New(h.Name).
 		Funcs(sprig.FuncMap()).
 		Option("missingkey=error").Parse(GenerateEnvTemplate)
 	if err != nil {
 		SystemError(err, "generate env template error")
 	}
 
-	if err := generateEnvTemplate.Execute(&envFileContent, fields); err != nil {
+	if err := envFileTemplate.Execute(&envFileContent, GenerateEnvFields{
+		Variables: append(h.podEnvVariables, container.Env...),
+	}); err != nil {
 		/*-- since both the template and fields are internal to the code, the evaluation should always succeed	--*/
 		SystemError(err, "failed to evaluate sbatch template")
 	}
