@@ -106,13 +106,13 @@ handle_init_containers() {
 	echo "[Virtual] Scheduling Init Container: {{$index}}"
 	
 	{{- if $container.EnvFilePath}}
-	sh -c {{$container.EnvFilePath}} > {{$container.EnvFilePath}}.tmp
+	sh -c {{$container.EnvFilePath}} > /scratch/{{$container.InstanceName}}.env
 	{{- end}}
 
 	${apptainer} {{ $container.ApptainerMode }} --compat --no-mount tmp,home --userns \
 	--bind /scratch/hosts:/etc/hosts,{{join "," $container.Binds}} \ 
 	{{- if $container.EnvFilePath}}
-	--env-file {{$container.EnvFilePath}}.tmp \
+	--env-file /scratch/{{$container.InstanceName}}.env \
 	{{- end}}
 	{{$container.Image}}
 	{{- if $container.Command}}{{range $index, $cmd := $container.Command}} '{{$cmd}}'{{end}}{{end -}}
@@ -130,13 +130,13 @@ handle_containers() {
 	echo "[Virtual] Scheduling Container: {{$container.InstanceName}}"
 
 	{{- if $container.EnvFilePath}}
-	sh -c {{$container.EnvFilePath}} > {{$container.EnvFilePath}}.tmp
+	sh -c {{$container.EnvFilePath}} > /scratch/{{$container.InstanceName}}.env
 	{{- end}}
 
 	$(${apptainer} {{$container.ApptainerMode}} --compat --no-mount tmp,home --userns \
 	--bind /scratch/hosts:/etc/hosts,{{join "," $container.Binds}} \ 
 	{{- if $container.EnvFilePath}}
-	--env-file {{$container.EnvFilePath}}.tmp \
+	--env-file /scratch/{{$container.InstanceName}}.env \
 	{{- end}}
 	{{$container.Image}}
 	{{- if $container.Command}}{{range $index, $cmd := $container.Command}} '{{$cmd}}'{{end}}{{end -}}
@@ -297,10 +297,6 @@ type VirtualEnvironmentPaths struct {
 	// IPAddressPath is where we store the internal Pod's ip.
 	IPAddressPath string
 
-	// JobIDPath points to the file where Slurm Job ID is written.
-	// This is used to know when the job has been started.
-	JobIDPath string
-
 	// StdoutPath instruct Slurm to write stdout into the specified path.
 	StdoutPath string
 
@@ -360,15 +356,14 @@ type RequestOptions struct {
 
 // GenerateEnvTemplate is used to generate environment variables.
 // This is needed for variables that consume information from the downward API (like .status.podIP)
-const GenerateEnvTemplate = `
-{{- range $index, $variable := .Variables}}
+const GenerateEnvTemplate = `#!/bin/bash
 
+{{- range $index, $variable := .Variables}}
 {{- if eq $variable.Value ".status.podIP"}}
 echo {{$variable.Name}}=$(ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p')
 {{ else }}
-echo {{$variable.Name}}='{{$variable.Value}}'
+echo {{$variable.Name}}=\''{{$variable.Value}}'\'
 {{- end}}
-
 {{- end}}
 `
 

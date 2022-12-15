@@ -19,6 +19,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/pkg/fieldpath"
@@ -27,7 +28,19 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8errors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 )
+
+// NotFoundBackoff is the recommended backoff for a resource that is required,
+// but is not created yet. For instance, when mounting configmap volumes to pods.
+// TODO: in future version, the backoff can be self-modified depending on the load of the controller.
+var NotFoundBackoff = wait.Backoff{
+	Steps:    4,
+	Duration: 2 * time.Second,
+	Factor:   5.0,
+	Jitter:   0.1,
+}
 
 func (h *podHandler) prepareVolumes(ctx context.Context) {
 	/*---------------------------------------------------
@@ -99,35 +112,46 @@ func (h *podHandler) ConfigMapVolumeSource(ctx context.Context, vol corev1.Volum
 			 name: game-config
 	 *---------------------------------------------------*/
 
-	var configMap corev1.ConfigMap
+	var configmap corev1.ConfigMap
 
 	source := vol.VolumeSource.ConfigMap
 
 	key := types.NamespacedName{Namespace: h.Pod.GetNamespace(), Name: source.Name}
 
-	if err := compute.K8SClient.Get(ctx, key, &configMap); k8errors.IsNotFound(err) {
-		if source.Optional != nil && *source.Optional == false {
-			PodError(h.Pod, ReasonObjectNotFound, "configMap '%s'", key)
-		}
+	{ // get the resource
+		err := retry.OnError(NotFoundBackoff, k8errors.IsNotFound,
+			func() error {
+				return compute.K8SClient.Get(ctx, key, &configmap)
+			})
 
-		/*-- configMap is optional, and we can safely skip the step --*/
-		return
-	} else if err != nil {
-		SystemError(err, "error getting configMap '%s'", key)
+		if err != nil {
+			if k8errors.IsNotFound(err) {
+				h.logger.Error(err, "MountVolume has failed for configmap")
+
+				if source.Optional == nil || *source.Optional == true {
+					PodError(h.Pod, ReasonObjectNotFound, "configmap '%s'", key)
+
+					return
+				}
+				/*-- configmap is optional, and we can safely skip the step --*/
+			} else {
+				SystemError(err, "error getting configmap '%s'", key)
+			}
+		}
 	}
 
-	// .hpk/namespace/podName/volName/*
+	// .hpk/namespace/podName/.virtualenv/volName/*
 	podConfigMapDir, err := h.podDirectory.CreateSubDirectory(vol.Name)
 	if err != nil {
-		SystemError(err, "cannot create dir '%s' for configMap", podConfigMapDir)
+		SystemError(err, "cannot create dir '%s' for configmap", podConfigMapDir)
 	}
 
-	for k, v := range configMap.Data {
+	for k, v := range configmap.Data {
 		// TODO: Ensure that these files are deleted in failure cases
 		fullPath := filepath.Join(podConfigMapDir, k)
 
 		if err := os.WriteFile(fullPath, []byte(v), fs.FileMode(*source.DefaultMode)); err != nil {
-			SystemError(err, "cannot write config map file '%s'", fullPath)
+			SystemError(err, "cannot write configmap file '%s'", fullPath)
 		}
 	}
 }
@@ -139,18 +163,29 @@ func (h *podHandler) SecretVolumeSource(ctx context.Context, vol corev1.Volume) 
 
 	key := types.NamespacedName{Namespace: h.Pod.GetNamespace(), Name: source.SecretName}
 
-	if err := compute.K8SClient.Get(ctx, key, &secret); k8errors.IsNotFound(err) {
-		if source.Optional != nil && *source.Optional == false {
-			PodError(h.Pod, ReasonObjectNotFound, "secret '%s'", key)
-		}
+	{ // get the resource
+		err := retry.OnError(NotFoundBackoff, k8errors.IsNotFound,
+			func() error {
+				return compute.K8SClient.Get(ctx, key, &secret)
+			})
 
-		/*-- secret is optional, and we can safely skip the step --*/
-		return
-	} else if err != nil {
-		SystemError(err, "error getting secret '%s'", key)
+		if err != nil {
+			if k8errors.IsNotFound(err) {
+				h.logger.Error(err, "MountVolume has failed for secret")
+
+				if source.Optional == nil || *source.Optional == true {
+					PodError(h.Pod, ReasonObjectNotFound, "secret '%s'", key)
+
+					return
+				}
+				/*-- secret is optional, and we can safely skip the step --*/
+			} else {
+				SystemError(err, "error getting secret '%s'", key)
+			}
+		}
 	}
 
-	// .hpk/namespace/podName/secretName/*
+	// .hpk/namespace/podName/.virtualenv/secretName/*
 	podSecretDir, err := h.podDirectory.CreateSubDirectory(vol.Name)
 	if err != nil {
 		SystemError(err, "cannot create dir '%s' for secrets", podSecretDir)
@@ -279,7 +314,10 @@ func (h *podHandler) PersistentVolumeClaimSource(ctx context.Context, vol corev1
 
 	key := types.NamespacedName{Namespace: h.Pod.GetNamespace(), Name: source.ClaimName}
 
-	if err := compute.K8SClient.Get(ctx, key, &pvc); err != nil {
+	if err := retry.OnError(NotFoundBackoff, k8errors.IsNotFound,
+		func() error {
+			return compute.K8SClient.Get(ctx, key, &pvc)
+		}); err != nil {
 		SystemError(err, "error getting persistentVolumeClaim '%s'", key)
 	}
 
@@ -324,8 +362,11 @@ func (h *podHandler) ProjectedVolumeSource(ctx context.Context, vol corev1.Volum
 
 			key := types.NamespacedName{Namespace: h.Pod.GetNamespace(), Name: h.Pod.Spec.ServiceAccountName}
 
-			if err := compute.K8SClient.Get(ctx, key, &serviceAccount); err != nil {
-				SystemError(err, "error getting ServiceAccount '%s'", key)
+			if err := retry.OnError(NotFoundBackoff, k8errors.IsNotFound,
+				func() error {
+					return compute.K8SClient.Get(ctx, key, &serviceAccount)
+				}); err != nil {
+				SystemError(err, "error getting serviceaccount '%s'", key)
 			}
 
 			/*
@@ -342,27 +383,27 @@ func (h *podHandler) ProjectedVolumeSource(ctx context.Context, vol corev1.Volum
 				automount = *serviceAccount.AutomountServiceAccountToken
 			}
 
-			if automount {
-				for _, secretRef := range serviceAccount.Secrets {
-					var secret corev1.Secret
+			if !automount {
+				continue
+			}
 
-					secretKey := types.NamespacedName{Namespace: h.Pod.GetNamespace(), Name: secretRef.Name}
+			for _, secretRef := range serviceAccount.Secrets {
+				var secret corev1.Secret
 
-					if err := compute.K8SClient.Get(ctx, secretKey, &secret); k8errors.IsNotFound(err) {
-						PodError(h.Pod, ReasonObjectNotFound, "secret '%s'", secretKey)
+				secretKey := types.NamespacedName{Namespace: h.Pod.GetNamespace(), Name: secretRef.Name}
 
-						return
-					} else if err != nil {
-						SystemError(err, "error getting secret '%s'", secretKey)
-					}
+				if err := retry.OnError(NotFoundBackoff, k8errors.IsNotFound,
+					func() error {
+						return compute.K8SClient.Get(ctx, secretKey, &secret)
+					}); err != nil {
+					SystemError(err, "error getting projected.secret '%s'", key)
+				}
 
-					// TODO: Update upon exceeded expiration date
-					// TODO: Ensure that these files are deleted in failure cases
-					fullPath := filepath.Join(projectedVolPath, projectedSrc.ServiceAccountToken.Path)
+				// TODO: Update upon exceeded expiration date
+				fullPath := filepath.Join(projectedVolPath, projectedSrc.ServiceAccountToken.Path)
 
-					if err := os.WriteFile(fullPath, secret.Data[projectedSrc.ServiceAccountToken.Path], fs.FileMode(0o766)); err != nil {
-						SystemError(err, "cannot write token '%s'", fullPath)
-					}
+				if err := os.WriteFile(fullPath, secret.Data[projectedSrc.ServiceAccountToken.Path], fs.FileMode(0o766)); err != nil {
+					SystemError(err, "cannot write token '%s'", fullPath)
 				}
 			}
 
@@ -436,15 +477,26 @@ func (h *podHandler) ProjectedVolumeSource(ctx context.Context, vol corev1.Volum
 
 			key := types.NamespacedName{Namespace: h.Pod.GetNamespace(), Name: source.Name}
 
-			if err := compute.K8SClient.Get(ctx, key, &configmap); k8errors.IsNotFound(err) {
-				if source.Optional != nil && *source.Optional == false {
-					PodError(h.Pod, ReasonObjectNotFound, "configmap '%s'", key)
-				}
+			{ // get the resource
+				err := retry.OnError(NotFoundBackoff, k8errors.IsNotFound,
+					func() error {
+						return compute.K8SClient.Get(ctx, key, &configmap)
+					})
 
-				/*-- configmap is optional, and we can safely skip the step --*/
-				return
-			} else if err != nil {
-				SystemError(err, "error getting configmap '%s'", key)
+				if err != nil {
+					if k8errors.IsNotFound(err) {
+						h.logger.Error(err, "MountVolume has failed for projected.configmap")
+
+						if source.Optional == nil || *source.Optional == true {
+							PodError(h.Pod, ReasonObjectNotFound, "configmap '%s'", key)
+
+							return
+						}
+						/*-- configmap is optional, and we can safely skip the step --*/
+					} else {
+						SystemError(err, "error getting configmap '%s'", key)
+					}
+				}
 			}
 
 			for k, item := range configmap.Data {
@@ -465,15 +517,26 @@ func (h *podHandler) ProjectedVolumeSource(ctx context.Context, vol corev1.Volum
 
 			key := types.NamespacedName{Namespace: h.Pod.GetNamespace(), Name: source.Name}
 
-			if err := compute.K8SClient.Get(ctx, key, &secret); k8errors.IsNotFound(err) {
-				if source.Optional != nil && *source.Optional == false {
-					PodError(h.Pod, ReasonObjectNotFound, "secret '%s'", key)
-				}
+			{ // get the resource
+				err := retry.OnError(NotFoundBackoff, k8errors.IsNotFound,
+					func() error {
+						return compute.K8SClient.Get(ctx, key, &secret)
+					})
 
-				/*-- secret is optional, and we can safely skip the step --*/
-				return
-			} else if err != nil {
-				SystemError(err, "error getting secret '%s'", key)
+				if err != nil {
+					if k8errors.IsNotFound(err) {
+						h.logger.Error(err, "MountVolume has failed for projected.secret")
+
+						if source.Optional == nil || *source.Optional == true {
+							PodError(h.Pod, ReasonObjectNotFound, "secret '%s'", key)
+
+							return
+						}
+						/*-- secret is optional, and we can safely skip the step --*/
+					} else {
+						SystemError(err, "error getting secret '%s'", key)
+					}
+				}
 			}
 
 			for k, item := range secret.Data {

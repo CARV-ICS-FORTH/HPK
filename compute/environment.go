@@ -65,7 +65,7 @@ const (
 
 	// Container-Related Extensions
 	ExtensionExitCode    = ".exitCode"
-	ExtensionJobID       = ".jid"
+	ExtensionJobID       = ".jobid"
 	ExtensionEnvironment = ".env"
 	ExtensionLogs        = ".logs"
 )
@@ -92,11 +92,6 @@ func PodRuntimeDir(podRef client.ObjectKey) PodPath {
 // SysErrorPath .hpk/namespace/podName/.syserror
 func (p PodPath) SysErrorPath() string {
 	return filepath.Join(string(p), ExtensionSysError)
-}
-
-// IDPath .hpk/namespace/podName/.jid
-func (p PodPath) IDPath() string {
-	return filepath.Join(string(p), ExtensionJobID)
 }
 
 // IPAddressPath .hpk/namespace/podName/.ip
