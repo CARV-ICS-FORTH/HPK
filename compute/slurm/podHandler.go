@@ -40,6 +40,11 @@ type podHandler struct {
 	podEnvVariables []corev1.EnvVar
 	podDirectory    compute.PodPath
 
+	// podMountSymlinks is used to bypass the default mounting behavior.
+	// instead of mounting directory from the podDirectory/volname:/containerpath,
+	// this will mount hostpath/containerpath
+	podMountSymlinks map[string]string
+
 	logger logr.Logger
 }
 
@@ -196,10 +201,11 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	}
 
 	h := podHandler{
-		Pod:          pod,
-		podKey:       podKey,
-		podDirectory: compute.PodRuntimeDir(podKey),
-		logger:       logger,
+		Pod:              pod,
+		podKey:           podKey,
+		podDirectory:     compute.PodRuntimeDir(podKey),
+		podMountSymlinks: map[string]string{},
+		logger:           logger,
 	}
 
 	/*---------------------------------------------------
@@ -333,7 +339,17 @@ func (h *podHandler) buildContainer(container *corev1.Container) Container {
 			mountArgs := make([]string, 0, len(container.VolumeMounts))
 
 			for _, mountVar := range container.VolumeMounts {
-				mountArgs = append(mountArgs, h.podDirectory.Mountpaths(mountVar))
+				hostpath, isSymlink := h.podMountSymlinks[mountVar.Name]
+				if isSymlink {
+					h.logger.Info("Bind volume as symlink",
+						"host", hostpath,
+						"container", mountVar.MountPath,
+					)
+
+					mountArgs = append(mountArgs, hostpath+":"+mountVar.MountPath)
+				} else {
+					mountArgs = append(mountArgs, h.podDirectory.Mountpaths(mountVar))
+				}
 			}
 
 			return mountArgs

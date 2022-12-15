@@ -153,6 +153,16 @@ func (p PodPath) CreateSubDirectory(name string) (string, error) {
 	return fullPath, nil
 }
 
+func (p PodPath) CreateSymlink(name string, origpath string) (string, error) {
+	fullPath := filepath.Join(string(p.VirtualEnvironmentDir()), name)
+
+	if err := os.Symlink(origpath, fullPath); err != nil {
+		return fullPath, errors.Wrapf(err, "cannot create symlink '%s'", fullPath)
+	}
+
+	return fullPath, nil
+}
+
 func (p PodPath) CreateFile(name string) (string, error) {
 	fullPath := filepath.Join(string(p.VirtualEnvironmentDir()), name)
 
