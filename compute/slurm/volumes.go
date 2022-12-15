@@ -58,11 +58,19 @@ func (h *podHandler) prepareVolumes(ctx context.Context) {
 			}
 			// without size limit for now
 
+			h.logger.Info("EmptyDir Volume is mounted",
+				"name", vol.Name,
+			)
+
 		case vol.VolumeSource.ConfigMap != nil:
 			/*---------------------------------------------------
 			 * ConfigMap
 			 *---------------------------------------------------*/
 			h.ConfigMapVolumeSource(ctx, vol)
+
+			h.logger.Info("ConfigMap Volume is mounted",
+				"name", vol.Name,
+			)
 
 		case vol.VolumeSource.Secret != nil:
 			/*---------------------------------------------------
@@ -70,11 +78,19 @@ func (h *podHandler) prepareVolumes(ctx context.Context) {
 			 *---------------------------------------------------*/
 			h.SecretVolumeSource(ctx, vol)
 
+			h.logger.Info("Secret Volume is mounted",
+				"name", vol.Name,
+			)
+
 		case vol.VolumeSource.DownwardAPI != nil:
 			/*---------------------------------------------------
 			 * Downward API
 			 *---------------------------------------------------*/
 			h.DownwardAPIVolumeSource(ctx, vol)
+
+			h.logger.Info("DownwardAPI Volume is mounted",
+				"name", vol.Name,
+			)
 
 		case vol.VolumeSource.HostPath != nil:
 			/*---------------------------------------------------
@@ -82,17 +98,30 @@ func (h *podHandler) prepareVolumes(ctx context.Context) {
 			 *---------------------------------------------------*/
 			h.HostPathVolumeSource(ctx, vol)
 
+			h.logger.Info("HostPath Volume is mounted",
+				"name", vol.Name,
+			)
+
 		case vol.VolumeSource.PersistentVolumeClaim != nil:
 			/*---------------------------------------------------
 			 * Persistent Volume Claim
 			 *---------------------------------------------------*/
 			h.PersistentVolumeClaimSource(ctx, vol)
 
+			h.logger.Info("PersistentVolumeClaim Volume is mounted",
+				"name", vol.Name,
+			)
+
 		case vol.VolumeSource.Projected != nil:
 			/*---------------------------------------------------
 			 * Projected
 			 *---------------------------------------------------*/
 			h.ProjectedVolumeSource(ctx, vol)
+
+			h.logger.Info("Volume is mounted",
+				"name", vol.Name,
+				"type", "Projected",
+			)
 
 		default:
 			logrus.Warn(vol)
@@ -225,9 +254,16 @@ func (h *podHandler) HostPathVolumeSource(ctx context.Context, vol corev1.Volume
 	switch *vol.VolumeSource.HostPath.Type {
 	case corev1.HostPathUnset:
 		// For backwards compatible, leave it empty if unset
-		if path, err := h.podDirectory.CreateSubDirectory(vol.Name); err != nil {
-			SystemError(err, "cannot create HostPathUnset at path '%s'", path)
+		if path, err := h.podDirectory.CreateSymlink(vol.Name, vol.VolumeSource.HostPath.Path); err != nil {
+			SystemError(err, "cannot create HostPathDirectoryOrCreate at path '%s'", path)
 		}
+
+		h.podMountSymlinks[vol.Name] = vol.VolumeSource.HostPath.Path
+
+		h.logger.Info("Create Volume with Host Symlink",
+			"from ", vol.Name,
+			"to", vol.VolumeSource.HostPath.Path,
+		)
 
 	case corev1.HostPathDirectoryOrCreate:
 		// If nothing exists at the given path, an empty directory will be created there
@@ -237,7 +273,6 @@ func (h *podHandler) HostPathVolumeSource(ctx context.Context, vol corev1.Volume
 		}
 	case corev1.HostPathDirectory:
 		// A directory must exist at the given path
-
 		info, err := h.podDirectory.PathExists(vol.Name)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {

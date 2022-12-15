@@ -1,0 +1,87 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: build-run
+spec:
+  volumes:
+    - name: sourcecode-volume
+      hostPath:
+        path: /home/fnikol/examples/openmpi/sources
+    - name: binaries-volume
+      hostPath:
+        path: /home/fnikol/examples/openmpi/binaries
+
+  entrypoint: diamond
+  templates:
+    - name: diamond
+      dag:
+        tasks:
+          - name: A
+            template: builder
+          - name: B
+            depends: "A"
+            template: runner
+            arguments:
+              parameters: [{name: program, value: hello_c}]
+          - name: C
+            depends: "A"
+            template: runner
+            arguments:
+              parameters: [{name: program, value: hello_c}]
+          - name: D
+            depends: "B && C"
+            template: runner
+            arguments:
+              parameters: [{name: program, value: hello_c}]
+
+    - name: runner
+      inputs:
+        parameters:
+          - name: program
+      container:
+        image: icsforth/openmpi
+        volumeMounts:
+          - name: binaries-volume
+            mountPath: /binaries
+        command: [mpirun, "/binaries/{{inputs.parameters.program}}"]
+
+
+    - name: builder
+      container:
+        image: icsforth/openmpi
+        volumeMounts:
+          - name: sourcecode-volume
+            mountPath: /sourcecode
+
+          - name: binaries-volume
+            mountPath: /binaries
+        command:
+          - sh
+          - -c
+          - |
+            echo "== Build MPI Codes =="
+            ls /sourcecode
+            
+            mpicc -g  /sourcecode/hello_c.c  -o /binaries/hello_c
+            #mpicc -g  /sourcecode/ring_c.c  -o /binaries/ring_c
+            #mpicc -g  /sourcecode/connectivity_c.c  -o /binaries/connectivity_c
+            #mpicc -g  /sourcecode/spc_example.c  -o /binaries/spc_example
+            #mpic++ -g  /sourcecode/hello_cxx.cc  -o /binaries/hello_cxx
+            #mpic++ -g  /sourcecode/ring_cxx.cc  -o /binaries/ring_cxx
+            #mpifort -g  /sourcecode/hello_mpifh.f  -o /binaries/hello_mpifh
+            #mpifort -g  /sourcecode/ring_mpifh.f  -o /binaries/ring_mpifh
+            #mpifort -g  /sourcecode/hello_usempi.f90  -o /binaries/hello_usempi
+            #mpifort -g  /sourcecode/ring_usempi.f90  -o /binaries/ring_usempi
+            #mpifort -g  /sourcecode/hello_usempif08.f90  -o /binaries/hello_usempif08
+            #mpifort -g  /sourcecode/ring_usempif08.f90  -o /binaries/ring_usempif08
+            #shmemcc -g  /sourcecode/hello_oshmem_c.c  -o /binaries/hello_oshmem
+            #shmemc++ -g  /sourcecode/hello_oshmem_cxx.cc  -o /binaries/hello_oshmemcxx
+            #shmemcc -g  /sourcecode/ring_oshmem_c.c  -o /binaries/ring_oshmem
+            #shmemcc -g  /sourcecode/oshmem_shmalloc.c  -o /binaries/oshmem_shmalloc
+            #shmemcc -g  /sourcecode/oshmem_circular_shift.c  -o /binaries/oshmem_circular_shift
+            #shmemcc -g  /sourcecode/oshmem_max_reduction.c  -o /binaries/oshmem_max_reduction
+            #shmemcc -g  /sourcecode/oshmem_strided_puts.c  -o /binaries/oshmem_strided_puts
+            #shmemcc -g  /sourcecode/oshmem_strided_puts.c  -o /binaries/oshmem_strided_puts
+            #shmemcc -g  /sourcecode/oshmem_symmetric_data.c  -o /binaries/oshmem_symmetric_data
+            #shmemfort -g  /sourcecode/hello_oshmemfh.f90  -o /binaries/hello_oshmemfh
+            #shmemfort -g  /sourcecode/ring_oshmemfh.f90  -o /binaries/ring_oshmemfh
