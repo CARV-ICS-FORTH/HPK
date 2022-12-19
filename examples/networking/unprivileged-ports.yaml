@@ -1,0 +1,54 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: unprivileged-server-service
+  namespace: iperf
+spec:
+  selector:
+    app: unprivileged-server
+  ports:
+    - name: http
+      port: 5201
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: iperf
+  name: unprivileged-server
+  labels:
+    app: unprivileged-server
+spec:
+  restartPolicy: Never
+  containers:
+    - name: main
+      image: networkstatic/iperf3
+      ports:
+        - name: http
+          containerPort: 5201
+          protocol: TCP
+      command:
+        - sh
+        - -c
+        - |
+          iperf3 -s -p 5201
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: iperf
+  name: unprivileged-client
+spec:
+  restartPolicy: Never
+  containers:
+    - name: main
+      image: networkstatic/iperf3
+      command:
+        - sh
+        - -c
+        - |
+          # Delay waiting for server to become ready
+          sleep 20 
+          iperf3 -c unprivileged-server-service -p 5201

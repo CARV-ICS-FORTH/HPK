@@ -87,6 +87,8 @@ echo "$(hostname -I) $(hostname)" >> /scratch/hosts
 # If not removed, Flags will be consumed by the nested Apptainer and overwrite paths.
 # https://apptainer.org/user-docs/master/environment_and_metadata.html#environment-from-the-singularity-runtime
 unset_env() {
+    unset LD_LIBRARY_PATH
+
 	unset SINGULARITY_COMMAND
 	unset SINGULARITY_CONTAINER
 	unset SINGULARITY_ENVIRONMENT
@@ -109,6 +111,9 @@ handle_init_containers() {
 	sh -c {{$container.EnvFilePath}} > /scratch/{{$container.InstanceName}}.env
 	{{- end}}
 
+	# Mark the beginning of an init job (all get the shell's pid).  
+	echo pid://$$ > {{$container.JobIDPath}}
+
 	${apptainer} {{ $container.ApptainerMode }} --compat --no-mount tmp,home --userns \
 	--bind /scratch/hosts:/etc/hosts,{{join "," $container.Binds}} \ 
 	{{- if $container.EnvFilePath}}
@@ -117,9 +122,11 @@ handle_init_containers() {
 	{{$container.Image}}
 	{{- if $container.Command}}{{range $index, $cmd := $container.Command}} '{{$cmd}}'{{end}}{{end -}}
 	{{- if $container.Args}}{{range $index, $arg := $container.Args}} '{{$arg}}'{{end}}{{end -}} \
-	&>> {{$container.LogsPath}}; echo $? > {{$container.ExitCodePath}} &
+	&>> {{$container.LogsPath}}
 
-	echo pid://$! > {{$container.JobIDPath}}
+	# Mark the ending of an init job.
+	echo $? > {{$container.ExitCodePath}}
+
 {{end}}
 
 return 
@@ -133,8 +140,10 @@ handle_containers() {
 	sh -c {{$container.EnvFilePath}} > /scratch/{{$container.InstanceName}}.env
 	{{- end}}
 
+	mkdir -p /scratch/singularity.d_{{$container.InstanceName}}
+
 	$(${apptainer} {{$container.ApptainerMode}} --compat --no-mount tmp,home --userns \
-	--bind /scratch/hosts:/etc/hosts,{{join "," $container.Binds}} \ 
+	--bind /scratch/hosts:/etc/hosts,/scratch/singularity.d_{{$container.InstanceName}}:/.singularity.d,{{join "," $container.Binds}} \ 
 	{{- if $container.EnvFilePath}}
 	--env-file /scratch/{{$container.InstanceName}}.env \
 	{{- end}}
@@ -168,22 +177,19 @@ _teardown() {
 # echo an error message before exiting
 trap '_teardown "${BASH_COMMAND}" "$?"'  EXIT
 
-# Store IP
-echo $(hostname -I) > {{.VirtualEnv.IPAddressPath}}
-
 debug_info
 
 unset_env
 
 handle_dns
 
+# Network is ready
+echo $(hostname -I) > {{.VirtualEnv.IPAddressPath}}
+
 {{- if .InitContainers}}
 echo "[Virtual] Scheduling Init Containers ..."
 
 handle_init_containers
-
-echo "[Virtual] Waiting for init containers to complete"
-wait
 {{- end}}
 
 
