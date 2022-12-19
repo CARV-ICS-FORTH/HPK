@@ -6,28 +6,29 @@ helm install spark-operator spark-operator/spark-operator \
 --set enableWebhook=true
 
 cat <<EOF | kubectl apply -f -
-          apiVersion: "sparkoperator.k8s.io/v1beta2"
+---
+apiVersion: "sparkoperator.k8s.io/v1beta2"
 kind: SparkApplication
 metadata:
-name: spark-pi
-namespace: default
+    name: spark-pi
+    namespace: default
 spec:
-type: Scala
-mode: cluster
-image: "carvicsforth/spark:3.3.1"
-mainClass: org.apache.spark.examples.SparkPi
-mainApplicationFile: "local:///opt/spark/examples/jars/spark-examples_2.12-3.3.1.jar"
-sparkVersion: "3.3.1"
-restartPolicy:
-type: Never
-driver:
-serviceAccount: default
-labels:
-version: 3.3.1
-executor:
-instances: 2
-labels:
-version: 3.3.1
+    type: Scala
+    mode: cluster
+    image: "carvicsforth/spark:3.3.1"
+    mainClass: org.apache.spark.examples.SparkPi
+    mainApplicationFile: "local:///opt/spark/examples/jars/spark-examples_2.12-3.3.1.jar"
+    sparkVersion: "3.3.1"
+    restartPolicy:
+        type: Never
+    driver:
+        serviceAccount: default
+        labels:
+            version: 3.3.1
+    executor:
+        instances: 2
+        labels:
+            version: 3.3.1
 EOF
 ```
 

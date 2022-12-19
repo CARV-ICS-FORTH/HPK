@@ -139,12 +139,15 @@ func podStateMapper(pod *corev1.Pod) {
 	/*---------------------------------------------------
 	 * Check status of Init Containers
 	 *---------------------------------------------------*/
+	// https://kubernetes.io/docs/concepts/workloads/pods/init-containers/
+
+	/*-- A Pod that is initializing is in the Pending state --*/
 	if pod.Status.Phase == corev1.PodPending {
 		logger.Info(" * Checking Init Container Statuses")
 
 		for _, initContainer := range pod.Status.InitContainerStatuses {
 			if initContainer.State.Terminated == nil {
-				/*-- Initializing: at least one init container is still running --*/
+				/*-- Still Initializing: at least one init container is still running --*/
 				return
 			} else {
 				/*-- Initialization error: at least one init container has failed --*/
@@ -156,7 +159,7 @@ func podStateMapper(pod *corev1.Pod) {
 			}
 		}
 
-		/*-- Pod Successful Initialization: all init containers have completed successfully --*/
+		/*-- Pod is Ready: all init containers have completed successfully --*/
 		crdtools.SetPodStatusCondition(&pod.Status.Conditions, corev1.PodCondition{
 			Type:   corev1.PodInitialized,
 			Status: corev1.ConditionTrue,
@@ -165,6 +168,13 @@ func podStateMapper(pod *corev1.Pod) {
 			Reason:             "Initialized",
 			Message:            "all init containers in the pod have started successfully",
 		})
+
+		/*--
+			Set the transition between completion of init containers and starting of normal containers.
+			This transition may take arbitrary time, if for example we need to pull the container images.
+		--*/
+		pod.Status.Message = "Waiting"
+		pod.Status.Reason = "ContainerCreating"
 	}
 
 	/*---------------------------------------------------
@@ -228,6 +238,8 @@ func podStateMapper(pod *corev1.Pod) {
 			expression: state.NumRunningJobs()+state.NumSuccessfulJobs() == totalJobs,
 			change: func(status *corev1.PodStatus) {
 				status.Phase = corev1.PodRunning
+				status.Reason = "Running"
+				status.Message = "at least one pod is still running"
 
 				/*-- ContainersReady: all containers in the pod are ready. --*/
 				crdtools.SetPodStatusCondition(&pod.Status.Conditions, corev1.PodCondition{
@@ -256,6 +268,8 @@ func podStateMapper(pod *corev1.Pod) {
 			expression: state.NumPendingJobs() > 0,
 			change: func(status *corev1.PodStatus) {
 				status.Phase = corev1.PodPending
+				status.Reason = "InQueue"
+				status.Message = "some jobs are not yet created"
 			},
 		},
 
@@ -263,6 +277,8 @@ func podStateMapper(pod *corev1.Pod) {
 			expression: true,
 			change: func(status *corev1.PodStatus) {
 				status.Phase = corev1.PodFailed
+				status.Reason = "PodFailure"
+				status.Message = "Add some explanatory message here"
 			},
 		},
 	}

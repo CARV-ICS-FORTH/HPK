@@ -58,7 +58,7 @@ run-kubemaster: ## Run the Kubernetes Master
     --env K8SFS_MOCK_KUBELET=0 \
     --bind .k8sfs:/usr/local/etc \
     --bind .k8sfs/log:/var/log \
-    docker://chazapis/kubernetes-from-scratch:20221206
+    docker://chazapis/kubernetes-from-scratch:20221217
 
 
 run-kubelet: ## Run the the Kubernetes virtual kubelet
