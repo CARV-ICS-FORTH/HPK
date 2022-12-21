@@ -197,7 +197,8 @@ func (h *EventHandler) Run(ctx context.Context, notifyVirtualKubelet func(pod *c
 					/*---------------------------------------------------
 					 * Declare events that warrant Pod reconciliation
 					 *---------------------------------------------------*/
-					switch filepath.Ext(file) {
+					ext := filepath.Ext(file)
+					switch ext {
 					case compute.ExtensionSysError:
 						/*-- Sbatch failed. Pod should fail immediately without other checks --*/
 						logger.Info("SLURM -> Pod initialization error", "op", event.Op, "file", file)
@@ -245,6 +246,14 @@ func (h *EventHandler) Run(ctx context.Context, notifyVirtualKubelet func(pod *c
 					/*-- Load Pod from reference --*/
 					pod := LoadPod(podkey)
 					if pod == nil {
+						if ext == compute.ExtensionExitCode {
+							// Race conditions may between the deletion of a Terminating pod, and the creation
+							// of an exitcode for the containers within it.
+							logger.Info("Omit event due to conflicting exit and termination events")
+
+							continue
+						}
+
 						SystemError(errors.Errorf("pod '%s' does not exist", podkey), "ERR")
 					}
 

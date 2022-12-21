@@ -1,0 +1,45 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: dag-run
+spec:
+  volumes:
+    - name: binaries-volume
+      hostPath:
+        path: /home/fnikol/scratch/openmpi/binaries
+
+  entrypoint: diamond
+  templates:
+    - name: diamond
+      dag:
+        tasks:
+          - name: A
+            template: runner
+            arguments:
+              parameters: [{name: program, value: hello_c}]
+          - name: B
+            depends: "A"
+            template: runner
+            arguments:
+              parameters: [{name: program, value: hello_c}]
+          - name: C
+            depends: "A"
+            template: runner
+            arguments:
+              parameters: [{name: program, value: hello_c}]
+          - name: D
+            depends: "B && C"
+            template: runner
+            arguments:
+              parameters: [{name: program, value: hello_c}]
+
+    - name: runner
+      inputs:
+        parameters:
+          - name: program
+      container:
+        image: icsforth/openmpi
+        volumeMounts:
+          - name: binaries-volume
+            mountPath: /binaries
+        command: [mpirun, "--allow-run-as-root", "/binaries/{{inputs.parameters.program}}"]

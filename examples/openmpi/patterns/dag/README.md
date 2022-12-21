@@ -14,8 +14,7 @@ helm install argo-workflows argo/argo-workflows --set server.extraArgs[0]="--aut
 Step 2. Run the Workflow
 
 ```shell
-rm -rf ./binaries/*
-kubectl apply -f build-run.yaml
+kubectl apply -f dag.yaml
 ```
 
 

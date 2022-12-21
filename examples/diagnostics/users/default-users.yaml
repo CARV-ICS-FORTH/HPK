@@ -1,0 +1,21 @@
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: whoami-postgres
+spec:
+  containers:
+    - name: whoami-newuser
+      image: icsforth/alpine:newuser
+      command: ["whoami"]
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: whoami-root
+spec:
+  containers:
+    - name: whoami-root
+      image: alpine
+      command: ["whoami"]

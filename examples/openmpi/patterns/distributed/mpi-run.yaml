@@ -1,15 +1,19 @@
-apiVersion: kubeflow.org/v1alpha2
+apiVersion: kubeflow.org/v1
 kind: MPIJob
 metadata:
-  name: tensorflow-benchmarks
+  name: mpi-run
 spec:
+  slotsPerWorker: 1
+
+  runPolicy:
+    cleanPodPolicy: Running
+    ttlSecondsAfterFinished: 60
+
   volumes:
     - name: binaries-volume
       hostPath:
-        path: /home/fnikol/examples/openmpi/binaries
+        path: /home/fnikol/scratch/openmpi/binaries
 
-  slotsPerWorker: 1
-  cleanPodPolicy: Running
   mpiReplicaSpecs:
     Launcher:
       replicas: 1
@@ -20,12 +24,12 @@ spec:
               name: hello-world
               volumeMounts:
                 - name: binaries-volume
-                  mountPath: /binaries
+                  mountPath: /skata
               command:
                     - sh
                     - -c
                     - |
-                      mpirun /binaries/hello_c                 
+                      mpirun /skata/hello_c -n 2          
 
     Worker:
       replicas: 2
@@ -34,3 +38,8 @@ spec:
           containers:
             - image: icsforth/openmpi
               name: tensorflow-benchmarks
+              command:
+                - sh
+                - -c
+                - |
+                  /usr/sbin/sshd -De                  
