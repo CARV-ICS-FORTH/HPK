@@ -15,7 +15,8 @@ VERSION_FLAGS   := -ldflags='-X "main.buildVersion=$(BUILD_VERSION)" -X "main.bu
 
 
 # deployment options
-KUBEPATH ?= ${HOME}/.k8sfs/kubernetes/
+K8SFSPATH ?= ${HOME}/.k8sfs
+KUBEPATH ?= ${K8SFSPATH}/kubernetes/
 HOST_ADDRESS ?= $(shell ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p')
 
 ##@ General
@@ -49,42 +50,37 @@ build-race: ## Build HPK binary with race condition detector.
 ##@ Deployment
 
 run-kubemaster: ## Run the Kubernetes Master
-	mkdir -p .k8sfs/log
-
+	mkdir -p ${K8SFSPATH}/log
 	apptainer run --net --dns 8.8.8.8 --fakeroot \
-    --cleanenv --pid --containall \
-    --no-init --no-umask --no-eval \
-    --no-mount tmp,home --unsquash --writable \
-    --env K8SFS_MOCK_KUBELET=0 \
-    --bind .k8sfs:/usr/local/etc \
-    --bind .k8sfs/log:/var/log \
-    docker://chazapis/kubernetes-from-scratch:20221217
+	--cleanenv --pid --containall \
+	--no-init --no-umask --no-eval \
+	--no-mount tmp,home --unsquash --writable \
+	--env K8SFS_MOCK_KUBELET=0 \
+	--bind ${K8SFSPATH}:/usr/local/etc \
+	--bind ${K8SFSPATH}/log:/var/log \
+	docker://chazapis/kubernetes-from-scratch:20221217
 
 
 run-kubelet: ## Run the the Kubernetes virtual kubelet
 	@echo "===> Generate HPK Certificates <==="
 	mkdir -p ./bin
-
 	openssl genrsa -out bin/kubelet.key 2048
-
 	openssl req -x509 -key bin/kubelet.key -CA ${KUBEPATH}/pki/ca.crt -CAkey ${KUBEPATH}/pki/ca.key \
-	  -days 365 -nodes -out bin/kubelet.crt -subj "/CN=hpk-kubelet" \
-	  -addext "basicConstraints=CA:FALSE" \
-	  -addext "keyUsage=digitalSignature,keyEncipherment" \
-	  -addext "extendedKeyUsage=serverAuth,clientAuth" \
-	  -addext "subjectAltName=IP:127.0.0.1,IP:${HOST_ADDRESS}"
-
+	-days 365 -nodes -out bin/kubelet.crt -subj "/CN=hpk-kubelet" \
+	-addext "basicConstraints=CA:FALSE" \
+	-addext "keyUsage=digitalSignature,keyEncipherment" \
+	-addext "extendedKeyUsage=serverAuth,clientAuth" \
+	-addext "subjectAltName=IP:127.0.0.1,IP:${HOST_ADDRESS}"
 
 	@echo "===> Register Webhook <==="
-	VKUBELET_ADDRESS=${HOST_ADDRESS}                \
+	VKUBELET_ADDRESS=${HOST_ADDRESS} \
 	./hack/webhooks/apply-mutating-webhook.sh ./hack/webhooks/mutating-webhook.yaml
 
-
 	@echo "===> Run HPK <==="
-	KUBECONFIG=${KUBEPATH}/admin.conf				\
-	APISERVER_KEY_LOCATION=bin/kubelet.key          \
-	APISERVER_CERT_LOCATION=bin/kubelet.crt         \
-	VKUBELET_ADDRESS=${HOST_ADDRESS}                \
+	KUBECONFIG=${KUBEPATH}/admin.conf \
+	APISERVER_KEY_LOCATION=bin/kubelet.key \
+	APISERVER_CERT_LOCATION=bin/kubelet.crt \
+	VKUBELET_ADDRESS=${HOST_ADDRESS} \
 	./bin/hpk-kubelet
 
 

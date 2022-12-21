@@ -248,7 +248,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	scriptFileContent := strings.Builder{}
 
 	scriptTemplate, err := template.New(h.Name).
-		Funcs(sprig.FuncMap()).
+		Funcs(sprig.TxtFuncMap()).
 		Option("missingkey=error").Parse(SbatchScriptTemplate)
 	if err != nil {
 		/*-- template errors should be expected from the custom fields where users can inject shitty input.	--*/
@@ -311,7 +311,7 @@ func (h *podHandler) buildContainer(container *corev1.Container) Container {
 	envFileContent := strings.Builder{}
 
 	envFileTemplate, err := template.New(h.Name).
-		Funcs(sprig.FuncMap()).
+		Funcs(sprig.TxtFuncMap()).
 		Option("missingkey=error").Parse(GenerateEnvTemplate)
 	if err != nil {
 		SystemError(err, "generate env template error")
