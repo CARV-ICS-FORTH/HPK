@@ -19,8 +19,8 @@ import (
 	"context"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/carv-ics-forth/hpk/compute"
@@ -28,7 +28,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 /************************************************************
@@ -43,12 +43,20 @@ var ExcludeNodes = "--exclude="
 func init() {
 	Slurm.SubmitCmd = "sbatch"  // path.GetPathOrDie("sbatch")
 	Slurm.CancelCmd = "scancel" // path.GetPathOrDie("scancel")
+	Slurm.StatsCmd = "sinfo"
 }
 
 // Slurm represents a SLURM installation.
 var Slurm struct {
 	SubmitCmd string
 	CancelCmd string
+	StatsCmd  string
+}
+
+// ConnectionOK return true if HPK maintains connection with the Slurm manager.
+// Otherwise, it returns false.
+func ConnectionOK() bool {
+	return true
 }
 
 func SubmitJob(scriptFile string) (string, error) {
@@ -74,34 +82,6 @@ func CancelJob(args string) (string, error) {
 	}
 
 	return string(out), nil
-}
-
-/************************************************************
-
-			Slurm Stats
-
-************************************************************/
-
-// ConnectionOK return true if HPK maintains connection with the Slurm manager.
-// Otherwise, it returns false.
-func ConnectionOK() bool {
-	return true
-}
-
-func TotalResources(ctx context.Context) corev1.ResourceList {
-	return corev1.ResourceList{
-		"cpu":    *resource.NewQuantity(int64(runtime.NumCPU()), resource.DecimalSI),
-		"memory": resource.MustParse("10Gi"),
-		"pods":   resource.MustParse("110"),
-	}
-}
-
-func AllocatableResources(ctx context.Context) corev1.ResourceList {
-	return corev1.ResourceList{
-		"cpu":    *resource.NewQuantity(int64(runtime.NumCPU()), resource.DecimalSI),
-		"memory": resource.MustParse("10Gi"),
-		"pods":   resource.MustParse("110"),
-	}
 }
 
 /************************************************************
@@ -272,5 +252,62 @@ func (h *EventHandler) Run(ctx context.Context, notifyVirtualKubelet func(pod *c
 		}()
 
 		waitGroup.Wait()
+	}
+}
+
+/************************************************************
+
+		Known Job Types
+
+************************************************************/
+
+type JobIDType string
+
+const (
+	JobIDTypeInstance JobIDType = "instance://"
+
+	JobIDTypeProcess JobIDType = "pid://"
+
+	JobIDTypeSlurm JobIDType = "slurm://"
+
+	JobIDTypeEmpty JobIDType = ""
+)
+
+func SetPodID(pod *corev1.Pod, idType JobIDType, value string) {
+	metav1.SetMetaDataAnnotation(&pod.ObjectMeta, "pod.hpk/id", string(idType)+value)
+}
+
+func SetContainerStatusID(status *corev1.ContainerStatus, typedValue string) {
+	// ensure that the value follows an expected format.
+	_, _ = parseIDType(typedValue)
+
+	status.ContainerID = typedValue
+}
+
+func ParsePodID(pod *corev1.Pod) (idType JobIDType, value string) {
+	raw, exists := pod.GetAnnotations()["pod.hpk/id"]
+
+	if !exists {
+		return JobIDTypeEmpty, ""
+	}
+
+	return parseIDType(raw)
+}
+
+func ParseContainerID(status *corev1.ContainerStatus) (idType JobIDType, value string) {
+	return parseIDType(status.ContainerID)
+}
+
+func parseIDType(raw string) (idType JobIDType, value string) {
+	/*-- Extract id from raw format '<type>://<job_id>'. --*/
+	switch {
+	case strings.HasPrefix(raw, string(JobIDTypeSlurm)):
+		return JobIDTypeSlurm, strings.Split(raw, string(JobIDTypeSlurm))[1]
+	case strings.HasPrefix(raw, string(JobIDTypeInstance)):
+		return JobIDTypeInstance, strings.Split(raw, string(JobIDTypeInstance))[1]
+	case strings.HasPrefix(raw, string(JobIDTypeProcess)):
+		return JobIDTypeProcess, strings.Split(raw, string(JobIDTypeProcess))[1]
+	default:
+		panic("unknown id format: " + raw)
 	}
 }

@@ -57,6 +57,9 @@ func AddWebhook(c Opts, virtualk8s *provider.VirtualK8S) {
 	}
 
 	mux.Handle("/mutates/pods", whHandler)
+	mux.Handle("/hello", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Write([]byte("Hi there! I 'm HPK-Kubelet. My job is to run your Kubernetes stuff on Slurm.\n"))
+	}))
 
 	/*---------------------------------------------------
 	 * Add handlers for Logs and Statistics
