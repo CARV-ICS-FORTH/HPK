@@ -301,6 +301,8 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	return nil
 }
 
+// buildContainer replicates the behavior of
+// https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/kuberuntime/kuberuntime_container.go
 func (h *podHandler) buildContainer(container *corev1.Container) Container {
 	containerPath := h.podDirectory.Container(container.Name)
 

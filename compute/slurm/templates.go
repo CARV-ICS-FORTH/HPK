@@ -140,10 +140,8 @@ handle_containers() {
 	sh -c {{$container.EnvFilePath}} > /scratch/{{$container.InstanceName}}.env
 	{{- end}}
 
-	mkdir -p /scratch/singularity.d_{{$container.InstanceName}}
-
-	$(${apptainer} {{$container.ApptainerMode}} --compat --no-mount tmp,home --userns \
-	--bind /scratch/hosts:/etc/hosts,/scratch/singularity.d_{{$container.InstanceName}}:/.singularity.d,{{join "," $container.Binds}} \ 
+	$(${apptainer} {{$container.ApptainerMode}} --compat --no-mount tmp,home \
+	--bind /scratch/hosts:/etc/hosts,{{join "," $container.Binds}} \ 
 	{{- if $container.EnvFilePath}}
 	--env-file /scratch/{{$container.InstanceName}}.env \
 	{{- end}}
@@ -258,7 +256,7 @@ trap sigdown SIGTERM SIGINT
 
 echo "[Host] Starting the constructor the Virtual Environment ..."
 
-${apptainer} exec --net --network=flannel --scratch /scratch \
+${apptainer} exec --net --fakeroot --scratch /scratch \
 --env PARENT=${PPID}								 \
 --hostname {{.Pod.Name}}							 \
 --bind /bin,/etc/apptainer,/var/lib/apptainer,/lib,/lib64,/usr,/etc/passwd,$HOME,/run/shm \
