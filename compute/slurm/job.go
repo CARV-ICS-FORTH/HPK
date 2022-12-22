@@ -208,6 +208,8 @@ func (h *EventHandler) Run(ctx context.Context, notifyVirtualKubelet func(pod *c
 						/*-- Container Started --*/
 						logger.Info("SLURM: Container Started", "op", event.Op, "file", file)
 
+						// FIXME: create k8s event "Started container CONTAINERNAME"
+
 					case compute.ExtensionExitCode:
 						/*-- Container Terminated --*/
 						logger.Info("SLURM: Container Terminated", "op", event.Op, "file", file)
@@ -226,15 +228,9 @@ func (h *EventHandler) Run(ctx context.Context, notifyVirtualKubelet func(pod *c
 					/*-- Load Pod from reference --*/
 					pod := LoadPod(podkey)
 					if pod == nil {
-						if ext == compute.ExtensionExitCode {
-							// Race conditions may between the deletion of a Terminating pod, and the creation
-							// of an exitcode for the containers within it.
-							logger.Info("Omit event due to conflicting exit and termination events")
-
-							continue
-						}
-
-						SystemError(errors.Errorf("pod '%s' does not exist", podkey), "ERR")
+						// Race conditions may between the deletion of a pod and Slurm events.
+						logger.Info("pod was not found. this is probably a conflict. omit event")
+						continue
 					}
 
 					/*-- Recalculate the Pod status from locally stored containers --*/

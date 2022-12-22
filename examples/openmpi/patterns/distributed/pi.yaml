@@ -18,18 +18,18 @@ spec:
           containers:
             - image: mpioperator/mpi-pi
               name: mpi-launcher
-              securityContext:
-                runAsUser: 1000
-              command:
-                - mpirun
+              command: [runuser, -u, mpiuser, -- ]
               args:
-                - -n
-                - "2"
-                - /home/mpiuser/pi
-              resources:
-                limits:
-                  cpu: 1
-                  memory: 1Gi
+                - sh
+                - -c
+                - |
+                  unset LD_LIBRARY_PATH
+                  unset LD_PRELOAD
+
+                  env 
+
+                  mpirun --allow-run-as-root -n "2" /home/mpiuser/pi
+
     Worker:
       replicas: 2
       template:
@@ -37,15 +37,26 @@ spec:
           containers:
             - image: mpioperator/mpi-pi
               name: mpi-worker
-              securityContext:
-                runAsUser: 1000
               command:
-                - /usr/sbin/sshd
-              args:
-                - -De
-                - -f
-                - /home/mpiuser/.sshd_config
-              resources:
-                limits:
-                  cpu: 1
-                  memory: 1Gi
+                - runuser
+                - --preserve-environment
+                - root
+                - -c
+                - |
+                  whoami 
+                  env
+
+                  chmod -R 700 /home/mpiuser/.ssh
+                  chmod 600 /home/mpiuser/.ssh/id_rsa
+
+                  echo skata | passwd mpiuser
+
+                  echo PubkeyAuthentication yes >> /home/mpiuser/.sshd_config
+                  echo PasswordAuthentication no >> /home/mpiuser/.sshd_config
+
+                  echo "SSH Daemon Config "
+                  echo " ------- "
+                  cat /home/mpiuser/.sshd_config
+                  echo " ------- "
+
+                  /usr/sbin/sshd -De -f /home/mpiuser/.sshd_config

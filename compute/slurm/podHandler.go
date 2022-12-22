@@ -214,7 +214,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	logger.Info(" * Creating Environment Variables")
 	h.podEnvVariables = FromServices(ctx, pod.GetNamespace())
 
-	logger.Info(" * Mounting Volumes")
+	h.logger.Info(" * Mounting Volumes")
 	h.prepareVolumes(ctx)
 
 	logger.Info(" * Listening for async changes on host directory")

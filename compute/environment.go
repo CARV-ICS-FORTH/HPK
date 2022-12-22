@@ -46,9 +46,9 @@ var DefaultLogger = zap.New(zap.UseDevMode(true))
 ************************************************************/
 
 const (
-	PodGlobalDirectoryPermissions = 0o777
-	PodSpecJsonFilePermissions    = 0o600
-	ContainerJobPermissions       = 0o777
+	PodGlobalDirectoryPermissions = os.FileMode(0o777)
+	PodSpecJsonFilePermissions    = os.FileMode(0o600)
+	ContainerJobPermissions       = os.FileMode(0o777)
 )
 
 const (
@@ -143,10 +143,10 @@ func (p PodPath) StderrPath() string {
 	Pod-Related functions
 */
 
-func (p PodPath) CreateSubDirectory(name string) (string, error) {
+func (p PodPath) CreateSubDirectory(name string, mode os.FileMode) (string, error) {
 	fullPath := filepath.Join(string(p.VirtualEnvironmentDir()), name)
 
-	if err := os.MkdirAll(fullPath, PodGlobalDirectoryPermissions); err != nil {
+	if err := os.MkdirAll(fullPath, mode); err != nil {
 		return fullPath, errors.Wrapf(err, "cannot create dir '%s'", fullPath)
 	}
 

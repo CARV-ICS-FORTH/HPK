@@ -72,35 +72,38 @@ debug_info() {
 
 
 handle_dns() {
-# Rewire /etc/resolv.conf to point to KubeDNS
-cat > /etc/resolv.conf << DNS_EOF
+mkdir -p /scratch/etc
+
+# Rewire /scratch/etc/resolv.conf to point to KubeDNS
+cat > /scratch/etc/resolv.conf << DNS_EOF
 search {{.Pod.Namespace}}.svc.cluster.local svc.cluster.local cluster.local
 nameserver {{.ComputeEnv.KubeDNS}}
 options ndots:5
 DNS_EOF
 
-# Add hostname to known hosts
-cp /etc/hosts /scratch/hosts
-echo "$(hostname -I) $(hostname)" >> /scratch/hosts
+# Add hostname to known hosts. Required for loopbacks
+cp /etc/hosts /scratch/etc/hosts
+echo "$(hostname -I) $(hostname)" >> /scratch/etc/hosts
 }
 
 # If not removed, Flags will be consumed by the nested Apptainer and overwrite paths.
 # https://apptainer.org/user-docs/master/environment_and_metadata.html#environment-from-the-singularity-runtime
-unset_env() {
+reset_env() {
     unset LD_LIBRARY_PATH
 
 	unset SINGULARITY_COMMAND
 	unset SINGULARITY_CONTAINER
 	unset SINGULARITY_ENVIRONMENT
 	unset SINGULARITY_NAME
-	unset SINGULARITY_BIND
 	
 	unset APPTAINER_APPNAME
 	unset APPTAINER_COMMAND
 	unset APPTAINER_CONTAINER
 	unset APPTAINER_ENVIRONMENT
 	unset APPTAINER_NAME
-	unset APPTAINER_BIND
+
+	export APPTAINER_BIND="/bin,/lib64/,/lib/x86_64-linux-gnu/,/scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts"
+	export SINGULARITY_BIND="/bin,/lib64/,/lib/x86_64-linux-gnu/,/scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts"
 }
 
 handle_init_containers() {
@@ -114,14 +117,14 @@ handle_init_containers() {
 	# Mark the beginning of an init job (all get the shell's pid).  
 	echo pid://$$ > {{$container.JobIDPath}}
 
-	${apptainer} {{ $container.ApptainerMode }} --compat --no-mount tmp,home --userns \
-	--bind /scratch/hosts:/etc/hosts,{{join "," $container.Binds}} \ 
+	${apptainer} {{ $container.ApptainerMode }}  --cleanenv --compat --no-mount tmp,home --fakeroot \
+	--bind /scratch/etc/:/etc/,{{join "," $container.Binds}} \ 
 	{{- if $container.EnvFilePath}}
 	--env-file /scratch/{{$container.InstanceName}}.env \
 	{{- end}}
 	{{$container.Image}}
 	{{- if $container.Command}}{{range $index, $cmd := $container.Command}} '{{$cmd}}'{{end}}{{end -}}
-	{{- if $container.Args}}{{range $index, $arg := $container.Args}} '{{$arg}}'{{end}}{{end -}} \
+	{{- if $container.Args}}{{range $index, $arg := $container.Args}} '{{$arg}}'{{end}}{{end -}}
 	&>> {{$container.LogsPath}}
 
 	# Mark the ending of an init job.
@@ -140,14 +143,15 @@ handle_containers() {
 	sh -c {{$container.EnvFilePath}} > /scratch/{{$container.InstanceName}}.env
 	{{- end}}
 
-	$(${apptainer} {{$container.ApptainerMode}} --compat --no-mount tmp,home \
-	--bind /scratch/hosts:/etc/hosts,{{join "," $container.Binds}} \ 
+	# Internal fakeroot is needed for appropriate permissions within the container
+	$(${apptainer} {{$container.ApptainerMode}} --cleanenv --compat --no-mount tmp,home --fakeroot \
+	--bind  {{join "," $container.Binds}} \ 
 	{{- if $container.EnvFilePath}}
 	--env-file /scratch/{{$container.InstanceName}}.env \
 	{{- end}}
-	{{$container.Image}}
+	{{$container.Image}}   
 	{{- if $container.Command}}{{range $index, $cmd := $container.Command}} '{{$cmd}}'{{end}}{{end -}}
-	{{- if $container.Args}}{{range $index, $arg := $container.Args}} '{{$arg}}'{{end}}{{end -}} \
+	{{- if $container.Args}}{{range $index, $arg := $container.Args}} '{{$arg}}'{{end}}{{end -}} 
 	&>> {{$container.LogsPath}}; echo $? > {{$container.ExitCodePath}}) &
 
 	echo pid://$! > {{$container.JobIDPath}}
@@ -177,9 +181,9 @@ trap '_teardown "${BASH_COMMAND}" "$?"'  EXIT
 
 debug_info
 
-unset_env
-
 handle_dns
+
+reset_env
 
 # Network is ready
 echo $(hostname -I) > {{.VirtualEnv.IPAddressPath}}
@@ -256,10 +260,11 @@ trap sigdown SIGTERM SIGINT
 
 echo "[Host] Starting the constructor the Virtual Environment ..."
 
-${apptainer} exec --net --fakeroot --scratch /scratch \
+# External fakeroot is needed for the networking  
+${apptainer} exec --dns 8.8.8.8 --net --fakeroot --scratch /scratch \
 --env PARENT=${PPID}								 \
 --hostname {{.Pod.Name}}							 \
---bind /bin,/etc/apptainer,/var/lib/apptainer,/lib,/lib64,/usr,/etc/passwd,$HOME,/run/shm \
+--bind /bin,/usr,/lib,/lib64,/etc/apptainer,/var/lib/apptainer \
 docker://alpine {{.VirtualEnv.ConstructorPath}} &
 
 # return the PID of Apptainer running the virtual environment
