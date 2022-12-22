@@ -331,7 +331,10 @@ func (v *VirtualK8S) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
 	if err := slurm.WalkPodDirectories(func(path compute.PodPath) error {
 		encodedPod, err := os.ReadFile(path.EncodedJSONPath())
 		if err != nil {
-			return errors.Wrapf(err, "cannot read pod description file '%s'", path)
+			v.Logger.Error(err, "potentially corrupted dir. cannot read pod description file",
+				"path", path)
+
+			return nil
 		}
 
 		var pod corev1.Pod
