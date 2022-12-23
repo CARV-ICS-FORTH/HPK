@@ -30,7 +30,7 @@ jobs:
         uses: actions/checkout@v3
       - name: Setup the environment
         run: |
-          ./docs/install-environment.sh
+          sudo ./docs/install-environment.sh
       - name: Check the install-environment
         run: |
           apptainer exec --net --fakeroot docker://alpine ip a
