@@ -19,8 +19,8 @@ sudo apt-get update
 sudo apt-get install -y wget
 
 # Install Apptainer
-wget https://github.com/apptainer/apptainer/releases/download/v${APPTAINER_VERSION}/apptainer_${APPTAINER_VERSION}_amd64.deb
-wget https://github.com/apptainer/apptainer/releases/download/v${APPTAINER_VERSION}/apptainer-suid_${APPTAINER_VERSION}_amd64.deb
+wget -q https://github.com/apptainer/apptainer/releases/download/v${APPTAINER_VERSION}/apptainer_${APPTAINER_VERSION}_amd64.deb
+wget -q https://github.com/apptainer/apptainer/releases/download/v${APPTAINER_VERSION}/apptainer-suid_${APPTAINER_VERSION}_amd64.deb
 apt-get install -y ./apptainer_${APPTAINER_VERSION}_amd64.deb ./apptainer-suid_${APPTAINER_VERSION}_amd64.deb
 
 # Install etcd, needed by Flannel to store configuration
@@ -36,7 +36,7 @@ export ETCDCTL_API=3
 etcdctl --endpoints http://${HOST_ADDRESS}:2379 put /coreos.com/network/config '{"Network": "10.244.0.0/16", "Backend": {"Type": "vxlan"}}'
 
 # Install Flannel to distribute priate IPs across hosts
-wget https://github.com/flannel-io/flannel/releases/download/v${FLANNEL_VERSION}/flanneld-amd64
+wget -q https://github.com/flannel-io/flannel/releases/download/v${FLANNEL_VERSION}/flanneld-amd64
 chmod +x flanneld-amd64
 mv flanneld-amd64 /usr/local/bin/flanneld
 
@@ -56,7 +56,7 @@ systemctl enable flanneld
 systemctl start flanneld
 
 # Install the Flannel CNI plug-in in Apptainer and configure Apptainer to use Flannel for fakeroot runs
-wget https://github.com/flannel-io/cni-plugin/releases/download/v${FLANNEL_CNI_PLUGIN_VERSION}/flannel-amd64
+wget -q https://github.com/flannel-io/cni-plugin/releases/download/v${FLANNEL_CNI_PLUGIN_VERSION}/flannel-amd64
 chmod +x flannel-amd64
 mv flannel-amd64 /usr/libexec/apptainer/cni/flannel
 
@@ -87,7 +87,7 @@ EOF
 
 apt-get install -y slurmd slurm-client slurmctld
 
-cat > /etc/slurm/slurm.conf << EOF
+cat >/etc/slurm-llnl/slurm.conf << EOF
 AuthType=auth/none
 CredType=cred/none
 MpiDefault=none
@@ -112,7 +112,6 @@ SchedulerType=sched/backfill
 SelectType=select/cons_tres
 SelectTypeParameters=CR_Core
 AccountingStorageType=accounting_storage/none
-AccountingStoreFlags=job_comment
 ClusterName=cluster
 JobCompType=jobcomp/none
 JobAcctGatherFrequency=30
@@ -128,11 +127,11 @@ systemctl start slurmd
 systemctl start slurmctld
 
 # Install utilities
-wget https://dl.k8s.io/v${KUBERNETES_VERSION}/bin/linux/amd64/kubectl
+wget -q https://dl.k8s.io/v${KUBERNETES_VERSION}/bin/linux/amd64/kubectl
 chmod +x kubectl
 mv kubectl /usr/local/bin/kubectl
 
-wget https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz
+wget -q https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz
 tar -zxvf helm-v${HELM_VERSION}-linux-amd64.tar.gz --strip-components=1 linux-amd64/helm
 mv helm /usr/local/bin/helm
 rm -f helm-v${HELM_VERSION}-linux-amd64.tar.gz
