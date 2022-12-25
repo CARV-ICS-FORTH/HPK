@@ -110,17 +110,13 @@ handle_init_containers() {
 {{- range $index, $container := .InitContainers}}
 	echo "[Virtual] Scheduling Init Container: {{$index}}"
 	
-	{{- if $container.EnvFilePath}}
-	sh -c {{$container.EnvFilePath}} > /scratch/{{$container.InstanceName}}.env
-	{{- end}}
-
 	# Mark the beginning of an init job (all get the shell's pid).  
 	echo pid://$$ > {{$container.JobIDPath}}
 
 	${apptainer} {{ $container.ApptainerMode }} --cleanenv --pid --compat --no-mount tmp,home --unsquash \
 	--bind /scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts,{{join "," $container.Binds}} \
 	{{- if $container.EnvFilePath}}
-	--env-file /scratch/{{$container.InstanceName}}.env \
+	--env-file {{$container.EnvFilePath}} \
 	{{- end}}
 	{{$container.Image}}
 	{{- if $container.Command}}{{range $index, $cmd := $container.Command}} '{{$cmd}}'{{end}}{{end -}}
@@ -139,15 +135,11 @@ handle_containers() {
 {{- range $index, $container := .Containers}}
 	echo "[Virtual] Scheduling Container: {{$container.InstanceName}}"
 
-	{{- if $container.EnvFilePath}}
-	sh -c {{$container.EnvFilePath}} > /scratch/{{$container.InstanceName}}.env
-	{{- end}}
-
 	# Internal fakeroot is needed for appropriate permissions within the container
 	$(${apptainer} {{ $container.ApptainerMode }} --cleanenv --pid --compat --no-mount tmp,home --unsquash \
 	--bind /scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts,{{join "," $container.Binds}} \
 	{{- if $container.EnvFilePath}}
-	--env-file /scratch/{{$container.InstanceName}}.env \
+	--env-file {{$container.EnvFilePath}} \
 	{{- end}}
 	{{$container.Image}}   
 	{{- if $container.Command}}{{range $index, $cmd := $container.Command}} '{{$cmd}}'{{end}}{{end -}}
@@ -365,14 +357,9 @@ type RequestOptions struct {
 
 // GenerateEnvTemplate is used to generate environment variables.
 // This is needed for variables that consume information from the downward API (like .status.podIP)
-const GenerateEnvTemplate = `#!/bin/bash
-
+const GenerateEnvTemplate = `
 {{- range $index, $variable := .Variables}}
-{{- if eq $variable.Value ".status.podIP"}}
-echo {{$variable.Name}}=$(ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p')
-{{ else }}
-echo {{$variable.Name}}=\''{{$variable.Value}}'\'
-{{- end}}
+{{$variable.Name}}='{{$variable.Value}}'
 {{- end}}
 `
 
