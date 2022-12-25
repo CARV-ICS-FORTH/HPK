@@ -109,7 +109,7 @@ func TestSBatch(t *testing.T) {
 		Name:      "dummier",
 	}
 
-	podDir := compute.PodRuntimeDir(podKey)
+	podDir := compute.InternalPodRuntimeDir(podKey)
 
 	tests := []struct {
 		name   string

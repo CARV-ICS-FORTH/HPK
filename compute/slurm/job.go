@@ -60,7 +60,7 @@ func ConnectionOK() bool {
 }
 
 func SubmitJob(scriptFile string) (string, error) {
-	out, err := process.Execute(Slurm.SubmitCmd, ExcludeNodes, scriptFile)
+	out, err := process.ExecuteInDir(compute.UserHomeDir, Slurm.SubmitCmd, ExcludeNodes, scriptFile)
 	if err != nil {
 		SystemError(err, "sbatch submission error. out : '%s'", out)
 	}

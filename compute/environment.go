@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -51,9 +52,10 @@ const (
 	ContainerJobPermissions       = os.FileMode(0o777)
 )
 
-const (
-	RuntimeDir = ".hpk"
+var UserHomeDir, _ = os.UserHomeDir()
+var RuntimeDir = filepath.Join(UserHomeDir, ".hpk")
 
+const (
 	// Slurm-Related Extensions
 	ExtensionSysError = ".syserror"
 
@@ -80,6 +82,12 @@ func (p PodPath) String() string {
 
 func PodRuntimeDir(podRef client.ObjectKey) PodPath {
 	path := filepath.Join(RuntimeDir, podRef.Namespace, podRef.Name)
+
+	return PodPath(path)
+}
+
+func InternalPodRuntimeDir(podRef client.ObjectKey) PodPath {
+	path := filepath.Join(".hpk", podRef.Namespace, podRef.Name)
 
 	return PodPath(path)
 }
@@ -222,7 +230,8 @@ func (c ContainerPath) EnvFilePath() string {
 func ParsePath(path string) (podKey types.NamespacedName, fileName string, invalid bool) {
 	re := regexp.MustCompile(`^.hpk/(?P<namespace>\S+)/(?P<pod>\S+?)(/.virtualenv)*/(?P<file>.*)$`)
 
-	match := re.FindStringSubmatch(path)
+	trimmedPath := strings.TrimPrefix(path, UserHomeDir + string(os.PathSeparator))
+	match := re.FindStringSubmatch(trimmedPath)
 
 	if len(match) == 0 {
 		invalid = true

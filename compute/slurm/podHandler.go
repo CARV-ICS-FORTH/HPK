@@ -37,8 +37,9 @@ type podHandler struct {
 
 	podKey client.ObjectKey
 
-	podEnvVariables []corev1.EnvVar
-	podDirectory    compute.PodPath
+	podEnvVariables         []corev1.EnvVar
+	podDirectory            compute.PodPath
+	internalPodDirectory    compute.PodPath
 
 	// podMountSymlinks is used to bypass the default mounting behavior.
 	// instead of mounting directory from the podDirectory/volname:/containerpath,
@@ -96,7 +97,7 @@ func SavePod(_ context.Context, pod *corev1.Pod) {
 
 func WalkPodDirectories(f compute.WalkPodFunc) error {
 	rootDir := compute.RuntimeDir
-	maxDepth := 2 // expect path .hpk/namespace/pod
+	maxDepth := strings.Count(rootDir, string(os.PathSeparator)) + 2 // expect path .hpk/namespace/pod
 
 	return filepath.WalkDir(rootDir, func(path string, info os.DirEntry, err error) error {
 		if err != nil {
@@ -201,11 +202,12 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	}
 
 	h := podHandler{
-		Pod:              pod,
-		podKey:           podKey,
-		podDirectory:     compute.PodRuntimeDir(podKey),
-		podMountSymlinks: map[string]string{},
-		logger:           logger,
+		Pod:                  pod,
+		podKey:               podKey,
+		podDirectory:         compute.PodRuntimeDir(podKey),
+		internalPodDirectory: compute.InternalPodRuntimeDir(podKey),
+		podMountSymlinks:     map[string]string{},
+		logger:               logger,
 	}
 
 	/*---------------------------------------------------
@@ -259,11 +261,11 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 		Pod:        h.podKey,
 		ComputeEnv: compute.Environment,
 		VirtualEnv: VirtualEnvironmentPaths{
-			ConstructorPath: h.podDirectory.ConstructorPath(),
-			IPAddressPath:   h.podDirectory.IPAddressPath(),
-			StdoutPath:      h.podDirectory.StdoutPath(),
-			StderrPath:      h.podDirectory.StderrPath(),
-			SysErrorPath:    h.podDirectory.SysErrorPath(),
+			ConstructorPath: h.internalPodDirectory.ConstructorPath(),
+			IPAddressPath:   h.internalPodDirectory.IPAddressPath(),
+			StdoutPath:      h.internalPodDirectory.StdoutPath(),
+			StderrPath:      h.internalPodDirectory.StderrPath(),
+			SysErrorPath:    h.internalPodDirectory.SysErrorPath(),
 		},
 		InitContainers: initContainers,
 		Containers:     containers,
@@ -304,12 +306,10 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 // buildContainer replicates the behavior of
 // https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/kuberuntime/kuberuntime_container.go
 func (h *podHandler) buildContainer(container *corev1.Container) Container {
-	containerPath := h.podDirectory.Container(container.Name)
-
 	/*---------------------------------------------------
 	 * Generate Environment Variables
 	 *---------------------------------------------------*/
-	envfilePath := containerPath.EnvFilePath()
+	envfilePath := h.podDirectory.Container(container.Name).EnvFilePath()
 	envFileContent := strings.Builder{}
 
 	envFileTemplate, err := template.New(h.Name).
@@ -333,10 +333,12 @@ func (h *podHandler) buildContainer(container *corev1.Container) Container {
 	/*---------------------------------------------------
 	 * Prepare fields for Container Template
 	 *---------------------------------------------------*/
+	containerPath := h.internalPodDirectory.Container(container.Name)
+
 	return Container{
 		InstanceName: fmt.Sprintf("%s_%s_%s", h.Pod.GetNamespace(), h.Pod.GetName(), container.Name),
 		Image:        compute.Environment.ContainerRegistry + container.Image,
-		EnvFilePath:  envfilePath,
+		EnvFilePath:  containerPath.EnvFilePath(),
 		Binds: func() []string {
 			mountArgs := make([]string, 0, len(container.VolumeMounts))
 
@@ -350,7 +352,7 @@ func (h *podHandler) buildContainer(container *corev1.Container) Container {
 
 					mountArgs = append(mountArgs, hostpath+":"+mountVar.MountPath)
 				} else {
-					mountArgs = append(mountArgs, h.podDirectory.Mountpaths(mountVar))
+					mountArgs = append(mountArgs, h.internalPodDirectory.Mountpaths(mountVar))
 				}
 			}
 
