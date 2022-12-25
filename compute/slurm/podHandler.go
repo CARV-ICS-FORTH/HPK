@@ -37,8 +37,9 @@ type podHandler struct {
 
 	podKey client.ObjectKey
 
-	podEnvVariables []corev1.EnvVar
-	podDirectory    compute.PodPath
+	podEnvVariables         []corev1.EnvVar
+	podDirectory            compute.PodPath
+	internalPodDirectory    compute.PodPath
 
 	// podMountSymlinks is used to bypass the default mounting behavior.
 	// instead of mounting directory from the podDirectory/volname:/containerpath,
@@ -194,19 +195,19 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	 *---------------------------------------------------*/
 	logger.Info(" * Creating Host Directory and Pod Handler")
 
-	podDir := compute.PodRuntimeDir(podKey)
-	virtualEnvironmentDir := podDir.VirtualEnvironmentDir()
+	virtualEnvironmentDir := compute.PodRuntimeDir(podKey).VirtualEnvironmentDir()
 
 	if err := os.MkdirAll(string(virtualEnvironmentDir), compute.PodGlobalDirectoryPermissions); err != nil {
 		SystemError(err, "Cant create pod directory '%s'", virtualEnvironmentDir)
 	}
 
 	h := podHandler{
-		Pod:              pod,
-		podKey:           podKey,
-		podDirectory:     compute.InternalPodRuntimeDir(podKey),
-		podMountSymlinks: map[string]string{},
-		logger:           logger,
+		Pod:                  pod,
+		podKey:               podKey,
+		podDirectory:         compute.PodRuntimeDir(podKey),
+		internalPodDirectory: compute.InternalPodRuntimeDir(podKey),
+		podMountSymlinks:     map[string]string{},
+		logger:               logger,
 	}
 
 	/*---------------------------------------------------
@@ -221,8 +222,8 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	logger.Info(" * Listening for async changes on host directory")
 	// because fswatch does not work recursively, we cannot have the container directories nested within the pod.
 	// instead, we use a flat directory in the format "podir/containername.{jid,stdout,stdour,...}"
-	if err := watcher.Add(string(podDir)); err != nil {
-		SystemError(err, "register watcher for path '%s' has failed", podDir)
+	if err := watcher.Add(string(h.podDirectory)); err != nil {
+		SystemError(err, "register watcher for path '%s' has failed", h.podDirectory)
 	}
 
 	/*---------------------------------------------------
@@ -245,7 +246,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	 *---------------------------------------------------*/
 	logger.Info(" * Preparing job submission script")
 
-	scriptFilePath := podDir.SubmitJobPath()
+	scriptFilePath := h.podDirectory.SubmitJobPath()
 	scriptFileContent := strings.Builder{}
 
 	scriptTemplate, err := template.New(h.Name).
@@ -260,11 +261,11 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 		Pod:        h.podKey,
 		ComputeEnv: compute.Environment,
 		VirtualEnv: VirtualEnvironmentPaths{
-			ConstructorPath: h.podDirectory.ConstructorPath(),
-			IPAddressPath:   h.podDirectory.IPAddressPath(),
-			StdoutPath:      h.podDirectory.StdoutPath(),
-			StderrPath:      h.podDirectory.StderrPath(),
-			SysErrorPath:    h.podDirectory.SysErrorPath(),
+			ConstructorPath: h.internalPodDirectory.ConstructorPath(),
+			IPAddressPath:   h.internalPodDirectory.IPAddressPath(),
+			StdoutPath:      h.internalPodDirectory.StdoutPath(),
+			StderrPath:      h.internalPodDirectory.StderrPath(),
+			SysErrorPath:    h.internalPodDirectory.SysErrorPath(),
 		},
 		InitContainers: initContainers,
 		Containers:     containers,
@@ -305,12 +306,10 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 // buildContainer replicates the behavior of
 // https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/kuberuntime/kuberuntime_container.go
 func (h *podHandler) buildContainer(container *corev1.Container) Container {
-	containerPath := h.podDirectory.Container(container.Name)
-
 	/*---------------------------------------------------
 	 * Generate Environment Variables
 	 *---------------------------------------------------*/
-	envfilePath := containerPath.EnvFilePath()
+	envfilePath := h.podDirectory.Container(container.Name).EnvFilePath()
 	envFileContent := strings.Builder{}
 
 	envFileTemplate, err := template.New(h.Name).
@@ -334,6 +333,8 @@ func (h *podHandler) buildContainer(container *corev1.Container) Container {
 	/*---------------------------------------------------
 	 * Prepare fields for Container Template
 	 *---------------------------------------------------*/
+	containerPath := h.internalPodDirectory.Container(container.Name)
+
 	return Container{
 		InstanceName: fmt.Sprintf("%s_%s_%s", h.Pod.GetNamespace(), h.Pod.GetName(), container.Name),
 		Image:        compute.Environment.ContainerRegistry + container.Image,
@@ -351,7 +352,7 @@ func (h *podHandler) buildContainer(container *corev1.Container) Container {
 
 					mountArgs = append(mountArgs, hostpath+":"+mountVar.MountPath)
 				} else {
-					mountArgs = append(mountArgs, h.podDirectory.Mountpaths(mountVar))
+					mountArgs = append(mountArgs, h.internalPodDirectory.Mountpaths(mountVar))
 				}
 			}
 
