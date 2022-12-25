@@ -338,7 +338,7 @@ func (h *podHandler) buildContainer(container *corev1.Container) Container {
 	return Container{
 		InstanceName: fmt.Sprintf("%s_%s_%s", h.Pod.GetNamespace(), h.Pod.GetName(), container.Name),
 		Image:        compute.Environment.ContainerRegistry + container.Image,
-		EnvFilePath:  envfilePath,
+		EnvFilePath:  containerPath.EnvFilePath(),
 		Binds: func() []string {
 			mountArgs := make([]string, 0, len(container.VolumeMounts))
 
