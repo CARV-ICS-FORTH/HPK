@@ -96,7 +96,7 @@ func SavePod(_ context.Context, pod *corev1.Pod) {
 
 func WalkPodDirectories(f compute.WalkPodFunc) error {
 	rootDir := compute.RuntimeDir
-	maxDepth := 2 // expect path .hpk/namespace/pod
+	maxDepth := strings.Count(rootDir, string(os.PathSeparator)) + 2 // expect path .hpk/namespace/pod
 
 	return filepath.WalkDir(rootDir, func(path string, info os.DirEntry, err error) error {
 		if err != nil {
@@ -194,7 +194,8 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	 *---------------------------------------------------*/
 	logger.Info(" * Creating Host Directory and Pod Handler")
 
-	virtualEnvironmentDir := compute.PodRuntimeDir(podKey).VirtualEnvironmentDir()
+	podDir := compute.PodRuntimeDir(podKey)
+	virtualEnvironmentDir := podDir.VirtualEnvironmentDir()
 
 	if err := os.MkdirAll(string(virtualEnvironmentDir), compute.PodGlobalDirectoryPermissions); err != nil {
 		SystemError(err, "Cant create pod directory '%s'", virtualEnvironmentDir)
@@ -203,7 +204,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	h := podHandler{
 		Pod:              pod,
 		podKey:           podKey,
-		podDirectory:     compute.PodRuntimeDir(podKey),
+		podDirectory:     compute.InternalPodRuntimeDir(podKey),
 		podMountSymlinks: map[string]string{},
 		logger:           logger,
 	}
@@ -220,8 +221,8 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	logger.Info(" * Listening for async changes on host directory")
 	// because fswatch does not work recursively, we cannot have the container directories nested within the pod.
 	// instead, we use a flat directory in the format "podir/containername.{jid,stdout,stdour,...}"
-	if err := watcher.Add(string(h.podDirectory)); err != nil {
-		SystemError(err, "register watcher for path '%s' has failed", h.podDirectory)
+	if err := watcher.Add(string(podDir)); err != nil {
+		SystemError(err, "register watcher for path '%s' has failed", podDir)
 	}
 
 	/*---------------------------------------------------
@@ -244,7 +245,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	 *---------------------------------------------------*/
 	logger.Info(" * Preparing job submission script")
 
-	scriptFilePath := h.podDirectory.SubmitJobPath()
+	scriptFilePath := podDir.SubmitJobPath()
 	scriptFileContent := strings.Builder{}
 
 	scriptTemplate, err := template.New(h.Name).
