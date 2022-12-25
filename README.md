@@ -10,12 +10,10 @@ In contrast to a "typical" Kubernetes installation at the Cloud:
 * HPK uses a pass-through scheduler, which assigns all pods to the single `hpk-kubelet` that represents the cluster. In practice, this means that all scheduling is delegated to Slurm.
 * All Kubernetes services are converted to [headless](https://kubernetes.io/docs/concepts/services-networking/service/#headless-services). This avoids the need for internal, virtual cluster IPs that would need special handling at the network level. As a side effect, HPK services that map to multiple pods are load-balanced at the DNS level if clients support it.
 
-
 ## Compile
 
 Compile using `make`.
-
-```
+```bash
 make build
 ```
 
@@ -25,12 +23,12 @@ HPK consists of two components. The Kubernetes Master and the Virtual Kubelet.
 These components must start separately.
 
 To run the Kubernetes Master:
-```
+```bash
 make run-kubemaster
 ```
 
-Once the installation is complete, you can start the Virtual Kubelet
-```
+Once the installation is complete, you can start the Virtual Kubelet:
+```bash
 make run-kubelet
 ```
 

@@ -10,14 +10,38 @@ else
 BUILD_VERSION='unknown'
 endif
 
-BUILD_DATE     ?= $(shell date -u '+%Y-%m-%d-%H:%M UTC')
-VERSION_FLAGS   := -ldflags='-X "main.buildVersion=$(BUILD_VERSION)" -X "main.buildTime=$(BUILD_DATE)"'
+BUILD_DATE ?= $(shell date -u '+%Y-%m-%d-%H:%M UTC')
+VERSION_FLAGS := -ldflags='-X "main.buildVersion=$(BUILD_VERSION)" -X "main.buildTime=$(BUILD_DATE)"'
 
 
-# deployment options
-K8SFSPATH ?= ${HOME}/.k8sfs
-KUBEPATH ?= ${K8SFSPATH}/kubernetes/
+# Deployment options
+K8SFS_PATH ?= ${HOME}/.k8sfs
+KUBE_PATH ?= ${K8SFS_PATH}/kubernetes/
 HOST_ADDRESS ?= $(shell ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p')
+CA_BUNDLE=$(shell cat ${KUBE_PATH}/pki/ca.crt | base64 | tr -d '\n')
+
+define WEBHOOK_CONFIGURATION
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: mutating-webhook
+webhooks:
+  - name: "pod-mutator.hpk.dev"
+    rules:
+      - apiGroups:   [""]
+        apiVersions: ["v1"]
+        operations:  ["CREATE"]
+        resources:   ["pods"]
+        scope:       "Namespaced"
+    clientConfig:
+      url: "https://${HOST_ADDRESS}:10250/mutates/pods"
+      caBundle: ${CA_BUNDLE}
+    failurePolicy: Fail
+    admissionReviewVersions: ["v1"]
+    timeoutSeconds: 5
+    sideEffects: None
+endef
+export WEBHOOK_CONFIGURATION
 
 ##@ General
 
@@ -50,22 +74,22 @@ build-race: ## Build HPK binary with race condition detector.
 ##@ Deployment
 
 run-kubemaster: ## Run the Kubernetes Master
-	mkdir -p ${K8SFSPATH}/log
+	mkdir -p ${K8SFS_PATH}/log
 	apptainer run --net --dns 8.8.8.8 --fakeroot \
 	--cleanenv --pid --containall \
 	--no-init --no-umask --no-eval \
 	--no-mount tmp,home --unsquash --writable \
 	--env K8SFS_MOCK_KUBELET=0 \
-	--bind ${K8SFSPATH}:/usr/local/etc \
-	--bind ${K8SFSPATH}/log:/var/log \
+	--bind ${K8SFS_PATH}:/usr/local/etc \
+	--bind ${K8SFS_PATH}/log:/var/log \
 	docker://chazapis/kubernetes-from-scratch:20221217
 
 
 run-kubelet: ## Run the the Kubernetes virtual kubelet
 	@echo "===> Generate HPK Certificates <==="
 	mkdir -p ./bin
-	openssl genrsa -out bin/kubelet.key 2048
-	openssl req -x509 -key bin/kubelet.key -CA ${KUBEPATH}/pki/ca.crt -CAkey ${KUBEPATH}/pki/ca.key \
+	if [ ! -f bin/kubelet.key ]; then openssl genrsa -out bin/kubelet.key 2048; fi
+	openssl req -x509 -key bin/kubelet.key -CA ${KUBE_PATH}/pki/ca.crt -CAkey ${KUBE_PATH}/pki/ca.key \
 	-days 365 -nodes -out bin/kubelet.crt -subj "/CN=hpk-kubelet" \
 	-addext "basicConstraints=CA:FALSE" \
 	-addext "keyUsage=digitalSignature,keyEncipherment" \
@@ -73,17 +97,15 @@ run-kubelet: ## Run the the Kubernetes virtual kubelet
 	-addext "subjectAltName=IP:127.0.0.1,IP:${HOST_ADDRESS}"
 
 	@echo "===> Register Webhook <==="
-	VKUBELET_ADDRESS=${HOST_ADDRESS} \
-	./hack/webhooks/apply-mutating-webhook.sh ./hack/webhooks/mutating-webhook.yaml
+	export KUBECONFIG=${KUBE_PATH}/admin.conf; \
+	echo "$$WEBHOOK_CONFIGURATION" | kubectl apply -f -
 
 	@echo "===> Run HPK <==="
-	KUBECONFIG=${KUBEPATH}/admin.conf \
+	KUBECONFIG=${KUBE_PATH}/admin.conf \
 	APISERVER_KEY_LOCATION=bin/kubelet.key \
 	APISERVER_CERT_LOCATION=bin/kubelet.crt \
 	VKUBELET_ADDRESS=${HOST_ADDRESS} \
 	./bin/hpk-kubelet
-
-
 
 
 #.PHONY: build
