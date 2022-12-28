@@ -53,6 +53,9 @@ echo "Using ApptainerBin: ${apptainer}"
 cat > {{.VirtualEnv.ConstructorPath}} << "PAUSE_EOF"
 #!/bin/bash
 
+export apptainer={{.ComputeEnv.ApptainerBin}}
+echo "Using ApptainerBin: ${apptainer}"
+
 ############################
 # Auto-Generated Script    #
 # Please do not it. 	   #
@@ -102,8 +105,11 @@ reset_env() {
 	unset APPTAINER_ENVIRONMENT
 	unset APPTAINER_NAME
 
-	export APPTAINER_BIND="/bin,/lib64/,/lib/x86_64-linux-gnu/,/scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts"
-	export SINGULARITY_BIND="/bin,/lib64/,/lib/x86_64-linux-gnu/,/scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts"
+	# /bin,/lib64/,/lib/x86_64-linux-gnu/,
+	export APPTAINER_BIND="/scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts"
+	export SINGULARITY_BIND="/scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts"
+
+	touch /etc/localtime
 }
 
 handle_init_containers() {
@@ -117,7 +123,7 @@ handle_init_containers() {
 	# Mark the beginning of an init job (all get the shell's pid).  
 	echo pid://$$ > {{$container.JobIDPath}}
 
-	${apptainer} {{ $container.ApptainerMode }}  --cleanenv --compat --no-mount tmp,home --fakeroot \
+	${apptainer} {{ $container.ApptainerMode }} --cleanenv --compat --no-mount tmp,home --fakeroot \
 	--bind /scratch/etc/:/etc/,{{join "," $container.Binds}} \ 
 	{{- if $container.EnvFilePath}}
 	--env-file /scratch/{{$container.InstanceName}}.env \
@@ -144,7 +150,7 @@ handle_containers() {
 	{{- end}}
 
 	# Internal fakeroot is needed for appropriate permissions within the container
-	$(${apptainer} {{$container.ApptainerMode}} --cleanenv --compat --no-mount tmp,home --fakeroot \
+	$(${apptainer} {{$container.ApptainerMode}} --cleanenv --compat --no-mount tmp,home \
 	--bind  {{join "," $container.Binds}} \ 
 	{{- if $container.EnvFilePath}}
 	--env-file /scratch/{{$container.InstanceName}}.env \
@@ -260,12 +266,16 @@ trap sigdown SIGTERM SIGINT
 
 echo "[Host] Starting the constructor the Virtual Environment ..."
 
-# External fakeroot is needed for the networking  
-${apptainer} exec --dns 8.8.8.8 --net --fakeroot --scratch /scratch \
+export APPTAINER_HOSTNAME={{.Pod.Name}}
+export APPTAINER_BIND=$HOME:/root
+
+# External fakeroot is needed for the networking
+apptainer run --net --dns 8.8.8.8 --fakeroot \
+        --cleanenv --pid --ipc  \
+        --no-init --no-umask --no-eval \
+        --no-mount tmp,home --unsquash --writable \
 --env PARENT=${PPID}								 \
---hostname {{.Pod.Name}}							 \
---bind /bin,/usr,/lib,/lib64,/etc/apptainer,/var/lib/apptainer \
-docker://alpine {{.VirtualEnv.ConstructorPath}} &
+docker://icsforth/pause {{.VirtualEnv.ConstructorPath}} &
 
 # return the PID of Apptainer running the virtual environment
 VPID=$!
