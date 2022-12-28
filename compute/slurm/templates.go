@@ -89,7 +89,7 @@ echo "$(hostname -I) $(hostname)" >> /scratch/etc/hosts
 # If not removed, Flags will be consumed by the nested Apptainer and overwrite paths.
 # https://apptainer.org/user-docs/master/environment_and_metadata.html#environment-from-the-singularity-runtime
 reset_env() {
-    unset LD_LIBRARY_PATH
+    #unset LD_LIBRARY_PATH
 
 	unset SINGULARITY_COMMAND
 	unset SINGULARITY_CONTAINER
@@ -102,8 +102,8 @@ reset_env() {
 	unset APPTAINER_ENVIRONMENT
 	unset APPTAINER_NAME
 
-	export APPTAINER_BIND="/bin,/lib64/,/lib/x86_64-linux-gnu/,/scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts"
-	export SINGULARITY_BIND="/bin,/lib64/,/lib/x86_64-linux-gnu/,/scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts"
+	export APPTAINER_BIND="/scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts"
+	export SINGULARITY_BIND="/scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts"
 }
 
 handle_init_containers() {
@@ -261,11 +261,11 @@ trap sigdown SIGTERM SIGINT
 echo "[Host] Starting the constructor the Virtual Environment ..."
 
 # External fakeroot is needed for the networking  
-${apptainer} exec --dns 8.8.8.8 --net --fakeroot --scratch /scratch \
+${apptainer} exec --dns 8.8.8.8 --net --network=flannel --scratch /scratch \
 --env PARENT=${PPID}								 \
 --hostname {{.Pod.Name}}							 \
---bind /bin,/usr,/lib,/lib64,/etc/apptainer,/var/lib/apptainer \
-docker://alpine {{.VirtualEnv.ConstructorPath}} &
+--bind /etc/apptainer,/var/lib/apptainer \
+docker://icsforth/pause {{.VirtualEnv.ConstructorPath}} &
 
 # return the PID of Apptainer running the virtual environment
 VPID=$!
