@@ -264,8 +264,7 @@ echo "[Host] Starting the constructor the Virtual Environment ..."
 ${apptainer} exec --dns 8.8.8.8 --net --fakeroot --scratch /scratch \
 --env PARENT=${PPID}								 \
 --hostname {{.Pod.Name}}							 \
---bind /bin,/usr,/lib,/lib64,/etc/apptainer,/var/lib/apptainer \
-docker://alpine {{.VirtualEnv.ConstructorPath}} &
+docker://icsforth/pause {{.VirtualEnv.ConstructorPath}} &
 
 # return the PID of Apptainer running the virtual environment
 VPID=$!
