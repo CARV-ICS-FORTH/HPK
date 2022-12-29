@@ -89,7 +89,7 @@ echo "$(hostname -I) $(hostname)" >> /scratch/etc/hosts
 # If not removed, Flags will be consumed by the nested Apptainer and overwrite paths.
 # https://apptainer.org/user-docs/master/environment_and_metadata.html#environment-from-the-singularity-runtime
 reset_env() {
-    #unset LD_LIBRARY_PATH
+    unset LD_LIBRARY_PATH
 
 	unset SINGULARITY_COMMAND
 	unset SINGULARITY_CONTAINER
@@ -102,8 +102,8 @@ reset_env() {
 	unset APPTAINER_ENVIRONMENT
 	unset APPTAINER_NAME
 
-	export APPTAINER_BIND="/scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts"
-	export SINGULARITY_BIND="/scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts"
+	unset APPTAINER_BIND
+	unset SINGULARITY_BIND
 }
 
 handle_init_containers() {
@@ -117,8 +117,8 @@ handle_init_containers() {
 	# Mark the beginning of an init job (all get the shell's pid).  
 	echo pid://$$ > {{$container.JobIDPath}}
 
-	${apptainer} {{ $container.ApptainerMode }}  --cleanenv --compat --no-mount tmp,home --fakeroot \
-	--bind /scratch/etc/:/etc/,{{join "," $container.Binds}} \ 
+	${apptainer} {{ $container.ApptainerMode }} --cleanenv --pid --compat --no-mount tmp,home --unsquash \
+	--bind /scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts,{{join "," $container.Binds}} \
 	{{- if $container.EnvFilePath}}
 	--env-file /scratch/{{$container.InstanceName}}.env \
 	{{- end}}
@@ -144,8 +144,8 @@ handle_containers() {
 	{{- end}}
 
 	# Internal fakeroot is needed for appropriate permissions within the container
-	$(${apptainer} {{$container.ApptainerMode}} --cleanenv --compat --no-mount tmp,home --fakeroot \
-	--bind  {{join "," $container.Binds}} \ 
+	$(${apptainer} {{ $container.ApptainerMode }} --cleanenv --pid --compat --no-mount tmp,home --unsquash \
+	--bind /scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts,{{join "," $container.Binds}} \
 	{{- if $container.EnvFilePath}}
 	--env-file /scratch/{{$container.InstanceName}}.env \
 	{{- end}}
@@ -261,11 +261,11 @@ trap sigdown SIGTERM SIGINT
 echo "[Host] Starting the constructor the Virtual Environment ..."
 
 # External fakeroot is needed for the networking  
-${apptainer} exec --dns 8.8.8.8 --net --network=flannel --scratch /scratch \
+${apptainer} exec --dns 8.8.8.8 --net --fakeroot --scratch /scratch \
 --env PARENT=${PPID}								 \
 --hostname {{.Pod.Name}}							 \
---bind /etc/apptainer,/var/lib/apptainer \
-docker://icsforth/pause {{.VirtualEnv.ConstructorPath}} &
+--bind /bin,/usr,/lib,/lib64,/etc/apptainer,/var/lib/apptainer \
+docker://alpine {{.VirtualEnv.ConstructorPath}} &
 
 # return the PID of Apptainer running the virtual environment
 VPID=$!
