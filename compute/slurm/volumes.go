@@ -21,11 +21,12 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/carv-ics-forth/hpk/compute/slurm/volume/configmap"
+	"github.com/carv-ics-forth/hpk/compute/slurm/volume/hostpath"
+
 	"github.com/carv-ics-forth/hpk/compute"
-	"github.com/carv-ics-forth/hpk/compute/slurm/volume"
 	"github.com/carv-ics-forth/hpk/compute/slurm/volume/secret"
 	"github.com/carv-ics-forth/hpk/pkg/fieldpath"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	k8errors "k8s.io/apimachinery/pkg/api/errors"
@@ -61,19 +62,29 @@ func (h *podHandler) prepareVolumes(ctx context.Context) {
 			}
 			// without size limit for now
 
-			h.logger.Info("  * EmptyDir Volume is mounted",
-				"name", vol.Name,
-			)
+			h.logger.Info("  * EmptyDir Volume is mounted", "name", vol.Name)
 
 		case vol.VolumeSource.ConfigMap != nil:
 			/*---------------------------------------------------
 			 * ConfigMap
 			 *---------------------------------------------------*/
-			h.ConfigMapVolumeSource(ctx, vol)
+			mounter := configmap.VolumeMounter{
+				Volume: vol,
+				Pod:    *h.Pod,
+				Logger: h.logger,
+			}
 
-			h.logger.Info("  * ConfigMap Volume is mounted",
-				"name", vol.Name,
-			)
+			// .hpk/namespace/podName/.virtualenv/secretName/*
+			podConfigMapDir, err := h.podDirectory.CreateSubDirectory(vol.Name, compute.PodGlobalDirectoryPermissions)
+			if err != nil {
+				SystemError(err, "cannot create dir '%s' for configmap", podConfigMapDir)
+			}
+
+			if err = mounter.SetUpAt(ctx, podConfigMapDir); err != nil {
+				SystemError(err, "mount secret volume to dir '%s' has failed", podConfigMapDir)
+			}
+
+			h.logger.Info("  * ConfigMap Volume is mounted", "name", vol.Name)
 
 		case vol.VolumeSource.Secret != nil:
 			/*---------------------------------------------------
@@ -91,22 +102,11 @@ func (h *podHandler) prepareVolumes(ctx context.Context) {
 				SystemError(err, "cannot create dir '%s' for secrets", podSecretDir)
 			}
 
-			if err = mounter.SetUpAt(ctx,
-				podSecretDir,
-				volume.MounterArgs{
-					FsUser:              h.Pod.Spec.SecurityContext.RunAsUser,
-					FsGroup:             h.Pod.Spec.SecurityContext.FSGroup,
-					FSGroupChangePolicy: h.Pod.Spec.SecurityContext.FSGroupChangePolicy,
-					DesiredSize:         nil,
-					SELinuxLabel:        "",
-				},
-			); err != nil {
+			if err = mounter.SetUpAt(ctx, podSecretDir); err != nil {
 				SystemError(err, "mount secret volume to dir '%s' has failed", podSecretDir)
 			}
 
-			h.logger.Info("  * Secret Volume is mounted",
-				"name", vol.Name,
-			)
+			h.logger.Info("  * Secret Volume is mounted", "name", vol.Name)
 
 		case vol.VolumeSource.DownwardAPI != nil:
 			/*---------------------------------------------------
@@ -114,19 +114,34 @@ func (h *podHandler) prepareVolumes(ctx context.Context) {
 			 *---------------------------------------------------*/
 			h.DownwardAPIVolumeSource(ctx, vol)
 
-			h.logger.Info("  * DownwardAPI Volume is mounted",
-				"name", vol.Name,
-			)
+			h.logger.Info("  * DownwardAPI Volume is mounted", "name", vol.Name)
 
 		case vol.VolumeSource.HostPath != nil:
 			/*---------------------------------------------------
 			 * HostPath
 			 *---------------------------------------------------*/
-			h.HostPathVolumeSource(ctx, vol)
+			if vol.VolumeSource.HostPath.Type == nil || *vol.VolumeSource.HostPath.Type == corev1.HostPathUnset {
+				// For backwards compatible, leave it empty if unset
+				if path, err := h.podDirectory.CreateSymlink(vol.VolumeSource.HostPath.Path, vol.Name); err != nil {
+					SystemError(err, "cannot create HostPathDirectoryOrCreate at path '%s'", path)
+				}
 
-			h.logger.Info("  * HostPath Volume is mounted",
-				"name", vol.Name,
-			)
+				h.logger.Info("  * HostPath Volume is mounted", "name", vol.Name)
+
+				break
+			}
+
+			mounter := hostpath.VolumeMounter{
+				Volume: vol,
+				Pod:    *h.Pod,
+				Logger: h.logger,
+			}
+
+			if err := mounter.SetUpAt(ctx); err != nil {
+				SystemError(err, "mount hostpath volum has failed")
+			}
+
+			h.logger.Info("  * HostPath Volume is mounted", "name", vol.Name)
 
 		case vol.VolumeSource.PersistentVolumeClaim != nil:
 			/*---------------------------------------------------
@@ -134,9 +149,7 @@ func (h *podHandler) prepareVolumes(ctx context.Context) {
 			 *---------------------------------------------------*/
 			h.PersistentVolumeClaimSource(ctx, vol)
 
-			h.logger.Info("  * PersistentVolumeClaim Volume is mounted",
-				"name", vol.Name,
-			)
+			h.logger.Info("  * PersistentVolumeClaim Volume is mounted", "name", vol.Name)
 
 		case vol.VolumeSource.Projected != nil:
 			/*---------------------------------------------------
@@ -153,61 +166,6 @@ func (h *podHandler) prepareVolumes(ctx context.Context) {
 			logrus.Warn(vol)
 
 			panic("It seems I have missed a Volume type")
-		}
-	}
-}
-
-func (h *podHandler) ConfigMapVolumeSource(ctx context.Context, vol corev1.Volume) {
-	/*---------------------------------------------------
-	 * ConfigMap
-	 * Example:
-		volumes:
-		 - name: config-volume
-		   configMap:
-			 name: game-config
-	 *---------------------------------------------------*/
-
-	var configmap corev1.ConfigMap
-
-	source := vol.VolumeSource.ConfigMap
-
-	key := types.NamespacedName{Namespace: h.Pod.GetNamespace(), Name: source.Name}
-
-	{ // get the resource
-		optional := source.Optional != nil && *source.Optional
-
-		err := retry.OnError(NotFoundBackoff, k8errors.IsNotFound,
-			func() error {
-				return compute.K8SClient.Get(ctx, key, &configmap)
-			})
-
-		if err != nil {
-			if !(k8errors.IsNotFound(err) && optional) {
-				SystemError(err, "Couldn't get configmap '%s'", key)
-
-			}
-
-			configmap = corev1.ConfigMap{
-				ObjectMeta: metav1.ObjectMeta{
-					Namespace: h.Pod.GetNamespace(),
-					Name:      source.Name,
-				},
-			}
-		}
-	}
-
-	// .hpk/namespace/podName/.virtualenv/volName/*
-	podConfigMapDir, err := h.podDirectory.CreateSubDirectory(vol.Name, compute.PodGlobalDirectoryPermissions)
-	if err != nil {
-		SystemError(err, "cannot create dir '%s' for configmap", podConfigMapDir)
-	}
-
-	for k, v := range configmap.Data {
-		// TODO: Ensure that these files are deleted in failure cases
-		fullPath := filepath.Join(podConfigMapDir, k)
-
-		if err := os.WriteFile(fullPath, []byte(v), fs.FileMode(*source.DefaultMode)); err != nil {
-			SystemError(err, "cannot write configmap file '%s'", fullPath)
 		}
 	}
 }
@@ -233,98 +191,6 @@ func (h *podHandler) DownwardAPIVolumeSource(ctx context.Context, vol corev1.Vol
 	}
 }
 
-func (h *podHandler) HostPathVolumeSource(ctx context.Context, vol corev1.Volume) {
-	switch *vol.VolumeSource.HostPath.Type {
-	case corev1.HostPathUnset:
-		// For backwards compatible, leave it empty if unset
-		if path, err := h.podDirectory.CreateSymlink(vol.Name, vol.VolumeSource.HostPath.Path); err != nil {
-			SystemError(err, "cannot create HostPathDirectoryOrCreate at path '%s'", path)
-		}
-
-		h.podMountSymlinks[vol.Name] = vol.VolumeSource.HostPath.Path
-
-		h.logger.Info("Create Volume with Host Symlink",
-			"from ", vol.Name,
-			"to", vol.VolumeSource.HostPath.Path,
-		)
-
-	case corev1.HostPathDirectoryOrCreate:
-		// If nothing exists at the given path, an empty directory will be created there
-		// as needed with file mode 0755, having the same group and ownership with Kubelet.
-		if path, err := h.podDirectory.CreateSubDirectory(vol.Name, compute.PodGlobalDirectoryPermissions); err != nil {
-			SystemError(err, "cannot create HostPathDirectoryOrCreate at path '%s'", path)
-		}
-	case corev1.HostPathDirectory:
-		// A directory must exist at the given path
-		info, err := h.podDirectory.PathExists(vol.Name)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				PodError(h.Pod, "VolumeNotFound", "volume '%s' was not found", vol.Name)
-				return
-			}
-			SystemError(err, "failed to inspect volume '%s'", vol.Name)
-		}
-
-		if !info.Mode().IsDir() {
-			PodError(h.Pod, "UnexpectedVolumeType", "volume '%s' was expected to be directory", vol.Name)
-			return
-		}
-
-	case corev1.HostPathFileOrCreate:
-		// If nothing exists at the given path, an empty file will be created there
-		// as needed with file mode 0644, having the same group and ownership with Kubelet.
-
-		_, err := h.podDirectory.PathExists(vol.Name)
-		if err == nil {
-			return
-		}
-
-		if errors.Is(err, os.ErrNotExist) {
-			if path, err := h.podDirectory.CreateFile(vol.Name); err != nil {
-				SystemError(err, "cannot apply HostPathDirectoryOrCreate at path '%s'", path)
-			}
-		} else {
-			SystemError(err, "failed to inspect volume '%s'", vol.Name)
-		}
-
-	case corev1.HostPathFile:
-		// A file must exist at the given path
-
-		info, err := h.podDirectory.PathExists(vol.Name)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				PodError(h.Pod, "VolumeNotFound", "volume '%s' was not found", vol.Name)
-				return
-			}
-			SystemError(err, "failed to inspect volume '%s'", vol.Name)
-		}
-
-		if !info.Mode().IsRegular() {
-			PodError(h.Pod, "UnexpectedVolumeType", "volume '%s' was expected to be file", vol.Name)
-			return
-		}
-
-	case corev1.HostPathSocket, corev1.HostPathCharDev, corev1.HostPathBlockDev:
-		// A UNIX socket/char device/ block device must exist at the given path
-
-		info, err := h.podDirectory.PathExists(vol.Name)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				PodError(h.Pod, "VolumeNotFound", "volume '%s' was not found", vol.Name)
-				return
-			}
-			SystemError(err, "failed to inspect volume '%s'", vol.Name)
-		}
-
-		// todo: perform the checks
-		_ = info
-	default:
-		logrus.Warn(vol.Projected)
-
-		panic("It seems I have missed a ProjectedVolume type")
-	}
-}
-
 func (h *podHandler) PersistentVolumeClaimSource(ctx context.Context, vol corev1.Volume) {
 	var pvc corev1.PersistentVolumeClaim
 
@@ -332,10 +198,16 @@ func (h *podHandler) PersistentVolumeClaimSource(ctx context.Context, vol corev1
 
 	key := types.NamespacedName{Namespace: h.Pod.GetNamespace(), Name: source.ClaimName}
 
-	if err := retry.OnError(NotFoundBackoff, k8errors.IsNotFound,
+	err := retry.OnError(NotFoundBackoff, k8errors.IsNotFound,
 		func() error {
 			return compute.K8SClient.Get(ctx, key, &pvc)
-		}); err != nil {
+		})
+	if err != nil {
+		if k8errors.IsNotFound(err) {
+			PodError(h.Pod, "PVCNotFound", "cannot find persistentVolumeClaim '%s'", key)
+
+			return
+		}
 		SystemError(err, "error getting persistentVolumeClaim '%s'", key)
 	}
 
@@ -502,7 +374,6 @@ func (h *podHandler) ProjectedVolumeSource(ctx context.Context, vol corev1.Volum
 					func() error {
 						return compute.K8SClient.Get(ctx, key, &configmap)
 					})
-
 				if err != nil {
 					if !(k8errors.IsNotFound(err) && optional) {
 						SystemError(err, "Couldn't get projected.configmap '%s'", key)
@@ -542,11 +413,9 @@ func (h *podHandler) ProjectedVolumeSource(ctx context.Context, vol corev1.Volum
 					func() error {
 						return compute.K8SClient.Get(ctx, key, &secret)
 					})
-
 				if err != nil {
 					if !(k8errors.IsNotFound(err) && optional) {
 						SystemError(err, "Couldn't get projected.secret '%s'", key)
-
 					}
 
 					secret = corev1.Secret{

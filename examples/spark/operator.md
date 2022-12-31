@@ -33,11 +33,13 @@ EOF
 ```
 
 Follow the status using:
+
 ```bash
 kubectl describe sparkapplication spark-pi
 ```
 
 The result is show in the driver logs:
+
 ```bash
 kubectl logs -f spark-pi-driver
 ```

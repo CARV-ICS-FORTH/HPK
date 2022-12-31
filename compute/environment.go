@@ -52,8 +52,10 @@ const (
 	ContainerJobPermissions       = os.FileMode(0o777)
 )
 
-var UserHomeDir, _ = os.UserHomeDir()
-var RuntimeDir = filepath.Join(UserHomeDir, ".hpk")
+var (
+	UserHomeDir, _ = os.UserHomeDir()
+	RuntimeDir     = filepath.Join(UserHomeDir, ".hpk")
+)
 
 const (
 	// Slurm-Related Extensions
@@ -161,10 +163,10 @@ func (p PodPath) CreateSubDirectory(name string, mode os.FileMode) (string, erro
 	return fullPath, nil
 }
 
-func (p PodPath) CreateSymlink(name string, origpath string) (string, error) {
-	fullPath := filepath.Join(string(p.VirtualEnvironmentDir()), name)
+func (p PodPath) CreateSymlink(src string, dst string) (string, error) {
+	fullPath := filepath.Join(string(p.VirtualEnvironmentDir()), dst)
 
-	if err := os.Symlink(origpath, fullPath); err != nil {
+	if err := os.Symlink(src, fullPath); err != nil {
 		return fullPath, errors.Wrapf(err, "cannot create symlink '%s'", fullPath)
 	}
 
@@ -230,7 +232,7 @@ func (c ContainerPath) EnvFilePath() string {
 func ParsePath(path string) (podKey types.NamespacedName, fileName string, invalid bool) {
 	re := regexp.MustCompile(`^.hpk/(?P<namespace>\S+)/(?P<pod>\S+?)(/.virtualenv)*/(?P<file>.*)$`)
 
-	trimmedPath := strings.TrimPrefix(path, UserHomeDir + string(os.PathSeparator))
+	trimmedPath := strings.TrimPrefix(path, UserHomeDir+string(os.PathSeparator))
 	match := re.FindStringSubmatch(trimmedPath)
 
 	if len(match) == 0 {

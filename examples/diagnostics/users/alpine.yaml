@@ -13,7 +13,7 @@ spec:
         - |
           addgroup -S newuser
           adduser -S newuser -G newuser
-      
+          
           apk add util-linux
 
           # Expect root
@@ -46,4 +46,4 @@ spec:
   containers:
     - name: whoami-root
       image: alpine
-      command: ["whoami"]
+      command: [ "whoami" ]

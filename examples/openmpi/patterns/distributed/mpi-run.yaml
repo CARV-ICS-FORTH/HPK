@@ -26,10 +26,10 @@ spec:
                 - name: binaries-volume
                   mountPath: /skata
               command:
-                    - sh
-                    - -c
-                    - |
-                      mpirun /skata/hello_c -n 2          
+                - sh
+                - -c
+                - |
+                  mpirun /skata/hello_c -n 2          
 
     Worker:
       replicas: 2

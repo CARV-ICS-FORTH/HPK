@@ -13,8 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package secret contains the internal representation of secret volumes.
-package secret
+// Package configmap contains the internal representation of configMap volumes.
+package configmap
 
 import (
 	"context"
@@ -36,8 +36,7 @@ import (
 // and placing them into the volume on the host.
 type VolumeMounter struct {
 	Volume corev1.Volume
-
-	Pod corev1.Pod
+	Pod    corev1.Pod
 
 	Logger logr.Logger
 }
@@ -45,46 +44,46 @@ type VolumeMounter struct {
 func (b *VolumeMounter) SetUpAt(ctx context.Context, dir string) error {
 	b.Logger.Info("Setting up volume for Pod", "volume", b.Volume.Name, "dir", dir)
 
-	var secret corev1.Secret
+	var configMap corev1.ConfigMap
 
-	source := b.Volume.Secret
+	source := b.Volume.ConfigMap
 	optional := source.Optional != nil && *source.Optional
 
 	/*---------------------------------------------------
 	 * Get the Resource from Kubernetes
 	 *---------------------------------------------------*/
 
-	key := types.NamespacedName{Namespace: b.Pod.GetNamespace(), Name: source.SecretName}
+	key := types.NamespacedName{Namespace: b.Pod.GetNamespace(), Name: source.Name}
 
 	err := retry.OnError(volume.NotFoundBackoff, k8errors.IsNotFound,
 		func() error {
-			return compute.K8SClient.Get(ctx, key, &secret)
+			return compute.K8SClient.Get(ctx, key, &configMap)
 		})
 	if err != nil {
 		if !(k8errors.IsNotFound(err) && optional) {
 			return errors.Wrapf(err, "Couldn't get secret '%s'", key)
 		}
 
-		secret = corev1.Secret{
+		configMap = corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: b.Pod.GetNamespace(),
-				Name:      source.SecretName,
+				Name:      source.Name,
 			},
 		}
 	}
 
-	totalBytes := totalSecretBytes(&secret)
+	totalBytes := totalBytes(&configMap)
 
-	b.Logger.Info("Received secret",
-		"secret", source.SecretName,
-		"data", len(secret.Data),
+	b.Logger.Info("Received configMap",
+		"configMap", source.Name,
+		"data", len(configMap.Data)+len(configMap.BinaryData),
 		"total", totalBytes,
 	)
 
 	/*---------------------------------------------------
 	 * Mount Resource to the host
 	 *---------------------------------------------------*/
-	payload, err := MakePayload(source.Items, &secret, source.DefaultMode, optional)
+	payload, err := MakePayload(source.Items, &configMap, source.DefaultMode, optional)
 	if err != nil {
 		return err
 	}
@@ -112,32 +111,38 @@ func (b *VolumeMounter) SetUpAt(ctx context.Context, dir string) error {
 }
 
 // MakePayload function is exported so that it can be called from the projection volume driver
-func MakePayload(mappings []corev1.KeyToPath, secret *corev1.Secret, defaultMode *int32, optional bool) (map[string]volumeutil.FileProjection, error) {
+func MakePayload(mappings []corev1.KeyToPath, configMap *corev1.ConfigMap, defaultMode *int32, optional bool) (map[string]volumeutil.FileProjection, error) {
 	if defaultMode == nil {
 		return nil, errors.Errorf("no defaultMode used, not even the default value for it")
 	}
 
-	payload := make(map[string]volumeutil.FileProjection, len(secret.Data))
+	payload := make(map[string]volumeutil.FileProjection, (len(configMap.Data) + len(configMap.BinaryData)))
 	var fileProjection volumeutil.FileProjection
 
 	if len(mappings) == 0 {
-		for name, data := range secret.Data {
+		for name, data := range configMap.Data {
+			fileProjection.Data = []byte(data)
+			fileProjection.Mode = *defaultMode
+			payload[name] = fileProjection
+		}
+		for name, data := range configMap.BinaryData {
 			fileProjection.Data = data
 			fileProjection.Mode = *defaultMode
 			payload[name] = fileProjection
 		}
 	} else {
 		for _, ktp := range mappings {
-			content, ok := secret.Data[ktp.Key]
-			if !ok {
+			if stringData, ok := configMap.Data[ktp.Key]; ok {
+				fileProjection.Data = []byte(stringData)
+			} else if binaryData, ok := configMap.BinaryData[ktp.Key]; ok {
+				fileProjection.Data = binaryData
+			} else {
 				if optional {
 					continue
 				}
-
-				return nil, errors.Errorf("references non-existent secret key: %s", ktp.Key)
+				return nil, fmt.Errorf("configmap references non-existent config key: %s", ktp.Key)
 			}
 
-			fileProjection.Data = content
 			if ktp.Mode != nil {
 				fileProjection.Mode = *ktp.Mode
 			} else {
@@ -150,10 +155,13 @@ func MakePayload(mappings []corev1.KeyToPath, secret *corev1.Secret, defaultMode
 	return payload, nil
 }
 
-func totalSecretBytes(secret *corev1.Secret) int {
+func totalBytes(configMap *corev1.ConfigMap) int {
 	totalSize := 0
-	for _, bytes := range secret.Data {
-		totalSize += len(bytes)
+	for _, value := range configMap.Data {
+		totalSize += len(value)
+	}
+	for _, value := range configMap.BinaryData {
+		totalSize += len(value)
 	}
 
 	return totalSize

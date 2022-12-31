@@ -16,22 +16,22 @@ spec:
           - name: A
             template: runner
             arguments:
-              parameters: [{name: program, value: hello_c}]
+              parameters: [ { name: program, value: hello_c } ]
           - name: B
             depends: "A"
             template: runner
             arguments:
-              parameters: [{name: program, value: hello_c}]
+              parameters: [ { name: program, value: hello_c } ]
           - name: C
             depends: "A"
             template: runner
             arguments:
-              parameters: [{name: program, value: hello_c}]
+              parameters: [ { name: program, value: hello_c } ]
           - name: D
             depends: "B && C"
             template: runner
             arguments:
-              parameters: [{name: program, value: hello_c}]
+              parameters: [ { name: program, value: hello_c } ]
 
     - name: runner
       inputs:
@@ -42,4 +42,4 @@ spec:
         volumeMounts:
           - name: binaries-volume
             mountPath: /binaries
-        command: [mpirun, "--allow-run-as-root", "/binaries/{{inputs.parameters.program}}"]
+        command: [ mpirun, "--allow-run-as-root", "/binaries/{{inputs.parameters.program}}" ]

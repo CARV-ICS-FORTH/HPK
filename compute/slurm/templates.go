@@ -263,6 +263,7 @@ echo "[Host] Starting the constructor the Virtual Environment ..."
 # External fakeroot is needed for the networking  
 ${apptainer} exec --dns 8.8.8.8 --net --fakeroot --scratch /scratch \
 --env PARENT=${PPID}								 \
+--bind $HOME		  								 \
 --hostname {{.Pod.Name}}							 \
 docker://icsforth/pause {{.VirtualEnv.ConstructorPath}} &
 

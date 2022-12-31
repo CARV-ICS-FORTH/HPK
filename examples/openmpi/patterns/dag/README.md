@@ -1,9 +1,9 @@
 # Run OpenMPI Workflows with shared paths
 
 The workflow consists of two steps.
+
 - Step1: Get the source codes and build thebinaries
 - Step2: Run the binaries
-
 
 Step 1. Install Argo
 
@@ -17,16 +17,15 @@ Step 2. Run the Workflow
 kubectl apply -f dag.yaml
 ```
 
-
 ## Step3: Access the UI
 
 #### from Login node
 
 To visit the workflow frontend at http://127.0.0.1:2746/workflows/default:
+
 ```bash
 kubectl port-forward service/argo-workflows-server 2746:2746
 ```
-
 
 #### from Workstation
 

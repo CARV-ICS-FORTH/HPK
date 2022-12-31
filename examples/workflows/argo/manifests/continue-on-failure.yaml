@@ -12,34 +12,34 @@ spec:
           - name: A
             template: whalesay
           - name: B
-            dependencies: [A]
+            dependencies: [ A ]
             template: intentional-fail
             continueOn:
               failed: true
           - name: C
-            dependencies: [A]
+            dependencies: [ A ]
             template: whalesay
           - name: D
-            dependencies: [B, C]
+            dependencies: [ B, C ]
             template: whalesay
           - name: E
-            dependencies: [A]
+            dependencies: [ A ]
             template: intentional-fail
           - name: F
-            dependencies: [A]
+            dependencies: [ A ]
             template: whalesay
           - name: G
-            dependencies: [E, F]
+            dependencies: [ E, F ]
             template: whalesay
 
     - name: whalesay
       container:
         image: docker/whalesay:latest
-        command: [cowsay]
-        args: ["hello world"]
+        command: [ cowsay ]
+        args: [ "hello world" ]
 
     - name: intentional-fail
       container:
         image: alpine:latest
-        command: [sh, -c]
-        args: ["echo intentional failure; exit 1"]
+        command: [ sh, -c ]
+        args: [ "echo intentional failure; exit 1" ]

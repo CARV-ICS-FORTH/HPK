@@ -1,12 +1,11 @@
 # Port forwarding
 
 This tutorial describes how you can access your web interfaces from
+
 - Login nodes
 - Remote Workstations
 
-
 == Login nodes
-
 
 == Remote workstations
 
@@ -28,7 +27,6 @@ kubectl describe service ${SERVICE_NAME} | awk /Endpoints/{'print $2'}
 
 Let's up assume that it returns `10.244.5.103:9000`.
 We will use this address on the next step.
-
 
 From your workstation:
 

@@ -44,4 +44,4 @@ spec:
   containers:
     - name: whoami-root
       image: ubuntu
-      command: ["whoami"]
+      command: [ "whoami" ]

@@ -17,8 +17,6 @@ VERSION_FLAGS := -ldflags='-X "main.buildVersion=$(BUILD_VERSION)" -X "main.buil
 # Deployment options
 K8SFS_PATH ?= ${HOME}/.k8sfs
 KUBE_PATH ?= ${K8SFS_PATH}/kubernetes/
-HOST_ADDRESS ?= $(shell ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p')
-CA_BUNDLE=$(shell cat ${KUBE_PATH}/pki/ca.crt | base64 | tr -d '\n')
 
 define WEBHOOK_CONFIGURATION
 apiVersion: admissionregistration.k8s.io/v1
@@ -84,7 +82,8 @@ run-kubemaster: ## Run the Kubernetes Master
 	--bind ${K8SFS_PATH}/log:/var/log \
 	docker://chazapis/kubernetes-from-scratch:20221217
 
-
+run-kubelet: CA_BUNDLE = $(shell cat ${KUBE_PATH}/pki/ca.crt | base64 | tr -d '\n')
+run-kubelet: HOST_ADDRESS = $(shell ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p')
 run-kubelet: ## Run the the Kubernetes virtual kubelet
 	@echo "===> Generate HPK Certificates <==="
 	mkdir -p ./bin

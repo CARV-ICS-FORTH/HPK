@@ -1,21 +1,23 @@
 This is a guide for installing apptainer without root, on arm64 machines.
 
-
 # Get the source codes
 
 Firstly, create a build directory and download the source codes there.
+
 ```
 mkdir builds
 cd builds
 ```
 
 If you can download them directly from the Internet, use:
+
 ```
 wget https://go.dev/dl/go1.19.3.linux-arm64.tar.gz
 wget https://github.com/apptainer/apptainer/releases/download/v1.1.3/apptainer-1.1.3.tar.gz
 ```
 
 # Install GO
+
 To install Go, we use the instructions on: https://go.dev/doc/install
 
 ```
@@ -26,10 +28,12 @@ In practise, we see that golang is already compile for the target platform.
 All we have to do now is to fix the `GOHOME`, `GOPATH`, and `PATH`
 
 In the ~/.bashrc, append the following:
+
 ```
 GOPATH=${HOME}/builds/go/bin
 PATH=$PATH:${GOPATH}
 ```
+
 To load the configuration, do `source ~/.bashrc`
 
 Now, simply try `go` to verify the installation
@@ -49,21 +53,23 @@ make -C ./builddir install
 by now, apptainer should be installed in $HOME/apptainer.
 
 Like before, in the ~/.bashrc, append the following:
+
 ```
 PATH=$PATH:${HOME}/apptainer/bin
 ```
 
 and do  `source ~/.bashrc`
 
-
 # Run a container
 
 Download an arm64 container.
+
 ```
 apptainer pull --arch arm64 arm64-ubuntu.sif docker://arm64v8/ubuntu
 ```
 
 Run the container on the headnode
+
 ```
 ./apptainer shell ~/arm64-ubuntu.sif
 ```
@@ -71,6 +77,7 @@ Run the container on the headnode
 # Use container in Slurm jobs
 
 To submit slurms jobs, we need to wrap the command into a `script.sh`.
+
 ```
 #!/bin/bash
 #MSUB -r box_128_32r               # Request name
@@ -89,8 +96,6 @@ singularity shell ~/arm64-ubuntu.sif
 ```
 
 Then, submit the script using `ccc_msub script.sh`
-
-
 
 # Additional Sources:
 

@@ -1,6 +1,5 @@
 # Argo Workflows with artifacts stored in MinIO
 
-
 ## Step 1: Argo + Minio Installation
 
 You will need to have `helm` installed on your setup.
@@ -33,8 +32,6 @@ helm install argo-workflows argo/argo-workflows \
 kubectl create rolebinding default-admin --clusterrole=cluster-admin --serviceaccount=default:default
 ```
 
-
-
 * Keep the following credentials. You will need them later to access Minio WebUI.
 
 ```bash
@@ -43,28 +40,21 @@ SECRET_KEY=`kubectl get secret argo-artifacts -n default -o jsonpath="{.data.roo
 echo "MinIO credentials: $ACCESS_KEY $SECRET_KEY"
 ```
 
-
-
 ## Step 2: Run a workflow
 
 ```
 kubectl create -f https://raw.githubusercontent.com/argoproj/argo-workflows/master/examples/artifact-passing.yaml
 ```
 
-
-
-## Step3: Access UI 
-
-
+## Step3: Access UI
 
 #### from Login node
 
 To visit the workflow frontend at http://127.0.0.1:2746/workflows/default:
+
 ```bash
 kubectl port-forward service/argo-workflows-server 2746:2746
 ```
-
-
 
 To visit the artifacts repository at http://127.0.0.1:9001/buckets/artifacts/browse:
 
@@ -73,8 +63,6 @@ kubectl port-forward service/argo-artifacts-console 9001:9001
 ```
 
 **Note:**  You will need the credentials of Step 1.
-
-
 
 #### from Workstation
 
@@ -94,7 +82,6 @@ COMPUTE_NODE=jedi1
 ssh -t ${LOGIN_NODE} -L ${LOCAL_PORT}:127.0.0.1:${LOCAL_PORT}  \
 ssh -L ${LOCAL_PORT}:${CONTAINER_IP}:${CONTAINER_PORT} ${COMPUTE_NODE}
 ```
-
 
 To visit the artifacts repository at  http://127.0.0.1:9001/buckets/artifacts/browse:
 
