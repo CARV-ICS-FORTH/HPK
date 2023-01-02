@@ -211,7 +211,9 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	h.podEnvVariables = FromServices(ctx, pod.GetNamespace())
 
 	h.logger.Info(" * Mounting Volumes")
-	h.prepareVolumes(ctx)
+	for _, vol := range h.Pod.Spec.Volumes {
+		h.mountVolumeSource(ctx, vol)
+	}
 
 	logger.Info(" * Listening for async changes on host directory")
 	// because fswatch does not work recursively, we cannot have the container directories nested within the pod.

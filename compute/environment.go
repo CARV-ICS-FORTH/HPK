@@ -20,6 +20,8 @@ import (
 	"regexp"
 	"strings"
 
+	"k8s.io/client-go/kubernetes"
+
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -37,6 +39,8 @@ type HPCEnvironment struct {
 var Environment HPCEnvironment
 
 var K8SClient client.Client
+
+var K8SClientset *kubernetes.Clientset
 
 var DefaultLogger = zap.New(zap.UseDevMode(true))
 

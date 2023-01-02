@@ -26,7 +26,7 @@ import (
 // getNestedMountpoints returns a list of mountpoint directories that should be created
 // for the volume indicated by name.
 // note: the returned list is relative to baseDir
-func getNestedMountpoints(name, baseDir string, pod corev1.Pod) ([]string, error) {
+func getNestedMountpoints(name string, pod corev1.Pod) ([]string, error) {
 	var retval []string
 	checkContainer := func(container *corev1.Container) error {
 		var allMountPoints []string // all mount points in this container
@@ -96,7 +96,7 @@ func getNestedMountpoints(name, baseDir string, pod corev1.Pod) ([]string, error
 
 // MakeNestedMountpoints creates mount points in baseDir for volumes mounted beneath name
 func MakeNestedMountpoints(name, baseDir string, pod corev1.Pod) error {
-	dirs, err := getNestedMountpoints(name, baseDir, pod)
+	dirs, err := getNestedMountpoints(name, pod)
 	if err != nil {
 		return err
 	}
