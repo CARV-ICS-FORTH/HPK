@@ -147,6 +147,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	}
 
 	compute.K8SClient = k8sclient
+	compute.K8SClientset = k8sclientset
 	compute.Environment.ContainerRegistry = c.ContainerRegistry
 	compute.Environment.ApptainerBin = c.ApptainerBin
 
@@ -202,6 +203,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		DaemonPort:        c.KubeletPort,
 		BuildVersion:      commands.BuildVersion,
 		FSPollingInterval: c.FSPollingInterval,
+		RestConfig:        restConfig,
 	})
 	if err != nil {
 		return err

@@ -20,6 +20,12 @@ import (
 	"os"
 	"time"
 
+	"github.com/virtual-kubelet/virtual-kubelet/node/api/statsv1alpha1"
+
+	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/remotecommand"
+
 	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/compute/slurm"
 	"github.com/carv-ics-forth/hpk/pkg/filenotify"
@@ -28,22 +34,11 @@ import (
 	"github.com/pkg/errors"
 	"github.com/virtual-kubelet/virtual-kubelet/errdefs"
 	vkapi "github.com/virtual-kubelet/virtual-kubelet/node/api"
-	"github.com/virtual-kubelet/virtual-kubelet/node/api/statsv1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/json"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
-
-// VirtualK8S implements the virtual-kubelet provider interface and stores pods in memory.
-type VirtualK8S struct {
-	InitConfig
-
-	Logger logr.Logger
-
-	fileWatcher filenotify.FileWatcher
-	updatedPod  func(*corev1.Pod)
-}
 
 // InitConfig is the config passed to initialize a registered provider.
 type InitConfig struct {
@@ -53,6 +48,18 @@ type InitConfig struct {
 	BuildVersion string
 
 	FSPollingInterval time.Duration
+
+	RestConfig *rest.Config
+}
+
+// VirtualK8S implements the virtual-kubelet provider interface and stores pods in memory.
+type VirtualK8S struct {
+	InitConfig
+
+	Logger logr.Logger
+
+	fileWatcher filenotify.FileWatcher
+	updatedPod  func(*corev1.Pod)
 }
 
 // NewVirtualK8S reads a kubeconfig file and sets up a client to interact
@@ -418,6 +425,16 @@ func (v *VirtualK8S) NotifyPods(_ context.Context, f func(*corev1.Pod)) {
 
 ************************************************************/
 
+func (v *VirtualK8S) GetStatsSummary(context.Context) (*statsv1alpha1.Summary, error) {
+	/*---------------------------------------------------
+	 * Preamble used for Request tracing on the logs
+	 *---------------------------------------------------*/
+	v.Logger.Info("K8s -> GetStatsSummary")
+	defer v.Logger.Info("K8s <- GetStatsSummary")
+
+	panic("not yet supported")
+}
+
 // GetContainerLogs retrieves the logs of a container by name from the provider.
 func (v *VirtualK8S) GetContainerLogs(ctx context.Context, namespace, podName, containerName string, opts vkapi.ContainerLogOpts) (io.ReadCloser, error) {
 	podKey := client.ObjectKey{Namespace: namespace, Name: podName}
@@ -470,58 +487,56 @@ func (v *VirtualK8S) RunInContainer(ctx context.Context, namespace, podName, con
 	logger.Info("K8s -> RunInContainer", "container", containerName)
 	defer logger.Info("K8s <- RunInContainer", "container", containerName)
 
-	/*
-		defer func() {
-			if attach.Stdout() != nil {
-				attach.Stdout().Close()
-			}
-			if attach.Stderr() != nil {
-				attach.Stderr().Close()
-			}
-		}()
-		req := v.client.CoreV1().RESTClient().
-			Post().
-			Namespace(namespace).
-			Resource("pods").
-			Name(podName).
-			SubResource("exec").
-			Timeout(0).
-			VersionedParams(&corev1.PodExecOptions{
-				Container: containerName,
-				Command:   cmd,
-				Stdin:     attach.Stdin() != nil,
-				Stdout:    attach.Stdout() != nil,
-				Stderr:    attach.Stderr() != nil,
-				TTY:       attach.TTY(),
-			}, scheme.ParameterCodec)
-
-		exec, err := remotecommand.NewSPDYExecutor(v.config, "POST", req.URL())
-		if err != nil {
-			return fmt.Errorf("could not make remote command: %v", err)
+	defer func() {
+		if attach.Stdout() != nil {
+			attach.Stdout().Close()
 		}
-
-		ts := &termSize{attach: attach}
-
-		err = exec.Stream(remotecommand.StreamOptions{
-			Stdin:             attach.Stdin(),
-			Stdout:            attach.Stdout(),
-			Stderr:            attach.Stderr(),
-			Tty:               attach.TTY(),
-			TerminalSizeQueue: ts,
-		})
-		if err != nil {
-			return err
+		if attach.Stderr() != nil {
+			attach.Stderr().Close()
 		}
-	*/
-	return nil
+	}()
+
+	req := compute.K8SClientset.RESTClient().
+		Post().
+		Namespace(namespace).
+		Resource("pods").
+		Name(podName).
+		SubResource("exec").
+		Timeout(0).
+		VersionedParams(&corev1.PodExecOptions{
+			Container: containerName,
+			Command:   cmd,
+			Stdin:     attach.Stdin() != nil,
+			Stdout:    attach.Stdout() != nil,
+			Stderr:    attach.Stderr() != nil,
+			TTY:       attach.TTY(),
+		}, scheme.ParameterCodec)
+
+	exec, err := remotecommand.NewSPDYExecutor(v.InitConfig.RestConfig, "POST", req.URL())
+	if err != nil {
+		return errors.Wrapf(err, "could not make remote command")
+	}
+
+	return exec.Stream(remotecommand.StreamOptions{
+		Stdin:             attach.Stdin(),
+		Stdout:            attach.Stdout(),
+		Stderr:            attach.Stderr(),
+		Tty:               attach.TTY(),
+		TerminalSizeQueue: &termSize{attach: attach},
+	})
 }
 
-func (v *VirtualK8S) GetStatsSummary(context.Context) (*statsv1alpha1.Summary, error) {
-	/*---------------------------------------------------
-	 * Preamble used for Request tracing on the logs
-	 *---------------------------------------------------*/
-	v.Logger.Info("K8s -> GetStatsSummary")
-	defer v.Logger.Info("K8s <- GetStatsSummary")
+// termSize helps exec termSize
+type termSize struct {
+	attach vkapi.AttachIO
+}
 
-	panic("not yet supported")
+// Next returns the new terminal size after the terminal has been resized. It returns nil when
+// monitoring has been stopped.
+func (t *termSize) Next() *remotecommand.TerminalSize {
+	resize := <-t.attach.Resize()
+	return &remotecommand.TerminalSize{
+		Height: resize.Height,
+		Width:  resize.Width,
+	}
 }

@@ -1,18 +1,4 @@
 ---
-# Source: localpv-provisioner/templates/rbac.yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: openebs-localpv-provisioner
-  labels:
-    chart: localpv-provisioner-3.3.0
-    heritage: Helm
-    openebs.io/version: "3.3.0"
-    app: localpv-provisioner
-    release: openebs
-    component: "localpv-provisioner"
-    openebs.io/component-name: openebs-localpv-provisioner
----
 # Source: localpv-provisioner/templates/device-class.yaml
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
@@ -44,6 +30,23 @@ metadata:
 provisioner: openebs.io/local
 volumeBindingMode: WaitForFirstConsumer
 reclaimPolicy: Delete
+
+
+---
+# Source: localpv-provisioner/templates/rbac.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openebs-localpv-provisioner
+  labels:
+    chart: localpv-provisioner-3.3.0
+    heritage: Helm
+    openebs.io/version: "3.3.0"
+    app: localpv-provisioner
+    release: openebs
+    component: "localpv-provisioner"
+    openebs.io/component-name: openebs-localpv-provisioner
+
 ---
 # Source: localpv-provisioner/templates/rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -79,6 +82,7 @@ rules:
   verbs: ["*" ]
 - nonResourceURLs: ["/metrics"]
   verbs: ["get"]
+
 ---
 # Source: localpv-provisioner/templates/rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -101,6 +105,7 @@ subjects:
 - kind: ServiceAccount
   name: openebs-localpv-provisioner
   namespace: default
+
 ---
 # Source: localpv-provisioner/templates/deployment.yaml
 apiVersion: apps/v1
