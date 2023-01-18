@@ -1,4 +1,4 @@
-name: Run examples
+name: Build and test
 on:
   workflow_dispatch:
 jobs:
@@ -23,7 +23,12 @@ jobs:
       - name: Build
         run: |
           make build
-  run:
+      - name: Archive binary
+        uses: actions/upload-artifact@v3
+        with:
+          name: hpk-kubelet
+          path: bin/hpk-kubelet
+  test:
     runs-on: ubuntu-20.04
     steps:
       - name: Check out Git repository
@@ -31,7 +36,24 @@ jobs:
       - name: Setup the environment
         run: |
           sudo ./docs/install-environment.sh
-      - name: Check the install-environment
+      - name: Get binary
+        uses: actions/download-artifact@v3
+        with:
+          name: hpk-kubelet
+          path: bin/hpk-kubelet
+      - name: Start Kubernetes
+        uses: JarvusInnovations/background-action@v1
+        with:
+          run: |
+            make run-kubemaster
+          wait-on: |
+            file:$HOME/.k8sfs/log/k8sfs/services-webhook.log
+          wait-for: 1m
+      - name: Start HPK
+        uses: JarvusInnovations/background-action@v1
+        with:
+          run: |
+            make run-kubelet
+      - name: Run the tests
         run: |
-          apptainer exec --net --fakeroot docker://alpine ip a
-          sinfo
+          make test

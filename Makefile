@@ -13,7 +13,6 @@ endif
 BUILD_DATE ?= $(shell date -u '+%Y-%m-%d-%H:%M UTC')
 VERSION_FLAGS := -ldflags='-X "main.buildVersion=$(BUILD_VERSION)" -X "main.buildTime=$(BUILD_DATE)"'
 
-
 # Deployment options
 K8SFS_PATH ?= ${HOME}/.k8sfs
 KUBE_PATH ?= ${K8SFS_PATH}/kubernetes/
@@ -43,29 +42,18 @@ export WEBHOOK_CONFIGURATION
 
 ##@ General
 
-# The help target prints out all targets with their descriptions organized
-# beneath their categories. The categories are represented by '##@' and the
-# target descriptions by '##'. The awk commands is responsible for reading the
-# entire set of makefiles included in this invocation, looking for lines of the
-# file as xyz: ## something, and then pretty-format the target and help. Then,
-# if there's a line with ##@ something, that gets pretty-printed as a category.
-# More info on the usage of ANSI control characters for terminal formatting:
-# https://en.wikipedia.org/wiki/ANSI_escape_code#SGR_parameters
-# More info on the awk command:
-# http://linuxcommand.org/lc3_adv_awk.php
-
 .DEFAULT_GOAL := help
 
-help: ## Display this help.
+help: ## Display this help
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 
 ##@ Build
 
-build: ## Build HPK binary.
+build: ## Build HPK binary
 	GOOS=linux GOARCH=amd64 go build $(VERSION_FLAGS) -ldflags '-extldflags "-static"' -o bin/hpk-kubelet ./cmd/hpk
 
-build-race: ## Build HPK binary with race condition detector.
+build-race: ## Build HPK binary with race condition detector
 	GOOS=linux GOARCH=amd64 go build $(VERSION_FLAGS) -race -o bin/hpk-kubelet ./cmd/hpk
 
 
@@ -84,7 +72,7 @@ run-kubemaster: ## Run the Kubernetes Master
 
 run-kubelet: CA_BUNDLE = $(shell cat ${KUBE_PATH}/pki/ca.crt | base64 | tr -d '\n')
 run-kubelet: HOST_ADDRESS = $(shell ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p')
-run-kubelet: ## Run the the Kubernetes virtual kubelet
+run-kubelet: ## Run the HPK Virtual Kubelet
 	@echo "===> Generate HPK Certificates <==="
 	mkdir -p ./bin
 	if [ ! -f bin/kubelet.key ]; then openssl genrsa -out bin/kubelet.key 2048; fi
@@ -106,6 +94,18 @@ run-kubelet: ## Run the the Kubernetes virtual kubelet
 	VKUBELET_ADDRESS=${HOST_ADDRESS} \
 	./bin/hpk-kubelet
 
+##@ Test
+
+test: ## Run all tests
+	if [ ! -d test/helper ]; then \
+		mkdir test/helper; \
+		git clone https://github.com/bats-core/bats-core.git test/helper/bats; \
+		git clone https://github.com/bats-core/bats-support.git test/helper/bats-support; \
+		git clone https://github.com/bats-core/bats-assert.git test/helper/bats-assert; \
+		git clone https://github.com/bats-core/bats-detik.git test/helper/bats-detik; \
+	fi
+	export KUBECONFIG=${KUBE_PATH}/admin.conf; \
+	./test/helper/bats/bin/bats test/test.bats
 
 #.PHONY: build
 #build: clean bin/hpk-kubelet
