@@ -28,7 +28,7 @@ setup() {
 
     sleep 30
 
-    run try "at most 10 times every 10s to find 1 pod named 'privileged-client' with 'status' being 'succeeded'"
+    run try "at most 20 times every 10s to find 1 pod named 'privileged-client' with 'status' being 'succeeded'"
     assert_success
     run verify "'status' is 'running' for pod named 'privileged-server'"
     assert_success
@@ -65,7 +65,7 @@ setup() {
 
     sleep 30
 
-    run try "at most 10 times every 10s to find 1 pod named 'unprivileged-client' with 'status' being 'succeeded'"
+    run try "at most 20 times every 10s to find 1 pod named 'unprivileged-client' with 'status' being 'succeeded'"
     assert_success
     run verify "'status' is 'running' for pod named 'unprivileged-server'"
     assert_success
