@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Check out Git repository
         uses: actions/checkout@v3
@@ -29,31 +29,37 @@ jobs:
           name: hpk-kubelet
           path: bin/hpk-kubelet
   test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
+    needs: build
     steps:
       - name: Check out Git repository
         uses: actions/checkout@v3
-      - name: Setup the environment
-        run: |
-          sudo ./docs/install-environment.sh
       - name: Get binary
         uses: actions/download-artifact@v3
         with:
           name: hpk-kubelet
-          path: bin/hpk-kubelet
+          path: bin
+      - name: Setup the environment
+        run: |
+          sudo ./test/install-environment.sh
+          echo "HOME=$HOME" >> $GITHUB_ENV
+          chmod +x bin/hpk-kubelet
       - name: Start Kubernetes
         uses: JarvusInnovations/background-action@v1
         with:
           run: |
             make run-kubemaster
           wait-on: |
-            file:$HOME/.k8sfs/log/k8sfs/services-webhook.log
-          wait-for: 1m
+            file:${{ env.HOME }}/.k8sfs/log/k8sfs/services-webhook.log
+          wait-for: 5m
       - name: Start HPK
         uses: JarvusInnovations/background-action@v1
         with:
           run: |
             make run-kubelet
+          wait-on: |
+            tcp:localhost:10250
+          wait-for: 5m
       - name: Run the tests
         run: |
           make test

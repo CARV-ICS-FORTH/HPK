@@ -36,6 +36,8 @@ export ETCDCTL_API=3
 etcdctl --endpoints http://${HOST_ADDRESS}:2379 put /coreos.com/network/config '{"Network": "10.244.0.0/16", "Backend": {"Type": "vxlan"}}'
 
 # Install Flannel to distribute priate IPs across hosts
+apt-get install -y nscd # https://github.com/flannel-io/flannel/issues/1512
+
 wget -q https://github.com/flannel-io/flannel/releases/download/v${FLANNEL_VERSION}/flanneld-amd64
 chmod +x flanneld-amd64
 mv flanneld-amd64 /usr/local/bin/flanneld
@@ -87,7 +89,7 @@ EOF
 
 apt-get install -y slurmd slurm-client slurmctld
 
-cat >/etc/slurm-llnl/slurm.conf << EOF
+cat >/etc/slurm/slurm.conf << EOF
 AuthType=auth/none
 CredType=cred/none
 MpiDefault=none

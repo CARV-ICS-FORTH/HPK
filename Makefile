@@ -96,6 +96,7 @@ run-kubelet: ## Run the HPK Virtual Kubelet
 
 ##@ Test
 
+.PHONY: test
 test: ## Run all tests
 	if [ ! -d test/helper ]; then \
 		mkdir test/helper; \
