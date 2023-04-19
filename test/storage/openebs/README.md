@@ -1,5 +1,12 @@
 # OpenEBS
 
+Firstly, create the directory that will server as local backend
+
+We assume that the login user is `fnikol`.
+The path `/home/fnikol/scratch/openebs/local` is referenced in the operator.yaml
+```
+mkdir -p /home/fnikol/scratch/openebs/local
+```
 
 Install a a lite version of OpenEBS including only  Local PV (hostpath and device). 
 

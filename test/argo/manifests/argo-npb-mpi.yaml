@@ -1,0 +1,31 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: npb-with-mpi
+spec:
+  entrypoint: npb-with-mpi
+  templates:
+    - name: npb-with-mpi
+      dag:
+        tasks:
+          - name: A
+            template: npb
+            arguments:
+              parameters:
+                - {name: cpus, value: "{{item}}"}
+            withItems: [2,4,8,16]
+    - name: npb
+      metadata:
+        annotations:
+          slurm.hpk.io/flags: "--nodes=2 --nodelist=jedi1,jedi2 --ntasks={{inputs.parameters.cpus}}"
+      inputs:
+        parameters:
+          - name: cpus
+      container:
+        image: malvag/mpi-npb
+        env:
+          - name: OMPI_MCA_btl
+            value: self,tcp,vader
+          - name: OMPI_MCA_btl_tcp_if_include
+            value: ib0
+        command: ["/work/NPB3.3-MPI/bin/ep.A.{{inputs.parameters.cpus}}"]

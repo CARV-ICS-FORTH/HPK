@@ -21,14 +21,6 @@ type FileWatcher interface {
 	Close() error
 }
 
-// New tries to use an fs-event watcher, and falls back to the poller if there is an error
-func New(interval time.Duration) (FileWatcher, error) {
-	if watcher, err := NewEventWatcher(); err == nil {
-		return watcher, nil
-	}
-	return NewPollingWatcher(interval), nil
-}
-
 // NewPollingWatcher returns a poll-based file watcher
 func NewPollingWatcher(interval time.Duration) FileWatcher {
 	return &filePoller{

@@ -212,7 +212,7 @@ func (h *podHandler) HostPathVolumeSource(ctx context.Context, vol corev1.Volume
 	switch *vol.VolumeSource.HostPath.Type {
 	case corev1.HostPathUnset:
 		// For backwards compatible, leave it empty if unset
-		if path, err := h.podDirectory.CreateSymlink(vol.Name, vol.VolumeSource.HostPath.Path); err != nil {
+		if path, err := h.podDirectory.CreateVolumeLink(vol.Name, vol.VolumeSource.HostPath.Path); err != nil {
 			SystemError(err, "cannot create HostPathDirectoryOrCreate at path '%s'", path)
 		}
 
@@ -226,7 +226,7 @@ func (h *podHandler) HostPathVolumeSource(ctx context.Context, vol corev1.Volume
 	case corev1.HostPathDirectoryOrCreate:
 		// If nothing exists at the given path, an empty directory will be created there
 		// as needed with file mode 0755, having the same group and ownership with Kubelet.
-		if path, err := h.podDirectory.CreateSubDirectory(vol.Name, compute.PodGlobalDirectoryPermissions); err != nil {
+		if path, err := h.podDirectory.CreateVolume(vol.Name, compute.PodGlobalDirectoryPermissions); err != nil {
 			SystemError(err, "cannot create HostPathDirectoryOrCreate at path '%s'", path)
 		}
 	case corev1.HostPathDirectory:

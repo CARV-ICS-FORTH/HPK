@@ -16,6 +16,7 @@ package slurm
 
 import (
 	"github.com/carv-ics-forth/hpk/compute"
+	"github.com/carv-ics-forth/hpk/pkg/resources"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -24,21 +25,17 @@ const SbatchScriptTemplate = `#!/bin/bash
 #SBATCH --job-name={{.Pod.Name}}
 #SBATCH --output={{.VirtualEnv.StdoutPath}}
 #SBATCH --error={{.VirtualEnv.StderrPath}}
-{{- if .Options.NTasksPerNode}}
-#SBATCH --ntasks-per-node={{.Options.NTasksPerNode}}
+{{- range $index, $flag := .CustomFlags}}
+#SBATCH {{$flag}}
 {{end}}
-{{- if .Options.CPUPerTask}}
-#SBATCH --cpus-per-task={{.Options.CPUPerTask}}  # usually, obviously, in the range[1-10]
+
+{{- if .ResourceRequest.CPU}}
+#SBATCH --ntasks-per-node={{.ResourceRequest.CPU}}
 {{end}}
-{{- if .Options.Nodes}}
-#SBATCH --nodes={{.Options.Nodes}}
-{{end}}
-{{- if .Options.MemoryPerNode}}
-#SBATCH --mem={{.Options.MemoryPerNode}} # e.g 400GB
-{{end}}
-{{- if .Options.CustomFlags}}
-{{.Options.CustomFlags}}
-{{end}}
+
+{{- if .ResourceRequest.Memory}}
+#SBATCH --mem={{.ResourceRequest.Memory}} 
+{{end}} 
 
 # exit when any command fails
 set -eum pipeline
@@ -82,8 +79,8 @@ options ndots:5
 DNS_EOF
 
 # Add hostname to known hosts. Required for loopbacks
-cp /etc/hosts /scratch/etc/hosts
-echo "$(hostname -I) $(hostname)" >> /scratch/etc/hosts
+echo -e "127.0.0.1 localhost" >> /scratch/etc/hosts
+echo -e "$(hostname -I) $(hostname)" >> /scratch/etc/hosts
 }
 
 # If not removed, Flags will be consumed by the nested Apptainer and overwrite paths.
@@ -95,7 +92,7 @@ reset_env() {
 	unset SINGULARITY_CONTAINER
 	unset SINGULARITY_ENVIRONMENT
 	unset SINGULARITY_NAME
-	
+
 	unset APPTAINER_APPNAME
 	unset APPTAINER_COMMAND
 	unset APPTAINER_CONTAINER
@@ -122,9 +119,13 @@ handle_init_containers() {
 	{{- if $container.EnvFilePath}}
 	--env-file /scratch/{{$container.InstanceName}}.env \
 	{{- end}}
-	{{$container.Image}}
-	{{- if $container.Command}}{{range $index, $cmd := $container.Command}} '{{$cmd}}'{{end}}{{end -}}
-	{{- if $container.Args}}{{range $index, $arg := $container.Args}} '{{$arg}}'{{end}}{{end -}}
+	{{$container.ImageFilePath}}
+	{{- if $container.Command}}
+		{{- range $index, $cmd := $container.Command}} "{{$cmd}}" {{- end}}
+	{{- end -}} 
+	{{- if $container.Args}}
+		{{range $index, $arg := $container.Args}} "{{$arg}}" {{- end}}
+	{{- end }} \
 	&>> {{$container.LogsPath}}
 
 	# Mark the ending of an init job.
@@ -149,17 +150,21 @@ handle_containers() {
 	{{- if $container.EnvFilePath}}
 	--env-file /scratch/{{$container.InstanceName}}.env \
 	{{- end}}
-	{{$container.Image}}   
-	{{- if $container.Command}}{{range $index, $cmd := $container.Command}} '{{$cmd}}'{{end}}{{end -}}
-	{{- if $container.Args}}{{range $index, $arg := $container.Args}} '{{$arg}}'{{end}}{{end -}} 
-	&>> {{$container.LogsPath}}; echo $? > {{$container.ExitCodePath}}) &
+	{{$container.ImageFilePath}}
+	{{- if $container.Command}}
+		{{- range $index, $cmd := $container.Command}} "{{$cmd}}" {{- end}}
+	{{- end -}} 
+	{{- if $container.Args}}
+		{{- range $index, $arg := $container.Args}} "{{$arg}}" {{- end}}
+	{{- end }} \
+	&>> {{$container.LogsPath}}; \
+	echo $? > {{$container.ExitCodePath}}) &
 
 	echo pid://$! > {{$container.JobIDPath}}
 {{- end}}
 
 	echo "[Virtual] All containers have been scheduled"
 }
-
 
 _teardown() {
 	lastCommand=$1
@@ -187,6 +192,7 @@ reset_env
 
 # Network is ready
 echo $(hostname -I) > {{.VirtualEnv.IPAddressPath}}
+sync
 
 {{- if .InitContainers}}
 echo "[Virtual] Scheduling Init Containers ..."
@@ -223,8 +229,8 @@ env_failed() {
 
 	reap
 
-	echo "-- Exit with 1--"
-	exit -1
+	echo "-- Exit with 255--"
+	exit 255
 }
 
 env_running() {
@@ -249,6 +255,9 @@ sigdown() {
 
 	echo -e "\n[Host] Kill Virtual Environment \n"
 	kill -TERM ${VPID} 
+
+	# sync filesystems
+	sync
 }
 
 
@@ -261,7 +270,7 @@ trap sigdown SIGTERM SIGINT
 echo "[Host] Starting the constructor the Virtual Environment ..."
 
 # External fakeroot is needed for the networking  
-${apptainer} exec --dns 8.8.8.8 --net --fakeroot --scratch /scratch \
+${apptainer} exec  --net --fakeroot --scratch /scratch \
 --env PARENT=${PPID}								 \
 --bind $HOME		  								 \
 --hostname {{.Pod.Name}}							 \
@@ -280,8 +289,8 @@ $(cat /dev/shm/signal_${PPID})
 #### END SECTION: Host Environment ####
 `
 
-// SbatchScriptFields provide the inputs to SbatchScriptTemplate.
-type SbatchScriptFields struct {
+// JobFields provide the inputs to SbatchScriptTemplate.
+type JobFields struct {
 	Pod types.NamespacedName
 
 	// VirtualEnv is the equivalent of a Pod.
@@ -295,7 +304,11 @@ type SbatchScriptFields struct {
 	// Containers is a list of container requests to be executed.
 	Containers []Container
 
-	Options RequestOptions
+	// ResourceRequest are reserved resources for the job.
+	ResourceRequest resources.ResourceList
+
+	// CustomFlags are flags given by the user via 'slurm.hpk.io/flags' annotations
+	CustomFlags []string
 }
 
 // The VirtualEnvironmentPaths create lightweight "virtual environments" that resemble "Pods" semantics.
@@ -321,14 +334,15 @@ type Container struct {
 	// needed for apptainer start.
 	InstanceName string // instance://podName_containerName
 
-	Image string // format: REGISTRY://image:tag
+	ImageFilePath string // format: REGISTRY://image:tag
 
 	EnvFilePath string
 
 	Binds []string
 
 	Command []string
-	Args    []string // space separated args
+
+	Args []string // space separated args
 
 	ApptainerMode string // exec or run
 
@@ -341,26 +355,6 @@ type Container struct {
 
 	// ExitCodePath is the path where the embedded Container command will write its exit code
 	ExitCodePath string
-}
-
-// RequestOptions are optional directives to sbatch.
-// Optional Fields (marked by a pointer)
-type RequestOptions struct {
-	// Nodes request that a minimum of number nodes are allocated to this job.
-	Nodes *int
-
-	// NTasksPerNode request that ntasks be invoked on each node
-	NTasksPerNode *int
-
-	// CPUPerTask advise the Slurm controller that ensuing job steps will require ncpus number
-	// of processors per task.
-	CPUPerTask *int
-
-	// MemoryPerNode Specify the real memory required per node.
-	MemoryPerNode *string
-
-	// CustomFlags are sbatch that are directly given by the end-user.
-	CustomFlags []string
 }
 
 // GenerateEnvTemplate is used to generate environment variables.

@@ -23,7 +23,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/pkg/errors"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -59,6 +58,7 @@ const (
 var (
 	UserHomeDir, _ = os.UserHomeDir()
 	RuntimeDir     = filepath.Join(UserHomeDir, ".hpk")
+	ImageDir       = filepath.Join(RuntimeDir, "images")
 )
 
 const (
@@ -92,12 +92,6 @@ func PodRuntimeDir(podRef client.ObjectKey) PodPath {
 	return PodPath(path)
 }
 
-func InternalPodRuntimeDir(podRef client.ObjectKey) PodPath {
-	path := filepath.Join(".hpk", podRef.Namespace, podRef.Name)
-
-	return PodPath(path)
-}
-
 /*
 	Pod-Related paths captured by Slurm Notifier.
 	They are necessary to drive the lifecycle of a Pod.
@@ -123,9 +117,8 @@ func (p PodPath) VirtualEnvironmentDir() PodPath {
 	return PodPath(filepath.Join(string(p), ".virtualenv"))
 }
 
-// Mountpaths returns .hpk/namespace/podName/.virtualenv/mountName:mountPath
-func (p PodPath) Mountpaths(mount corev1.VolumeMount) string {
-	return filepath.Join(string(p.VirtualEnvironmentDir()), mount.Name+":"+mount.MountPath)
+func (p PodPath) VolumeDir() string {
+	return filepath.Join(string(p.VirtualEnvironmentDir()), "volumes")
 }
 
 // EncodedJSONPath .hpk/namespace/podName/.virtualenv/pod.crd
@@ -157,8 +150,8 @@ func (p PodPath) StderrPath() string {
 	Pod-Related functions
 */
 
-func (p PodPath) CreateSubDirectory(name string, mode os.FileMode) (string, error) {
-	fullPath := filepath.Join(string(p.VirtualEnvironmentDir()), name)
+func (p PodPath) CreateVolume(volumeName string, mode os.FileMode) (string, error) {
+	fullPath := filepath.Join(p.VolumeDir(), volumeName)
 
 	if err := os.MkdirAll(fullPath, mode); err != nil {
 		return fullPath, errors.Wrapf(err, "cannot create dir '%s'", fullPath)
@@ -167,35 +160,14 @@ func (p PodPath) CreateSubDirectory(name string, mode os.FileMode) (string, erro
 	return fullPath, nil
 }
 
-func (p PodPath) CreateSymlink(src string, dst string) (string, error) {
-	fullPath := filepath.Join(string(p.VirtualEnvironmentDir()), dst)
+func (p PodPath) CreateVolumeLink(src string, dst string) (string, error) {
+	dstFullPath := filepath.Join(p.VolumeDir(), dst)
 
-	if err := os.Symlink(src, fullPath); err != nil {
-		return fullPath, errors.Wrapf(err, "cannot create symlink '%s'", fullPath)
+	if err := os.Symlink(src, dstFullPath); err != nil {
+		return dstFullPath, errors.Wrapf(err, "cannot create symlink '%s'", dstFullPath)
 	}
 
-	return fullPath, nil
-}
-
-func (p PodPath) CreateFile(name string) (string, error) {
-	fullPath := filepath.Join(string(p.VirtualEnvironmentDir()), name)
-
-	f, err := os.Create(fullPath)
-	if err != nil {
-		return fullPath, errors.Wrapf(err, "cannot create file '%s'", fullPath)
-	}
-
-	if err := f.Close(); err != nil {
-		return fullPath, errors.Wrapf(err, "cannot close file '%s'", fullPath)
-	}
-
-	return fullPath, nil
-}
-
-func (p PodPath) PathExists(name string) (os.FileInfo, error) {
-	fullPath := filepath.Join(string(p), name)
-
-	return os.Stat(fullPath)
+	return dstFullPath, nil
 }
 
 /*
@@ -260,4 +232,19 @@ func ParsePath(path string) (podKey types.NamespacedName, fileName string, inval
 	invalid = false
 
 	return
+}
+
+// PodEnvironmentIsOK checks if the pod structure is ok, and if it is not, it returns an indiciate reason
+func PodEnvironmentIsOK(path PodPath) (bool, string) {
+	// check that there is a valid pod description
+	if _, err := os.Open(path.EncodedJSONPath()); err != nil {
+		return false, "no pod specification was found"
+	}
+
+	// check if the pod is already failed
+	if _, err := os.Open(path.SysErrorPath()); !os.IsNotExist(err) {
+		return false, "pod has failed with a system error"
+	}
+
+	return true, ""
 }

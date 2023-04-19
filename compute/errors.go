@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package slurm
+package compute
 
 import (
 	"fmt"
 	"regexp"
 
-	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -33,6 +32,12 @@ var (
 	ReasonInitializationError = "InitializationError"
 )
 
+// Volume Errors
+var (
+	ErrUnboundedPVC         = errors.New("unbound pvc")
+	ErrUnsupportedClaimMode = errors.New("hpk does not support block volume provisioning")
+)
+
 func PodError(pod *corev1.Pod, reason string, msgFormat string, msgArgs ...any) {
 	pod.Status.Phase = corev1.PodFailed
 	pod.Status.Reason = reason
@@ -42,7 +47,7 @@ func PodError(pod *corev1.Pod, reason string, msgFormat string, msgArgs ...any) 
 func SystemError(err error, errFormat string, errArgs ...any) {
 	werr := errors.Wrapf(err, errFormat, errArgs...)
 
-	compute.DefaultLogger.Error(werr, "SystemERROR")
+	DefaultLogger.Error(werr, "SystemERROR")
 
 	panic(werr)
 }

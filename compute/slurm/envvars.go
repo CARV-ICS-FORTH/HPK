@@ -40,7 +40,7 @@ func FromServices(ctx context.Context, namespace string) []corev1.EnvVar {
 	if err := compute.K8SClient.List(ctx, &serviceList, &client.ListOptions{
 		LabelSelector: labels.Everything(),
 	}); err != nil {
-		SystemError(err, "failed to list services when setting up env vars")
+		compute.SystemError(err, "failed to list services when setting up env vars")
 	}
 
 	var services []*corev1.Service

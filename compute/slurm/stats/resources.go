@@ -12,19 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package slurm contains code for accessing compute resources via Slurm.
-package slurm
+// Package stats contains code for accessing compute resources via Slurm.
+package stats
 
 import (
 	"context"
 
+	"github.com/carv-ics-forth/hpk/compute"
+	"github.com/carv-ics-forth/hpk/compute/slurm/job"
 	"github.com/carv-ics-forth/hpk/pkg/process"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/json"
 )
 
-func TotalResources(ctx context.Context) corev1.ResourceList {
+func TotalResources() corev1.ResourceList {
 	var (
 		totalCPU       resource.Quantity
 		totalMem       resource.Quantity
@@ -67,7 +69,7 @@ func TotalResources(ctx context.Context) corev1.ResourceList {
 }
 
 func AllocatableResources(ctx context.Context) corev1.ResourceList {
-	return TotalResources(ctx)
+	return TotalResources()
 }
 
 type NodeInfo struct {
@@ -100,15 +102,15 @@ type Stats struct {
 }
 
 func getClusterStats() Stats {
-	out, err := process.Execute(Slurm.StatsCmd, "--long", "--json")
+	out, err := process.Execute(job.Slurm.StatsCmd, "--long", "--json")
 	if err != nil {
-		SystemError(err, "stats query error. out : '%s'", out)
+		compute.SystemError(err, "stats query error. out : '%s'", out)
 	}
 
 	var info Stats
 
 	if err := json.Unmarshal(out, &info); err != nil {
-		SystemError(err, "stats decoding error")
+		compute.SystemError(err, "stats decoding error")
 	}
 
 	return info
