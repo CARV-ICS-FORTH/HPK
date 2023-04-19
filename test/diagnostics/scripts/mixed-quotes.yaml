@@ -1,0 +1,35 @@
+# This test should fail because single quotes are not properly escaped
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mixed-quotes
+spec:
+  containers:
+    - name: quotes
+      image: python:3.11.3-alpine
+      command:
+        - sh
+        - -c
+        - |
+          set -eu
+          
+          echo "Write script"
+          
+          cat << EOF > test.py
+          with open('/tmp/somepath.json', 'w') as f:
+            f.write("test")
+          EOF
+        
+        
+          echo "Written script"
+          cat test.py
+          
+          echo "Run script"
+          python test.py
+          
+          echo "Print output"
+          cat /tmp/somepath.json
+
+          

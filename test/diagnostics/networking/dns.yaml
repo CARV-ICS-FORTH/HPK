@@ -1,0 +1,15 @@
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dns
+spec:
+  restartPolicy: Never
+  containers:
+    - name: client
+      image: alpine
+      command:
+        - sh
+        - -c
+        - |
+          wget www.google.com

@@ -104,7 +104,7 @@ handle_init_containers() {
 	{{- if $container.Binds}}
 	--bind {{join "," $container.Binds}} \
 	{{- end}}
-	{{$container.Image}}
+	{{$container.ImageFilePath}}
 	{{- if $container.Command}}{{range $index, $cmd := $container.Command}} '{{$cmd}}'{{end}}{{end -}}
 	{{- if $container.Args}}{{range $index, $arg := $container.Args}} '{{$arg}}'{{end}}{{end -}} \
 	&>> {{$container.LogsPath}}; echo $? > {{$container.ExitCodePath}}) &
@@ -123,7 +123,7 @@ spinup_instances() {
 	{{- if $container.Binds}}
 	--bind {{join "," $container.Binds}} \
 	{{- end}}
-	{{$container.Image}} {{$container.InstanceName}}
+	{{$container.ImageFilePath}} {{$container.InstanceName}}
 {{- end}}
 }
 
@@ -289,7 +289,7 @@ $(cat /dev/shm/signal_${PPID})
 #### END SECTION: Host Environment ####
 `
 
-// SbatchScriptFields container the supported fields for the submission template.
+// JobFields container the supported fields for the submission template.
 type SbatchScriptFields struct {
 	/*--
 		Mandatory Fields
@@ -382,3 +382,43 @@ type RequestOptions struct {
 	// CustomFlags are sbatch that are directly given by the end-user.
 	CustomFlags []string
 }
+
+/*
+
+// SubmitJobOptions are optional directives to srun.
+// Optional Fields (marked by a pointer)
+type SubmitJobOptions struct {
+
+
+	/*
+		// Nodes request that a minimum of number nodes are allocated to this job.
+		Nodes *int
+
+
+		// NTasksPerNode request that ntasks be invoked on each node
+		NTasksPerNode *int
+
+		// CPUPerTask advise the Slurm controller that ensuing job steps will require ncpus number
+		// of processors per task.
+		CPUPerTask *int64
+
+		// MemoryPerNode Specify the real memory required per node.
+		MemoryPerNode *string
+
+		// CustomFlags are sbatch that are directly given by the end-user.
+		CustomFlags []string
+}
+{{- if .Options.NTasksPerNode}}
+#SBATCH --ntasks-per-node={{.Options.NTasksPerNode}}
+{{end}}
+{{- if .Options.CPUPerTask}}
+#SBATCH --cpus-per-task={{.Options.CPUPerTask}}  # usually, obviously, in the range[1-10]
+{{end}}
+{{- if .Options.Nodes}}
+#SBATCH --nodes={{.Options.Nodes}}
+{{end}}
+
+{{- if .Options.CustomFlags}}
+{{.Options.CustomFlags}}
+{{end}}
+*/

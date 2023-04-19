@@ -15,8 +15,6 @@ import (
 var (
 	// errPollerClosed is returned when the poller is closed
 	errPollerClosed = errors.New("poller is closed")
-	// errNoSuchWatch is returned when trying to remove a watch that doesn't exist
-	errNoSuchWatch = errors.New("watch does not exist")
 )
 
 // filePoller is used to poll files for changes, especially in cases where fsnotify
@@ -83,7 +81,7 @@ func (w *filePoller) remove(name string) error {
 
 	_, exists := w.watches[name]
 	if !exists {
-		return errNoSuchWatch
+		return nil
 	}
 	delete(w.watches, name)
 	return nil

@@ -47,6 +47,13 @@ Once the installation is complete, you can start the Virtual Kubelet:
 make run-kubelet
 ```
 
+and then your common kubectl commands
+```basah
+export KUBE_PATH=~/.k8sfs/kubernetes/
+export HOST_ADDRESS=$(ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p')
+kubectl apply -f test/argo/install.yaml
+```
+
 ## Acknowledgements
 
 We thankfully acknowledge the support of the European Commission and the Greek General Secretariat for Research and

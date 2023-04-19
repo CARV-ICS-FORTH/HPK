@@ -12,7 +12,7 @@ metadata:
       - name: FSType
         value: "ext4"
 provisioner: openebs.io/local
-volumeBindingMode: WaitForFirstConsumer
+volumeBindingMode: Immediate # DO NOT CHANGE IT
 reclaimPolicy: Delete
 ---
 # Source: localpv-provisioner/templates/hostpath-class.yaml
@@ -26,9 +26,9 @@ metadata:
       - name: StorageType
         value: "hostpath"
       - name: BasePath
-        value: "/var/openebs/local"
+        value: "/home/fnikol/scratch/openebs/local"
 provisioner: openebs.io/local
-volumeBindingMode: WaitForFirstConsumer
+volumeBindingMode: Immediate # DO NOT CHANGE IT
 reclaimPolicy: Delete
 
 

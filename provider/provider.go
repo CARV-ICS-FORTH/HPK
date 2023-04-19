@@ -20,8 +20,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/carv-ics-forth/hpk/compute/slurm/job"
 	"github.com/virtual-kubelet/virtual-kubelet/node/api/statsv1alpha1"
-
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
@@ -87,8 +87,22 @@ func NewVirtualK8S(config InitConfig) (*VirtualK8S, error) {
 		return nil, errors.Wrapf(err, "Failed to create RuntimeDir '%s'", compute.RuntimeDir)
 	}
 
-	// iterate the filesystem and restore fsnotify watchers
+	// create the ~/.hpk/image directory, if it does not exist.
+	if err := os.MkdirAll(compute.ImageDir, compute.PodGlobalDirectoryPermissions); err != nil {
+		return nil, errors.Wrapf(err, "Failed to create ImageDir '%s'", compute.ImageDir)
+	}
+
+	// restore fsnotify watchers for valid pods. Valid are considered the pods with a Pod description
 	if err := slurm.WalkPodDirectories(func(path compute.PodPath) error {
+		ok, info := compute.PodEnvironmentIsOK(path)
+		if !ok {
+			compute.DefaultLogger.Info("Omit pod", "path", path, "info", info)
+
+			// continue with the next item
+			return nil
+		}
+
+		// register the watcher
 		return watcher.Add(path.String())
 	}); err != nil {
 		return nil, errors.Wrapf(err, "failed to restore watchers")
@@ -140,15 +154,22 @@ func (v *VirtualK8S) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	*/
 	pod.Status.HostIP = v.InitConfig.InternalIP
 
+	/*---------------------------------------------------
+	 * Asynchronously execute the Pod creation request
+	 *---------------------------------------------------*/
+	go func() {
+		// run each request on a different thread to avoid blocking
+		// if the pod has failed, notify the k8s.
+		if err := slurm.CreatePod(ctx, pod, v.fileWatcher); err != nil {
+			v.updatedPod(pod)
+		}
+	}()
+
 	/*
 		If an error is returned, Virtual Kubernetes will set the Phase to either "Pending" or "Failed",
 		depending on the pod.RestartPolicy.
 		In both cases, it will	wrap the reason into "podStatusReasonProviderFailed"
 	*/
-	if err := slurm.CreatePod(ctx, pod, v.fileWatcher); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -170,15 +191,10 @@ func (v *VirtualK8S) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Ensure that received pod is newer than the local
 	 *---------------------------------------------------*/
-	localPod := slurm.LoadPod(podKey)
+	localPod := slurm.LoadPodFromDisk(podKey)
 	if localPod == nil {
 		return errdefs.NotFoundf("object not found")
 	}
-
-	logger.Info("Local Pod ",
-		"version", localPod.GetResourceVersion(),
-		"phase", localPod.Status.Phase,
-	)
 
 	if localPod.ResourceVersion >= pod.ResourceVersion {
 		/*-- The received pod is old, so we can safely discard it --*/
@@ -203,9 +219,7 @@ func (v *VirtualK8S) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	}
 
 	/*-- Update the local status of Pod --*/
-	slurm.SavePod(ctx, pod)
-
-	logger.Info("Update pod success")
+	slurm.SavePodToDisk(ctx, pod)
 
 	return nil
 }
@@ -276,7 +290,7 @@ func (v *VirtualK8S) GetPod(ctx context.Context, namespace, name string) (*corev
 	 *---------------------------------------------------*/
 	logger.Info("K8s -> GetPod")
 
-	pod := slurm.LoadPod(podKey)
+	pod := slurm.LoadPodFromDisk(podKey)
 	if pod == nil {
 		logger.Info("K8s <- GetPod (POD NOT FOUND)")
 
@@ -304,7 +318,7 @@ func (v *VirtualK8S) GetPodStatus(ctx context.Context, namespace, name string) (
 	 *---------------------------------------------------*/
 	logger.Info("K8s -> GetPodStatus")
 
-	pod := slurm.LoadPod(podKey)
+	pod := slurm.LoadPodFromDisk(podKey)
 	if pod == nil {
 		logger.Info("K8s <- GetPodStatus (POD NOT FOUND)")
 
@@ -341,7 +355,7 @@ func (v *VirtualK8S) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
 			v.Logger.Error(err, "potentially corrupted dir. cannot read pod description file",
 				"path", path)
 
-			return nil
+			return errors.Wrapf(err, "corrupted dir")
 		}
 
 		var pod corev1.Pod
@@ -372,7 +386,7 @@ func (v *VirtualK8S) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
 //
 // NotifyPods must not block the caller since it is only used to register the callback.
 // The callback passed into `NotifyPods` may block when called.
-func (v *VirtualK8S) NotifyPods(_ context.Context, f func(*corev1.Pod)) {
+func (v *VirtualK8S) NotifyPods(ctx context.Context, f func(*corev1.Pod)) {
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
@@ -385,17 +399,21 @@ func (v *VirtualK8S) NotifyPods(_ context.Context, f func(*corev1.Pod)) {
 	v.updatedPod = f
 
 	/*-- start event handler --*/
-	eh := slurm.NewEventHandler(slurm.Options{
+	eh := job.NewEventHandler(job.Options{
 		MaxWorkers:   1,
 		MaxQueueSize: 10,
 	})
 
-	go eh.Run(context.Background(), func(pod *corev1.Pod) {
-		if pod == nil {
-			panic("this should not happen")
-		}
+	go eh.Run(ctx, job.PodControl{
+		SyncStatus:   slurm.SyncPodStatus,
+		LoadFromDisk: slurm.LoadPodFromDisk,
+		NotifyVirtualKubelet: func(pod *corev1.Pod) {
+			if pod == nil {
+				panic("this should not happen")
+			}
 
-		f(pod)
+			f(pod)
+		},
 	})
 
 	/*-- add fileWatcher events to queue to be processed asynchronously --*/
@@ -445,7 +463,7 @@ func (v *VirtualK8S) GetContainerLogs(ctx context.Context, namespace, podName, c
 	 *---------------------------------------------------*/
 	logger.Info("K8s -> GetContainerLogs", "container", containerName)
 
-	pod := slurm.LoadPod(podKey)
+	pod := slurm.LoadPodFromDisk(podKey)
 	if pod == nil {
 		logger.Info("K8s <- GetContainerLogs (POD NOT FOUND)")
 

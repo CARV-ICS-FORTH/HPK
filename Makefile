@@ -16,6 +16,7 @@ VERSION_FLAGS := -ldflags='-X "main.buildVersion=$(BUILD_VERSION)" -X "main.buil
 # Deployment options
 K8SFS_PATH ?= ${HOME}/.k8sfs
 KUBE_PATH ?= ${K8SFS_PATH}/kubernetes/
+EXTERNAL_DNS ?= 8.8.8.8
 
 define WEBHOOK_CONFIGURATION
 apiVersion: admissionregistration.k8s.io/v1
@@ -61,7 +62,7 @@ build-race: ## Build HPK binary with race condition detector
 
 run-kubemaster: ## Run the Kubernetes Master
 	mkdir -p ${K8SFS_PATH}/log
-	apptainer run --net --dns 8.8.8.8 --fakeroot \
+	apptainer run --net --dns ${EXTERNAL_DNS} --fakeroot \
 	--cleanenv --pid --containall \
 	--no-init --no-umask --no-eval \
 	--no-mount tmp,home --unsquash --writable \

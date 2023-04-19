@@ -39,7 +39,7 @@ func TestApptainer(t *testing.T) {
 			name: "noenv",
 			fields: slurm.ApptainerTemplateFields{
 				Apptainer: slurm.ApptainerExec,
-				Image:     "docker://alpine:3.7",
+				ImageFilePath:     "docker://alpine:3.7",
 				Command:   []string{"sh", "-c"},
 				Args:      []string{"echo", "hello world"},
 			},
@@ -50,7 +50,7 @@ docker://alpine:3.7 "sh" "-c" "echo" "hello world"`,
 			name: "env",
 			fields: slurm.ApptainerTemplateFields{
 				Apptainer:   slurm.ApptainerExec,
-				Image:       "docker://alpine:3.7",
+				ImageFilePath:       "docker://alpine:3.7",
 				Command:     []string{"sh", "-c"},
 				Args:        []string{"echo", "hello world"},
 				Environment: []string{"VAR=val1", "VAR2=val2"},
@@ -63,7 +63,7 @@ docker://alpine:3.7 "sh" "-c" "echo" "hello world"`,
 			name: "bind",
 			fields: slurm.ApptainerTemplateFields{
 				Apptainer:   slurm.ApptainerExec,
-				Image:       "docker://alpine:3.7",
+				ImageFilePath:       "docker://alpine:3.7",
 				Command:     []string{"sh", "-c"},
 				Args:        []string{"echo", "hello world"},
 				Environment: []string{"VAR=val1", "VAR2=val2"},
@@ -109,15 +109,15 @@ func TestSBatch(t *testing.T) {
 		Name:      "dummier",
 	}
 
-	podDir := compute.InternalPodRuntimeDir(podKey)
+	podDir := compute.PodRuntimeDir(podKey)
 
 	tests := []struct {
 		name   string
-		fields slurm.SbatchScriptFields
+		fields slurm.JobFields
 	}{
 		{
 			name: "noenv",
-			fields: slurm.SbatchScriptFields{
+			fields: slurm.JobFields{
 				ComputeEnv: compute.HPCEnvironment{
 					ApptainerBin:      "apptainer",
 					KubeDNS:           "6.6.6.6",
@@ -127,21 +127,21 @@ func TestSBatch(t *testing.T) {
 				VirtualEnv: slurm.VirtualEnvironmentPaths{
 					ConstructorPath: podDir.ConstructorPath(),
 					IPAddressPath:   podDir.IPAddressPath(),
-					JobIDPath:       podDir.IDPath(),
 					StdoutPath:      podDir.StdoutPath(),
 					StderrPath:      podDir.StderrPath(),
 				},
-				Options: slurm.RequestOptions{},
 				InitContainers: func() (containers []slurm.Container) {
 					containerName := []string{"a", "b", "c", "d"}
 					delays := []string{"5", "10", "8", "5"}
 
 					for i, cname := range containerName {
 						containers = append(containers, slurm.Container{
-							Command:      []string{"sleep " + delays[i], "echo " + cname},
-							JobIDPath:    podDir.Container(cname).IDPath(),
-							LogsPath:     podDir.Container(cname).LogsPath(),
-							ExitCodePath: podDir.Container(cname).ExitCodePath(),
+							ImageFilePath: "/image/path",
+							Command:       []string{"sleep " + delays[i], "echo " + cname},
+							Args:          []string{"some additional", "args"},
+							JobIDPath:     podDir.Container(cname).IDPath(),
+							LogsPath:      podDir.Container(cname).LogsPath(),
+							ExitCodePath:  podDir.Container(cname).ExitCodePath(),
 						})
 					}
 
@@ -150,11 +150,14 @@ func TestSBatch(t *testing.T) {
 
 				Containers: func() (containers []slurm.Container) {
 					containerName := []string{"server", "client"}
-					args := []string{"-s", "-c iperf-server \n \n"}
+					// args := []string{"-s", "-c iperf-server \n \n"}
 
-					for i, cname := range containerName {
+					for _, cname := range containerName {
 						containers = append(containers, slurm.Container{
-							Command:      []string{"# Some random comment ", "\n", "sleep 10; " + args[i]},
+							ImageFilePath: "/image/path",
+							// Command:       []string{"# Some random comment ", "\n", "sleep 10; " + args[i]},
+							Command:      []string{"sh", "-c", "wget www.google.com"},
+							Args:         []string{"some additional", "args"},
 							JobIDPath:    podDir.Container(cname).IDPath(),
 							LogsPath:     podDir.Container(cname).LogsPath(),
 							ExitCodePath: podDir.Container(cname).ExitCodePath(),

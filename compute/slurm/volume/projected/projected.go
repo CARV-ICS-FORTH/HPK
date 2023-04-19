@@ -47,25 +47,23 @@ type VolumeMounter struct {
 }
 
 func (b *VolumeMounter) SetUpAt(ctx context.Context, dir string) error {
-	pod := types.NamespacedName{Namespace: b.Pod.GetNamespace(), Name: b.Pod.GetName()}
-
-	b.Logger.Info("Setting up volume for Pod",
-		"volume", b.Volume.Name,
-		"pod", pod,
-	)
+	podKey := types.NamespacedName{Namespace: b.Pod.GetNamespace(), Name: b.Pod.GetName()}
 
 	if b.Volume.Projected.DefaultMode == nil {
 		return errors.Errorf("no defaultMode used, not even the default value for it")
 	}
 
-	data, err := b.collectData(ctx)
-	if err != nil {
-		b.Logger.Error(err, "Error preparing data for projected volume",
-			"volume", b.Volume.Name,
-			"pod", pod,
-		)
+	var data map[string]volumeutil.FileProjection
+	var errCollect error
 
-		return err
+	if err := retry.OnError(volume.NotFoundBackoff, k8errors.IsNotFound,
+		func() error {
+			data, errCollect = b.collectData(ctx)
+			return errCollect
+		},
+	); err != nil {
+		return errors.Wrapf(err, "error preparing data for project volume. volume:'%s' pod:'%s'",
+			b.Volume.Name, podKey)
 	}
 
 	/*---------------------------------------------------
@@ -75,7 +73,7 @@ func (b *VolumeMounter) SetUpAt(ctx context.Context, dir string) error {
 		return err
 	}
 
-	writerContext := fmt.Sprintf("pod %s volume %v", pod, b.Volume.Name)
+	writerContext := fmt.Sprintf("pod %s volume %v", podKey, b.Volume.Name)
 	writer, err := volumeutil.NewAtomicWriter(dir, writerContext)
 	if err != nil {
 		return errors.Wrapf(err, "Error creating atomic writer")
@@ -113,7 +111,7 @@ func (b *VolumeMounter) collectData(ctx context.Context) (map[string]volumeutil.
 					})
 				if err != nil {
 					if !(k8errors.IsNotFound(err) && optional) {
-						b.Logger.Error(err, "Couldn't get projected.secret '%s'", key)
+						b.Logger.Error(err, "Couldn't get projected.secret", "key", key)
 						errlist = append(errlist, err)
 						continue
 					}
@@ -154,7 +152,7 @@ func (b *VolumeMounter) collectData(ctx context.Context) (map[string]volumeutil.
 					})
 				if err != nil {
 					if !(k8errors.IsNotFound(err) && optional) {
-						b.Logger.Error(err, "Couldn't get projected.configmap '%s'", key)
+						b.Logger.Error(err, "Couldn't get projected.configmap", "key", key)
 						errlist = append(errlist, err)
 						continue
 					}

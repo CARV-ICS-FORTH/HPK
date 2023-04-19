@@ -182,7 +182,9 @@ func runRootCommand(ctx context.Context, c Opts) error {
 
 		compute.Environment.KubeDNS = dnsEndpoint.Subsets[0].Addresses[0].IP
 
-		DefaultLogger.Info("DNS connection is ready", "dnsIP", compute.Environment.KubeDNS)
+		DefaultLogger.Info("DNS connection is ready",
+			"k8sDNS", compute.Environment.KubeDNS,
+		)
 	}
 
 	/*---------------------------------------------------
