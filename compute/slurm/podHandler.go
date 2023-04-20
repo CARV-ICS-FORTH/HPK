@@ -195,6 +195,11 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 		compute.SystemError(err, "Cant create volume directory '%s'", h.podDirectory.VirtualEnvironmentDir().String())
 	}
 
+	// TODO: add the pod limit's
+	if _, err := os.Create(h.podDirectory.CgroupFilePath()); err != nil {
+		compute.SystemError(err, "Cant create cgroup configuration file '%s'", h.podDirectory.CgroupFilePath())
+	}
+
 	h.logger.Info(" * Mounting Volumes")
 	for _, vol := range h.Pod.Spec.Volumes {
 		h.mountVolumeSource(ctx, vol)
@@ -264,11 +269,12 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 		Pod:        h.podKey,
 		ComputeEnv: compute.Environment,
 		VirtualEnv: VirtualEnvironmentPaths{
-			ConstructorPath: h.podDirectory.ConstructorPath(),
-			IPAddressPath:   h.podDirectory.IPAddressPath(),
-			StdoutPath:      h.podDirectory.StdoutPath(),
-			StderrPath:      h.podDirectory.StderrPath(),
-			SysErrorPath:    h.podDirectory.SysErrorPath(),
+			CgroupFilePath:      h.podDirectory.CgroupFilePath(),
+			ConstructorFilePath: h.podDirectory.ConstructorFilePath(),
+			IPAddressPath:       h.podDirectory.IPAddressPath(),
+			StdoutPath:          h.podDirectory.StdoutPath(),
+			StderrPath:          h.podDirectory.StderrPath(),
+			SysErrorPath:        h.podDirectory.SysErrorPath(),
 		},
 		InitContainers:  initContainers,
 		Containers:      containers,

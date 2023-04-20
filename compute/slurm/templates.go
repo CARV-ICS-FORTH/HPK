@@ -47,7 +47,7 @@ echo "Using ApptainerBin: ${apptainer}"
 # Description
 # 	Builds a script for running a Virtual Environment
 # 	that resembles the semantics of a Pause Environment.
-cat > {{.VirtualEnv.ConstructorPath}} << "PAUSE_EOF"
+cat > {{.VirtualEnv.ConstructorFilePath}} << "PAUSE_EOF"
 #!/bin/bash
 
 ############################
@@ -262,7 +262,7 @@ sigdown() {
 
 
 echo "== Submit Environment =="
-chmod +x  {{.VirtualEnv.ConstructorPath}}
+chmod +x  {{.VirtualEnv.ConstructorFilePath}}
 
 echo "[Host] Setting Signal Traps for Virtual Environment [Abort (TERM,INT), Failed (USR1), Running (USR2)]..."
 trap sigdown SIGTERM SIGINT
@@ -271,10 +271,11 @@ echo "[Host] Starting the constructor the Virtual Environment ..."
 
 # External fakeroot is needed for the networking  
 ${apptainer} exec  --net --fakeroot --scratch /scratch \
+--apply-cgroups {{.VirtualEnv.CgroupFilePath}}		\
 --env PARENT=${PPID}								 \
 --bind $HOME		  								 \
 --hostname {{.Pod.Name}}							 \
-docker://icsforth/pause {{.VirtualEnv.ConstructorPath}} &
+docker://icsforth/pause {{.VirtualEnv.ConstructorFilePath}} &
 
 # return the PID of Apptainer running the virtual environment
 VPID=$!
@@ -313,8 +314,11 @@ type JobFields struct {
 
 // The VirtualEnvironmentPaths create lightweight "virtual environments" that resemble "Pods" semantics.
 type VirtualEnvironmentPaths struct {
-	// ConstructorPath points to the script for creating the virtual environment for Pod.
-	ConstructorPath string
+	// CgroupFilePath points to the cgroup configuration for the virtual environment.
+	CgroupFilePath string
+
+	// ConstructorFilePath points to the script for creating the virtual environment for Pod.
+	ConstructorFilePath string
 
 	// IPAddressPath is where we store the internal Pod's ip.
 	IPAddressPath string

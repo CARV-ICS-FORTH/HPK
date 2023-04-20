@@ -52,12 +52,17 @@ func imageFilePath(image string) string {
 }
 
 func PullImage(transport Transport, image string) (string, error) {
+	imagePath := imageFilePath(image)
+
 	// otherwise, download a fresh copy
 	downloadcmd := []string{"pull", "--dir", compute.ImageDir, string(transport) + image}
 
+	compute.DefaultLogger.Info("Downloading container image",
+		"image", image,
+		"path", imagePath,
+	)
+
 	_, _ = process.Execute(compute.Environment.ApptainerBin, downloadcmd...)
-
-	imagePath := imageFilePath(image)
-
+	
 	return imagePath, nil
 }

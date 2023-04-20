@@ -9,6 +9,22 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func MutatePVC(ctx context.Context, _ *kwhmodel.AdmissionReview, obj metav1.Object) (*kwhmutating.MutatorResult, error) {
+	pvc, ok := obj.(*corev1.PersistentVolumeClaim)
+	if !ok {
+		panic("This should not happen")
+		return &kwhmutating.MutatorResult{}, nil
+	}
+
+	// Mutate our object with the required annotations.
+	if pvc.Annotations == nil {
+		pvc.Annotations = make(map[string]string)
+	}
+	pvc.Annotations["volume.kubernetes.io/selected-node"] = "hpk-kubelet"
+
+	return &kwhmutating.MutatorResult{MutatedObject: pvc}, nil
+}
+
 // MutatePod is used to modify Pods requests before they arrive to the Virtual Kubelet Framework.
 // This is because the frameworks drops pods whose containers involve "valueFrom = .status.podIP" semantics.
 // Ref: https://github.com/Azure/AKS/issues/2427#issuecomment-1010354262

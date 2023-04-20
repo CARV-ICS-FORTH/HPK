@@ -120,54 +120,43 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	/*---------------------------------------------------
 	 * Setup a client to Kubernetes API
 	 *---------------------------------------------------*/
-	DefaultLogger.Info("* Starting Kubernetes Client ....")
-
-	// Config precedence
-	//
-	// * --kubeconfig flag pointing at a file
-	//
-	// * KUBECONFIG environment variable pointing at a file
-	//
-	// * In-cluster config if running in cluster
-	//
-	// * $HOME/.kube/config if exists.
 	restConfig, err := config.GetConfig()
 	if err != nil {
 		return errors.Wrapf(err, "unable to get kubeconfig")
 	}
 
-	k8sclientset, err := kubernetes.NewForConfig(restConfig)
-	if err != nil {
-		return errors.Wrapf(err, "unable to start kubernetes k8sclientset")
+	{
+		k8sclientset, err := kubernetes.NewForConfig(restConfig)
+		if err != nil {
+			return errors.Wrapf(err, "unable to start kubernetes k8sclientset")
+		}
+
+		k8sclient, err := client.New(restConfig, client.Options{})
+		if err != nil {
+			return errors.Wrapf(err, "unable to start kubernetes client")
+		}
+
+		compute.K8SClient = k8sclient
+		compute.K8SClientset = k8sclientset
+		compute.Environment.ContainerRegistry = c.ContainerRegistry
+		compute.Environment.ApptainerBin = c.ApptainerBin
+
+		kubemaster, err := url.Parse(restConfig.Host)
+		if err != nil {
+			return errors.Wrapf(err, "failed to extract hostname from url '%s'", restConfig.Host)
+		}
+		compute.Environment.KubeMasterHost = kubemaster.Hostname()
+
+		DefaultLogger.Info("Kubernetes Client is ready",
+			"APIServer", restConfig.Host,
+			"ContainerRegistry", compute.Environment.ContainerRegistry,
+		)
 	}
-
-	k8sclient, err := client.New(restConfig, client.Options{})
-	if err != nil {
-		return errors.Wrapf(err, "unable to start kubernetes client")
-	}
-
-	compute.K8SClient = k8sclient
-	compute.K8SClientset = k8sclientset
-	compute.Environment.ContainerRegistry = c.ContainerRegistry
-	compute.Environment.ApptainerBin = c.ApptainerBin
-
-	DefaultLogger.Info("Kubernetes Client is ready",
-		"KubernetesURL", restConfig.Host,
-		"registry", compute.Environment.ContainerRegistry,
-	)
-
-	kubemaster, err := url.Parse(restConfig.Host)
-	if err != nil {
-		return errors.Wrapf(err, "failed to extract hostname from url '%s'", restConfig.Host)
-	}
-	compute.Environment.KubeMasterHost = kubemaster.Hostname()
-
 	/*---------------------------------------------------
 	 * Discover Kubernetes DNS server
 	 *---------------------------------------------------*/
-	DefaultLogger.Info("* Discovering Kubernetes DNS Server ...")
 	{
-		dnsEndpoint, err := k8sclientset.CoreV1().Endpoints("kube-system").Get(ctx, "kube-dns", metav1.GetOptions{})
+		dnsEndpoint, err := compute.K8SClientset.CoreV1().Endpoints("kube-system").Get(ctx, "kube-dns", metav1.GetOptions{})
 		if err != nil && !errors.Is(err, context.Canceled) {
 			return errors.Wrapf(err, "unable to discover dns server")
 		}
@@ -188,18 +177,8 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	}
 
 	/*---------------------------------------------------
-	 * Create Informers for Kubernetes CRDs
-	 *---------------------------------------------------*/
-	podInformer, secretInformer, configMapInformer, serviceInformer, err := AddInformers(ctx, c, k8sclientset)
-	if err != nil {
-		return errors.Wrapf(err, "failed to add informers")
-	}
-
-	/*---------------------------------------------------
 	 * Register the Provisioner of Virtual Nodes
 	 *---------------------------------------------------*/
-	DefaultLogger.Info("* Starting Virtual Node Provisioner...")
-
 	virtualk8s, err := provider.NewVirtualK8S(provider.InitConfig{
 		InternalIP:        c.KubeletAddress,
 		DaemonPort:        c.KubeletPort,
@@ -211,7 +190,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		return err
 	}
 
-	AddWebhook(c, virtualk8s)
+	AddAdmissionWebhooks(c, virtualk8s)
 
 	DefaultLogger.Info("Virtual Node Provisioner is ready",
 		"internalIP", virtualk8s.InternalIP,
@@ -219,15 +198,25 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	)
 
 	/*---------------------------------------------------
-	 * Create Pod Controller
+	 * Create Informers for CRDs and Pod Controller
 	 *---------------------------------------------------*/
-	DefaultLogger.Info("* Starting Pod Controller ...")
 	{
+		podInformer, secretInformer, configMapInformer, serviceInformer, _, err := AddInformers(ctx, c, compute.K8SClientset)
+		if err != nil {
+			return errors.Wrapf(err, "failed to add informers")
+		}
+
+		DefaultLogger.Info("Informers are ready",
+			"namespace", c.KubeNamespace,
+			"crds", []string{
+				"pods", "secrets", "configMap", "service", "serviceAccount",
+			})
+
 		eb := record.NewBroadcaster()
 		eb.StartLogging(logrus.Infof)
 
 		pc, err := node.NewPodController(node.PodControllerConfig{
-			PodClient:                            k8sclientset.CoreV1(),
+			PodClient:                            compute.K8SClientset.CoreV1(),
 			PodInformer:                          podInformer,
 			EventRecorder:                        eb.NewRecorder(scheme.Scheme, corev1.EventSource{Component: "hpk-controller"}),
 			Provider:                             virtualk8s,
@@ -275,10 +264,9 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	/*---------------------------------------------------
 	 * Create Node Controller
 	 *---------------------------------------------------*/
-	DefaultLogger.Info("* Starting Node Controller ...")
-
-	np := node.NewNaiveNodeProvider()
 	{
+		np := node.NewNaiveNodeProvider()
+
 		var taint *corev1.Taint
 		if !c.DisableTaint {
 			taint, err = getTaint(c)
@@ -292,8 +280,8 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		nc, err := node.NewNodeController(
 			np,
 			virtualNode,
-			k8sclientset.CoreV1().Nodes(),
-			node.WithNodeEnableLeaseV1(k8sclientset.CoordinationV1().Leases(corev1.NamespaceNodeLease), 0),
+			compute.K8SClientset.CoreV1().Nodes(),
+			node.WithNodeEnableLeaseV1(compute.K8SClientset.CoordinationV1().Leases(corev1.NamespaceNodeLease), 0),
 			node.WithNodeStatusUpdateErrorHandler(func(ctx context.Context, err error) error {
 				if !k8serrors.IsNotFound(err) {
 					return err
@@ -303,7 +291,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 				newNode := virtualNode.DeepCopy()
 				newNode.ResourceVersion = ""
 
-				if _, err = k8sclientset.CoreV1().Nodes().Create(ctx, newNode, metav1.CreateOptions{}); err != nil {
+				if _, err = compute.K8SClientset.CoreV1().Nodes().Create(ctx, newNode, metav1.CreateOptions{}); err != nil {
 					return err
 				}
 
