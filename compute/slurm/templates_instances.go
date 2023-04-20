@@ -50,7 +50,7 @@ echo "Using ApptainerBin: ${apptainer}"
 # Description
 # 	Builds a script for running a Virtual Environment
 # 	that resembles the semantics of a Pause Environment.
-cat > {{.VirtualEnv.ConstructorPath}} << "PAUSE_EOF"
+cat > {{.VirtualEnv.ConstructorFilePath}} << "PAUSE_EOF"
 #!/bin/bash
 
 ############################
@@ -264,7 +264,7 @@ env_running() {
 
 
 echo "== Submit Environment =="
-chmod +x  {{.VirtualEnv.ConstructorPath}}
+chmod +x  {{.VirtualEnv.ConstructorFilePath}}
 
 echo "[Host] Setting Signal Traps for Virtual Environment [Aborted (TERM,KILL,QUIT,INT), Failed (USR1), Running (USR2)]..."
 trap env_abort SIGTERM SIGKILL SIGQUIT INT
@@ -274,7 +274,7 @@ echo "[Host] Starting the constructor the Virtual Environment ..."
 ${apptainer} exec --net --network=flannel --fakeroot \
 --env PARENT=${PPID}								 \
 --bind /bin,/etc/apptainer,/var/lib/apptainer,/lib,/lib64,/usr,/etc/passwd,$HOME,/run/shm \
-docker://alpine {{.VirtualEnv.ConstructorPath}} &
+docker://alpine {{.VirtualEnv.ConstructorFilePath}} &
 
 # return the PID of Apptainer running the virtual environment
 VPID=$!
@@ -312,7 +312,7 @@ type SbatchScriptFields struct {
 
 // The VirtualEnvironmentPaths create lightweight "virtual environments" that resemble "Pods" semantics.
 type VirtualEnvironmentPaths struct {
-	// ConstructorPath points to the script for creating the virtual environment for Pod.
+	// ConstructorFilePath points to the script for creating the virtual environment for Pod.
 	ConstructorPath string
 
 	// IPAddressPath is where we store the internal Pod's ip.

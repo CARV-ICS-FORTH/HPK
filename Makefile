@@ -32,7 +32,21 @@ webhooks:
         resources:   ["pods"]
         scope:       "Namespaced"
     clientConfig:
-      url: "https://${HOST_ADDRESS}:10250/mutates/pods"
+      url: "https://${HOST_ADDRESS}:10250/mutates/pod"
+      caBundle: ${CA_BUNDLE}
+    failurePolicy: Fail
+    admissionReviewVersions: ["v1"]
+    timeoutSeconds: 5
+    sideEffects: None
+  - name: "pvc-mutator.hpk.dev"
+    rules:
+      - apiGroups:   [""]
+        apiVersions: ["v1"]
+        operations:  ["CREATE"]
+        resources:   ["persistentvolumeclaims"]
+        scope:       "Namespaced"
+    clientConfig:
+      url: "https://${HOST_ADDRESS}:10250/mutates/pvc"
       caBundle: ${CA_BUNDLE}
     failurePolicy: Fail
     admissionReviewVersions: ["v1"]

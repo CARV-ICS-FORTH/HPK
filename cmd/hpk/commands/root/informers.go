@@ -17,8 +17,6 @@ package root
 import (
 	"context"
 
-	"github.com/carv-ics-forth/hpk/pkg/resourcemanager"
-	"github.com/pkg/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	kubeinformers "k8s.io/client-go/informers"
@@ -31,10 +29,9 @@ func AddInformers(ctx context.Context, c Opts, k8sclientset *kubernetes.Clientse
 	corev1.SecretInformer,
 	corev1.ConfigMapInformer,
 	corev1.ServiceInformer,
+	corev1.PersistentVolumeClaimInformer,
 	error,
 ) {
-	DefaultLogger.Info("* Starting Kubernetes Informers ...")
-
 	// Create a shared informer factory for Kubernetes Pods assigned to this Node.
 	podInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(
 		k8sclientset,
@@ -51,17 +48,14 @@ func AddInformers(ctx context.Context, c Opts, k8sclientset *kubernetes.Clientse
 	configMapInformer := informerFactory.Core().V1().ConfigMaps()
 	serviceInformer := informerFactory.Core().V1().Services()
 	serviceAccountInformer := informerFactory.Core().V1().ServiceAccounts()
+	pvcInformer := informerFactory.Core().V1().PersistentVolumeClaims()
 
-	// Setup the known Pods related resources manager.
-	if _, err := resourcemanager.NewResourceManager(
-		podInformer.Lister(),
-		secretInformer.Lister(),
-		configMapInformer.Lister(),
-		serviceInformer.Lister(),
-		serviceAccountInformer.Lister(),
-	); err != nil {
-		return nil, nil, nil, nil, errors.Wrap(err, "could not create resource manager")
-	}
+	podInformer.Lister()
+	secretInformer.Lister()
+	configMapInformer.Lister()
+	serviceInformer.Lister()
+	serviceAccountInformer.Lister()
+	pvcInformer.Lister()
 
 	// Finally, start the informers.
 	podInformerFactory.Start(ctx.Done())
@@ -70,11 +64,5 @@ func AddInformers(ctx context.Context, c Opts, k8sclientset *kubernetes.Clientse
 	informerFactory.Start(ctx.Done())
 	informerFactory.WaitForCacheSync(ctx.Done())
 
-	DefaultLogger.Info("Informers are ready",
-		"namespace", c.KubeNamespace,
-		"crds", []string{
-			"pods", "secrets", "configMap", "service", "serviceAccount",
-		})
-
-	return podInformer, secretInformer, configMapInformer, serviceInformer, nil
+	return podInformer, secretInformer, configMapInformer, serviceInformer, pvcInformer, nil
 }

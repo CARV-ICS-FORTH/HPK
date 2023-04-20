@@ -1,0 +1,131 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: genotype-imputation
+spec:
+  entrypoint: genotype-imputation
+  volumes:
+    - name: reference-volume
+      hostPath:
+        path: /home/fnikol/imputation
+  templates:
+    - name: genotype-imputation
+      steps:
+        - - name: download-sample
+            template: download-sample
+            arguments:
+              parameters:
+                - name: url
+                  value: "https://www.dropbox.com/s/y48pwil2r0f6ytb/2ef2b8d872121871a2c16726cd783c3e.gz?dl=1"
+        - - name: create-parameters
+            template: create-parameters
+        - - name: get-extract-parameters
+            template: print-message
+            arguments:
+              artifacts:
+                - name: message
+                  from: "{{steps.create-parameters.outputs.artifacts.extract-parameters}}"
+        - - name: extract
+            template: run-command
+            arguments:
+              artifacts:
+                - name: sample
+                  from: "{{steps.download-sample.outputs.artifacts.human-exome-sequencing}}"
+              parameters:
+                - name: cmd
+                  value: "/root/extract.sh /tmp/human-exome-sequencing.vcf.gz MITSOS {{item}} /reference /tmp/results"
+            withParam: "{{steps.get-extract-parameters.outputs.result}}"
+    - name: download-sample
+      inputs:
+        parameters:
+          - name: url
+      container:
+        image: curlimages/curl:8.00.1
+        command: [sh, -c]
+        args: ["curl -L -o /tmp/human-exome-sequencing.vcf.gz '{{inputs.parameters.url}}'"]
+      outputs:
+        artifacts:
+          - name: human-exome-sequencing
+            path: /tmp/human-exome-sequencing.vcf.gz
+
+    - name: create-parameters
+      script:
+        image: python:3.11.3-alpine
+        command: [python]
+        source: |
+          # Chromosome lengths
+          totals = [
+              {"chr": "chr1", "total": 249250621},
+              {"chr": "chr2", "total": 243199373},
+              {"chr": "chr3", "total": 198022430},
+              {"chr": "chr4", "total": 191154276},
+              {"chr": "chr5", "total": 180915260},
+              {"chr": "chr6", "total": 171115067},
+              {"chr": "chr7", "total": 159138663},
+              {"chr": "chr8", "total": 146364022},
+              {"chr": "chr9", "total": 141213431},
+              {"chr": "chr10", "total": 135534747},
+              {"chr": "chr11", "total": 135006516},
+              {"chr": "chr12", "total": 133851895},
+              {"chr": "chr13", "total": 115169878},
+              {"chr": "chr14", "total": 107349540},
+              {"chr": "chr15", "total": 102531392},
+              {"chr": "chr16", "total": 90354753},
+              {"chr": "chr17", "total": 81195210},
+              {"chr": "chr18", "total": 78077248},
+              {"chr": "chr19", "total": 59128983},
+              {"chr": "chr20", "total": 63025520},
+              {"chr": "chr21", "total": 48129895},
+              {"chr": "chr22", "total": 51304566},
+          ]
+          # Imputation limit
+          limit = 5000000
+        chromosomes = []
+        ranges = []
+        for d in totals:
+          # Filter chromosome
+          if d["chr"] not in ("chr19",):
+            continue
+          chromosomes.append(d["chr"])
+          ranges += list({"chr": d["chr"], "total": d["total"], "start": str(x), "end": str(x + limit)} for x in range(0, d["total"], limit))
+
+        # Write output
+        import json
+        with open("/tmp/extract-parameters.json", "w") as f:
+          f.write(json.dumps(chromosomes, indent=4))
+        with open("/tmp/imputation-parameters.json", "w") as f:
+          f.write(json.dumps(ranges, indent=4))
+      outputs:
+        artifacts:
+          - name: extract-parameters
+            path: /tmp/extract-parameters.json
+          - name: imputation-parameters
+            path: /tmp/imputation-parameters.json
+
+    - name: print-message
+      inputs:
+        artifacts:
+          - name: message
+            path: /tmp/message
+      container:
+        image: alpine:3.17.3
+        command: [sh, -c]
+        args: ["set -eux; cat /tmp/message"]
+
+    - name: run-command
+      inputs:
+        artifacts:
+          - name: sample
+            path: /tmp/human-exome-sequencing.vcf.gz
+        parameters:
+          - name: cmd
+      outputs:
+        artifacts:
+          - name: results
+            path: /tmp/results
+      container:
+        image: chazapis/imputation:latest
+        command: ["/bin/bash", "-c"]
+        args: ["mkdir -p /tmp/results; {{inputs.parameters.cmd}}"]
+        volumeMounts:
+          - mountPath: /reference

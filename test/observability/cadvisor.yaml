@@ -1,0 +1,33 @@
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: telemetry
+  annotations:
+    prometheus.io/scrape: "true"
+spec:
+  containers:
+    - name: cadvisor
+      image: icsforth/cadvisor
+      ports:
+        - name: tel-sys
+          containerPort: 9442
+      securityContext:
+        privileged: true
+      command:
+        - /bin/sh # Run shell
+        - -c # Read from string
+        - |  # Multi-line str
+          set -eux
+          
+          # Start the monitoring
+          cadvisor --port=9442                  \
+          --store_container_labels=false        \
+          --log_cadvisor_usage=false            \
+          --profiling=false                     \
+          --allow_dynamic_housekeeping=true     \
+          --housekeeping_interval=2s            \
+          --disable_root_cgroup_stats=false     \
+          --disable_metrics=advtcp,cpuLoad,cpu_topology,cpuset,hugetlb,memory_numa,process,referenced_memory,resctrl,sched,percpu,process,perf_event,tcp,udp  \
+          --enable_metrics=cpu,memory,disk,diskIO,network,accelerator,oom_event
+          

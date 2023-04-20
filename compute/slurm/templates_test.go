@@ -125,10 +125,10 @@ func TestSBatch(t *testing.T) {
 				},
 				Pod: podKey,
 				VirtualEnv: slurm.VirtualEnvironmentPaths{
-					ConstructorPath: podDir.ConstructorPath(),
-					IPAddressPath:   podDir.IPAddressPath(),
-					StdoutPath:      podDir.StdoutPath(),
-					StderrPath:      podDir.StderrPath(),
+					ConstructorFilePath: podDir.ConstructorFilePath(),
+					IPAddressPath:       podDir.IPAddressPath(),
+					StdoutPath:          podDir.StdoutPath(),
+					StderrPath:          podDir.StderrPath(),
 				},
 				InitContainers: func() (containers []slurm.Container) {
 					containerName := []string{"a", "b", "c", "d"}
