@@ -25,15 +25,18 @@ import (
 	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/compute/slurm/apptainer"
 	"github.com/carv-ics-forth/hpk/compute/slurm/job"
-	"github.com/sirupsen/logrus"
+	kubecontainer "github.com/carv-ics-forth/hpk/pkg/container"
+	"github.com/carv-ics-forth/hpk/pkg/hostutil"
+	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	mounter "k8s.io/utils/mount"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // buildContainer replicates the behavior of
 // https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/kuberuntime/kuberuntime_container.go
-func (h *podHandler) buildContainer(container *corev1.Container, containerStatus *corev1.ContainerStatus) Container {
+func (h *podHandler) buildContainer(container *corev1.Container, containerStatus *corev1.ContainerStatus) (Container, error) {
 	/*---------------------------------------------------
 	 * Generate Environment Variables
 	 *---------------------------------------------------*/
@@ -41,7 +44,7 @@ func (h *podHandler) buildContainer(container *corev1.Container, containerStatus
 		Funcs(sprig.TxtFuncMap()).
 		Option("missingkey=error").Parse(GenerateEnvTemplate)
 	if err != nil {
-		compute.SystemError(err, "generate env template error")
+		compute.SystemPanic(err, "generate env template error")
 	}
 
 	fields := GenerateEnvFields{
@@ -52,13 +55,13 @@ func (h *podHandler) buildContainer(container *corev1.Container, containerStatus
 
 	if err := envFileTemplate.Execute(&envFileContent, fields); err != nil {
 		/*-- since both the template and fields are internal to the code, the evaluation should always succeed	--*/
-		compute.SystemError(err, "failed to evaluate sbatch template")
+		compute.SystemPanic(err, "failed to evaluate sbatch template")
 	}
 
 	envfilePath := h.podDirectory.Container(container.Name).EnvFilePath()
 
 	if err := os.WriteFile(envfilePath, []byte(envFileContent.String()), compute.PodGlobalDirectoryPermissions); err != nil {
-		compute.SystemError(err, "cannot write env file for container '%s' of pod '%s'", container, h.podKey)
+		compute.SystemPanic(err, "cannot write env file for container '%s' of pod '%s'", container, h.podKey)
 	}
 
 	/*---------------------------------------------------
@@ -66,39 +69,63 @@ func (h *podHandler) buildContainer(container *corev1.Container, containerStatus
 	 *---------------------------------------------------*/
 	binds := make([]string, len(container.VolumeMounts))
 
+	// check the code from https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/kubelet_pods.go#L196
 	for i, mount := range container.VolumeMounts {
-		accessMode := func() string {
-			if mount.ReadOnly {
-				return ":ro"
-			} else {
-				return ":rw"
+		hostPath := filepath.Join(h.podDirectory.VolumeDir(), mount.Name)
+
+		subPath := mount.SubPath
+		if mount.SubPathExpr != "" {
+			subPath, err = kubecontainer.ExpandContainerVolumeMounts(mount, h.podEnvVariables)
+			if err != nil {
+				compute.SystemPanic(err, "cannot expand env variables for container '%s' of pod '%s'", container, h.podKey)
 			}
 		}
 
-		// When subpath is zero, the scheme is: ".hpk/namespace/podName/.virtualenv/mountName:mountPath"
-		// When subpath is non-zero, the scheme is ".hpk/namespace/podName/.virtualenv/mountName/subpath:mountPath"
-		if mount.SubPath == "" {
-			pathFile := filepath.Join(h.podDirectory.VolumeDir(), mount.Name)
+		if subPath != "" {
+			if filepath.IsAbs(subPath) {
+				return Container{}, errors.Errorf("error SubPath '%s' must not be an absolute path", subPath)
+			}
 
-			binds[i] = pathFile + ":" + mount.MountPath + accessMode()
-		} else {
-			subPathFile := filepath.Join(h.podDirectory.VolumeDir(), mount.Name, mount.SubPath)
+			subPathFile := filepath.Join(hostPath, subPath)
 
-			_, err := os.Stat(subPathFile)
-			switch {
-			case err == nil:
-				binds[i] = subPathFile + ":" + mount.MountPath + accessMode()
-			case os.IsNotExist(err):
-				// If the file doesn't exist, create a dummy placeholder
-				// FIXME: this can a security issue
-				_, err := os.Create(subPathFile)
-				if err != nil {
-					compute.SystemError(err, "failed to create placeholder. subpath:'%s'", subPathFile)
+			subPathFileExists, err := mounter.PathExists(subPathFile)
+			if err != nil {
+				compute.SystemPanic(err, "Could not determine if subPath exists. mount:'%v'", mount)
+			}
+
+			if !subPathFileExists {
+				// Create the sub path now because if it's auto-created later when referenced, it may have an
+				// incorrect ownership and mode.
+				// The placeholder should normally be of the same type (dir or file) as the bind target.
+				// However, at this point we do not have access to the bind.
+				// For this reason, we follow the convention that dir should be marked "/path/subpath/" whereas
+				// files should be marked as "/path/subpath".
+				//
+				// For the particular case of Argo, we know that "0" are always dirs.
+				if mount.SubPath == "0" {
+					if err := hostutil.SafeMakeDir(subPath, hostPath, compute.PodGlobalDirectoryPermissions); err != nil {
+						compute.SystemPanic(err, "failed to create dir placeholder. subpath:'%s'", subPathFile)
+					}
+				} else {
+					// A file is enough for all possible targets (symlink, device, pipe,
+					// socket, ...), bind-mounting them into a file correctly changes type
+					// of the target file.
+					if err = os.WriteFile(subPathFile, []byte{}, compute.PodGlobalDirectoryPermissions); err != nil {
+						compute.SystemPanic(err, "failed to create placeholder. subpath:'%s'", subPathFile)
+					}
 				}
-			default:
-				compute.SystemError(err, "volume mounting has failed. mount:'%v'", mount)
 			}
+
+			// mount the subpath
+			hostPath = subPathFile
 		}
+
+		accessMode := "rw"
+		if mount.ReadOnly {
+			accessMode = "ro"
+		}
+
+		binds[i] = hostPath + ":" + mount.MountPath + ":" + accessMode
 	}
 
 	/*---------------------------------------------------
@@ -125,8 +152,8 @@ func (h *podHandler) buildContainer(container *corev1.Container, containerStatus
 		InstanceName:  containerID,
 		ImageFilePath: imageID,
 		Binds:         binds,
-		Command:       container.Command,
-		Args:          container.Args,
+		Command:       kubecontainer.ExpandContainerCommandOnlyStatic(container.Command, container.Env),
+		Args:          kubecontainer.ExpandContainerCommandOnlyStatic(container.Args, container.Env),
 		ApptainerMode: apptainerMode,
 		EnvFilePath:   containerPath.EnvFilePath(),
 		JobIDPath:     containerPath.IDPath(),
@@ -143,7 +170,7 @@ func (h *podHandler) buildContainer(container *corev1.Container, containerStatus
 	containerStatus.Image = container.Image
 	containerStatus.ImageID = imageID
 
-	return c
+	return c, nil
 }
 
 /*************************************************************
@@ -169,8 +196,6 @@ func SyncContainerStatuses(pod *corev1.Pod) {
 		exitCode, exitCodeExists := readIntFromFile(exitCodePath)
 
 		if exitCodeExists {
-			logrus.Warnf("EXIT code:'%d' container:'%s'", exitCode, containerStatus.Name)
-
 			containerStatus.State.Waiting = nil
 			containerStatus.State.Running = nil
 			containerStatus.State.Terminated = &corev1.ContainerStateTerminated{

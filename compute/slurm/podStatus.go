@@ -36,8 +36,6 @@ func SyncPodStatus(pod *corev1.Pod) {
 	podDir := compute.PodRuntimeDir(podKey)
 	logger := compute.DefaultLogger.WithValues("pod", podKey)
 
-	logger.Info(" * Syncing Pod Status")
-
 	/*---------------------------------------------------
 	 * Handle Initialization and Finals States
 	 *---------------------------------------------------*/
@@ -205,7 +203,8 @@ func SyncPodStatus(pod *corev1.Pod) {
 		if testcase.expression {
 			testcase.change(&pod.Status)
 
-			logger.Info(" * Pod Status Synced", "phase", pod.Status.Phase,
+			logger.Info(" * Pod status has changed",
+				"phase", pod.Status.Phase,
 				"completed", state.ListSuccessfulJobs(),
 				"failed", state.ListFailedJobs(),
 			)
@@ -365,7 +364,7 @@ func readIntFromFile(filepath string) (int, bool) {
 	if scanner.Scan() {
 		code, err := strconv.Atoi(scanner.Text())
 		if err != nil {
-			compute.SystemError(err, "cannot decode content to int")
+			compute.SystemPanic(err, "cannot decode content to int")
 		}
 
 		return code, true

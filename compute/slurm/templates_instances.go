@@ -236,7 +236,7 @@ env_failed() {
 	echo "[HOST] Cleanup Signal files"
 	rm /dev/shm/signal_${PPID}
 
-	echo "Explain the Situations " >> {{.VirtualEnv.SysErrorPath}}
+	echo "Explain the Situations " >> {{.VirtualEnv.SysErrorFilePath}}
 
 	echo "[HOST] Waiting for the Virtual Environment to Exit"
 	wait ${VPID}
@@ -332,7 +332,7 @@ type VirtualEnvironmentPaths struct {
 	// This is used to know when the job has been completed.
 	ExitCodePath string
 
-	// SysErrorPath indicate a system failure that cause the Pod to fail Immediately, bypassing any other checks.
+	// SysErrorFilePath indicate a system failure that cause the Pod to fail Immediately, bypassing any other checks.
 	SysErrorPath string
 }
 

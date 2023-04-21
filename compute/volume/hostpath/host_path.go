@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/carv-ics-forth/hpk/compute/slurm/volume/util/hostutil"
-	"github.com/carv-ics-forth/hpk/compute/slurm/volume/util/validation"
+	"github.com/carv-ics-forth/hpk/compute/volume/util/validation"
+	hostutil2 "github.com/carv-ics-forth/hpk/pkg/hostutil"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -48,7 +48,7 @@ func (b *VolumeMounter) SetUpAt(ctx context.Context) error {
 		return nil
 	}
 
-	return checkType(source.Path, source.Type, hostutil.NewHostUtil())
+	return checkType(source.Path, source.Type, hostutil2.NewHostUtil())
 }
 
 type hostPathTypeChecker interface {
@@ -64,7 +64,7 @@ type hostPathTypeChecker interface {
 }
 
 // checkType checks whether the given path is the exact pathType
-func checkType(path string, pathType *corev1.HostPathType, hu hostutil.HostUtils) error {
+func checkType(path string, pathType *corev1.HostPathType, hu hostutil2.HostUtils) error {
 	return checkTypeInternal(newFileTypeChecker(path, hu), pathType)
 }
 
@@ -107,13 +107,13 @@ func checkTypeInternal(ftc hostPathTypeChecker, pathType *corev1.HostPathType) e
 	return nil
 }
 
-func newFileTypeChecker(path string, hu hostutil.HostUtils) hostPathTypeChecker {
+func newFileTypeChecker(path string, hu hostutil2.HostUtils) hostPathTypeChecker {
 	return &fileTypeChecker{path: path, hu: hu}
 }
 
 type fileTypeChecker struct {
 	path string
-	hu   hostutil.HostUtils
+	hu   hostutil2.HostUtils
 }
 
 func (ftc *fileTypeChecker) Exists() bool {

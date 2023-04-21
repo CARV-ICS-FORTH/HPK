@@ -21,15 +21,15 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/carv-ics-forth/hpk/compute/slurm/volume/projected"
-	"github.com/carv-ics-forth/hpk/compute/slurm/volume/util"
+	"github.com/carv-ics-forth/hpk/compute/volume/configmap"
+	"github.com/carv-ics-forth/hpk/compute/volume/emptydir"
+	"github.com/carv-ics-forth/hpk/compute/volume/hostpath"
+	"github.com/carv-ics-forth/hpk/compute/volume/projected"
+	"github.com/carv-ics-forth/hpk/compute/volume/secret"
+	"github.com/carv-ics-forth/hpk/compute/volume/util"
 	"github.com/pkg/errors"
 
-	"github.com/carv-ics-forth/hpk/compute/slurm/volume/configmap"
-	"github.com/carv-ics-forth/hpk/compute/slurm/volume/hostpath"
-
 	"github.com/carv-ics-forth/hpk/compute"
-	"github.com/carv-ics-forth/hpk/compute/slurm/volume/secret"
 	"github.com/carv-ics-forth/hpk/pkg/fieldpath"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
@@ -57,9 +57,18 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) {
 		 *---------------------------------------------------*/
 		emptyDir, err := h.podDirectory.CreateVolume(vol.Name, compute.PodGlobalDirectoryPermissions)
 		if err != nil {
-			compute.SystemError(err, "cannot create dir '%s' for emptyDir", emptyDir)
+			compute.SystemPanic(err, "cannot create dir '%s' for emptyDir", emptyDir)
 		}
-		// without size limit for now
+
+		mounter := emptydir.VolumeMounter{
+			Volume: vol,
+			Pod:    *h.Pod,
+			Logger: h.logger,
+		}
+
+		if err = mounter.SetUpAt(ctx, emptyDir); err != nil {
+			compute.SystemPanic(err, "mount emptyDir volume to dir '%s' has failed", emptyDir)
+		}
 
 		h.logger.Info("  * EmptyDir Volume is mounted", "name", vol.Name)
 
@@ -67,20 +76,19 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) {
 		/*---------------------------------------------------
 		 * ConfigMap
 		 *---------------------------------------------------*/
+		configMapDir, err := h.podDirectory.CreateVolume(vol.Name, compute.PodGlobalDirectoryPermissions)
+		if err != nil {
+			compute.SystemPanic(err, "cannot create dir '%s' for configmap", configMapDir)
+		}
+
 		mounter := configmap.VolumeMounter{
 			Volume: vol,
 			Pod:    *h.Pod,
 			Logger: h.logger,
 		}
 
-		// .hpk/namespace/podName/.virtualenv/secretName/*
-		podConfigMapDir, err := h.podDirectory.CreateVolume(vol.Name, compute.PodGlobalDirectoryPermissions)
-		if err != nil {
-			compute.SystemError(err, "cannot create dir '%s' for configmap", podConfigMapDir)
-		}
-
-		if err = mounter.SetUpAt(ctx, podConfigMapDir); err != nil {
-			compute.SystemError(err, "mount secret volume to dir '%s' has failed", podConfigMapDir)
+		if err = mounter.SetUpAt(ctx, configMapDir); err != nil {
+			compute.SystemPanic(err, "mount configmap volume to dir '%s' has failed", configMapDir)
 		}
 
 		h.logger.Info("  * ConfigMap Volume is mounted", "name", vol.Name)
@@ -89,20 +97,19 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) {
 		/*---------------------------------------------------
 		 * Secret
 		 *---------------------------------------------------*/
+		secretDir, err := h.podDirectory.CreateVolume(vol.Name, compute.PodGlobalDirectoryPermissions)
+		if err != nil {
+			compute.SystemPanic(err, "cannot create dir '%s' for secrets", secretDir)
+		}
+
 		mounter := secret.VolumeMounter{
 			Volume: vol,
 			Pod:    *h.Pod,
 			Logger: h.logger,
 		}
 
-		// .hpk/namespace/podName/.virtualenv/secretName/*
-		podSecretDir, err := h.podDirectory.CreateVolume(vol.Name, compute.PodGlobalDirectoryPermissions)
-		if err != nil {
-			compute.SystemError(err, "cannot create dir '%s' for secrets", podSecretDir)
-		}
-
-		if err = mounter.SetUpAt(ctx, podSecretDir); err != nil {
-			compute.SystemError(err, "mount secret volume to dir '%s' has failed", podSecretDir)
+		if err = mounter.SetUpAt(ctx, secretDir); err != nil {
+			compute.SystemPanic(err, "mount secret volume to dir '%s' has failed", secretDir)
 		}
 
 		h.logger.Info("  * Secret Volume is mounted", "name", vol.Name)
@@ -122,7 +129,7 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) {
 		if vol.VolumeSource.HostPath.Type == nil || *vol.VolumeSource.HostPath.Type == corev1.HostPathUnset {
 			// For backwards compatible, leave it empty if unset
 			if path, err := h.podDirectory.CreateVolumeLink(vol.VolumeSource.HostPath.Path, vol.Name); err != nil {
-				compute.SystemError(err, "cannot create HostPathDirectoryOrCreate at path '%s'", path)
+				compute.SystemPanic(err, "cannot create HostPathDirectoryOrCreate at path '%s'", path)
 			}
 
 			h.logger.Info("  * HostPath Volume is mounted", "name", vol.Name)
@@ -137,7 +144,7 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) {
 		}
 
 		if err := mounter.SetUpAt(ctx); err != nil {
-			compute.SystemError(err, "mount hostpath volum has failed")
+			compute.SystemPanic(err, "mount hostpath volum has failed")
 		}
 
 		h.logger.Info("  * HostPath Volume is mounted", "name", vol.Name)
@@ -154,20 +161,19 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) {
 		/*---------------------------------------------------
 		 * Projected
 		 *---------------------------------------------------*/
+		projectedDir, err := h.podDirectory.CreateVolume(vol.Name, compute.PodGlobalDirectoryPermissions)
+		if err != nil {
+			compute.SystemPanic(err, "cannot create dir '%s' for projected volumes", projectedDir)
+		}
+
 		mounter := projected.VolumeMounter{
 			Volume: vol,
 			Pod:    *h.Pod,
 			Logger: h.logger,
 		}
 
-		// .hpk/namespace/podName/.virtualenv/projected/*
-		projectedDir, err := h.podDirectory.CreateVolume(vol.Name, compute.PodGlobalDirectoryPermissions)
-		if err != nil {
-			compute.SystemError(err, "cannot create dir '%s' for projected volumes", projectedDir)
-		}
-
 		if err = mounter.SetUpAt(ctx, projectedDir); err != nil {
-			compute.SystemError(err, "mount projected volume to dir '%s' has failed", projectedDir)
+			compute.SystemPanic(err, "mount projected volume to dir '%s' has failed", projectedDir)
 		}
 
 		h.logger.Info("  * Projected Volume is mounted", "name", vol.Name)
@@ -182,7 +188,7 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) {
 func (h *podHandler) DownwardAPIVolumeSource(ctx context.Context, vol corev1.Volume) {
 	downApiDir, err := h.podDirectory.CreateVolume(vol.Name, compute.PodGlobalDirectoryPermissions)
 	if err != nil {
-		compute.SystemError(err, "cannot create dir '%s' for downwardApi", downApiDir)
+		compute.SystemPanic(err, "cannot create dir '%s' for downwardApi", downApiDir)
 	}
 
 	for _, item := range vol.DownwardAPI.Items {
@@ -195,7 +201,7 @@ func (h *podHandler) DownwardAPIVolumeSource(ctx context.Context, vol corev1.Vol
 		}
 
 		if err := os.WriteFile(itemPath, []byte(value), fs.FileMode(*vol.Projected.DefaultMode)); err != nil {
-			compute.SystemError(err, "cannot write config map file '%s'", itemPath)
+			compute.SystemPanic(err, "cannot write config map file '%s'", itemPath)
 		}
 	}
 }
@@ -283,7 +289,7 @@ func (h *podHandler) PersistentVolumeClaimSource(ctx context.Context, vol corev1
 	switch {
 	case pv.Spec.Local != nil:
 		if path, err := h.podDirectory.CreateVolumeLink(pv.Spec.Local.Path, vol.Name); err != nil {
-			compute.SystemError(err, "cannot create local pv at path '%s'", path)
+			compute.SystemPanic(err, "cannot create local pv at path '%s'", path)
 		}
 
 		h.logger.Info("  * Local Volume is mounted", "name", vol.Name)

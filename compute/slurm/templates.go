@@ -21,7 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-const SbatchScriptTemplate = `#!/bin/bash
+const SlurmScriptTemplate = `#!/bin/bash
 #SBATCH --job-name={{.Pod.Name}}
 #SBATCH --output={{.VirtualEnv.StdoutPath}}
 #SBATCH --error={{.VirtualEnv.StderrPath}}
@@ -101,6 +101,9 @@ reset_env() {
 
 	unset APPTAINER_BIND
 	unset SINGULARITY_BIND
+
+
+	export POD_NAMESPACE={{.Pod.Namespace}}
 }
 
 handle_init_containers() {
@@ -121,10 +124,10 @@ handle_init_containers() {
 	{{- end}}
 	{{$container.ImageFilePath}}
 	{{- if $container.Command}}
-		{{- range $index, $cmd := $container.Command}} "{{$cmd}}" {{- end}}
+		{{- range $index, $cmd := $container.Command}} '{{$cmd}}' {{- end}}
 	{{- end -}} 
 	{{- if $container.Args}}
-		{{range $index, $arg := $container.Args}} "{{$arg}}" {{- end}}
+		{{range $index, $arg := $container.Args}} '{{$arg}}' {{- end}}
 	{{- end }} \
 	&>> {{$container.LogsPath}}
 
@@ -152,10 +155,10 @@ handle_containers() {
 	{{- end}}
 	{{$container.ImageFilePath}}
 	{{- if $container.Command}}
-		{{- range $index, $cmd := $container.Command}} "{{$cmd}}" {{- end}}
+		{{- range $index, $cmd := $container.Command}} '{{$cmd}}' {{- end}}
 	{{- end -}} 
 	{{- if $container.Args}}
-		{{- range $index, $arg := $container.Args}} "{{$arg}}" {{- end}}
+		{{- range $index, $arg := $container.Args}} '{{$arg}}' {{- end}}
 	{{- end }} \
 	&>> {{$container.LogsPath}}; \
 	echo $? > {{$container.ExitCodePath}}) &
@@ -173,7 +176,7 @@ _teardown() {
 	if [[ $exitCode -eq 0 ]]; then
 		echo "[Virtual] Gracefully exit the Virtual Environment. All resources will be released."
 	else
-		echo "[Virtual] **SYSTEMERROR** ${lastCommand} command filed with exit code ${exitCode}" | tee {{.VirtualEnv.SysErrorPath}}
+		echo "[Virtual] **SYSTEMERROR** ${lastCommand} command filed with exit code ${exitCode}" | tee {{.VirtualEnv.SysErrorFilePath}}
 		echo "[Virtual] Send Signal to parent (${PARENT}) to inform about the failure"
 		echo "env_failed" > /dev/shm/signal_${PARENT}
 
@@ -290,7 +293,7 @@ $(cat /dev/shm/signal_${PPID})
 #### END SECTION: Host Environment ####
 `
 
-// JobFields provide the inputs to SbatchScriptTemplate.
+// JobFields provide the inputs to SlurmScriptTemplate.
 type JobFields struct {
 	Pod types.NamespacedName
 
@@ -329,8 +332,8 @@ type VirtualEnvironmentPaths struct {
 	// StdoutPath instruct Slurm to write stderr into the specified path.
 	StderrPath string
 
-	// SysErrorPath indicate a system failure that cause the Pod to fail Immediately, bypassing any other checks.
-	SysErrorPath string
+	// SysErrorFilePath indicate a system failure that cause the Pod to fail Immediately, bypassing any other checks.
+	SysErrorFilePath string
 }
 
 // The Container creates new within the Pod and resemble the "Container" semantics.

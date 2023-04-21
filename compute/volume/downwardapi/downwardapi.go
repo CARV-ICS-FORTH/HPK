@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	volumeutil "github.com/carv-ics-forth/hpk/compute/slurm/volume/util"
+	volumeutil "github.com/carv-ics-forth/hpk/compute/volume/util"
 	"github.com/carv-ics-forth/hpk/pkg/fieldpath"
 	corev1 "k8s.io/api/core/v1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"

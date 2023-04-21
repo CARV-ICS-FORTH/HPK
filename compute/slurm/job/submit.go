@@ -30,7 +30,7 @@ func SubmitJob(scriptFile string) (string, error) {
 	// Submit Job
 	out, err := process.ExecuteInDir(compute.UserHomeDir, Slurm.SubmitCmd, ExcludeNodes, scriptFile)
 	if err != nil {
-		compute.SystemError(err, "sbatch submission error. out : '%s'", out)
+		compute.SystemPanic(err, "sbatch submission error. out : '%s'", out)
 	}
 
 	// Parse Job ID
@@ -38,7 +38,7 @@ func SubmitJob(scriptFile string) (string, error) {
 	jid := expectedOutput.FindStringSubmatch(string(out))
 
 	if _, err := strconv.Atoi(jid[1]); err != nil {
-		compute.SystemError(err, "Invalid JobID")
+		compute.SystemPanic(err, "Invalid JobID")
 	}
 
 	return jid[1], nil

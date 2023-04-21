@@ -97,8 +97,8 @@ func PodRuntimeDir(podRef client.ObjectKey) PodPath {
 	They are necessary to drive the lifecycle of a Pod.
 */
 
-// SysErrorPath .hpk/namespace/podName/.syserror
-func (p PodPath) SysErrorPath() string {
+// SysErrorFilePath .hpk/namespace/podName/.syserror
+func (p PodPath) SysErrorFilePath() string {
 	return filepath.Join(string(p), ExtensionSysError)
 }
 
@@ -247,7 +247,7 @@ func PodEnvironmentIsOK(path PodPath) (bool, string) {
 	}
 
 	// check if the pod is already failed
-	if _, err := os.Open(path.SysErrorPath()); !os.IsNotExist(err) {
+	if _, err := os.Open(path.SysErrorFilePath()); !os.IsNotExist(err) {
 		return false, "pod has failed with a system error"
 	}
 
