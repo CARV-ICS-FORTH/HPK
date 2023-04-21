@@ -104,13 +104,13 @@ type Stats struct {
 func getClusterStats() Stats {
 	out, err := process.Execute(job.Slurm.StatsCmd, "--long", "--json")
 	if err != nil {
-		compute.SystemError(err, "stats query error. out : '%s'", out)
+		compute.SystemPanic(err, "stats query error. out : '%s'", out)
 	}
 
 	var info Stats
 
 	if err := json.Unmarshal(out, &info); err != nil {
-		compute.SystemError(err, "stats decoding error")
+		compute.SystemPanic(err, "stats decoding error")
 	}
 
 	return info

@@ -32,6 +32,7 @@ import (
 // which tell the container where to find the services it may need, which are
 // provided as an argument.
 func FromServices(ctx context.Context, namespace string) []corev1.EnvVar {
+
 	/*---------------------------------------------------
 	 * Get all Service resources from master
 	 *---------------------------------------------------*/
@@ -40,7 +41,7 @@ func FromServices(ctx context.Context, namespace string) []corev1.EnvVar {
 	if err := compute.K8SClient.List(ctx, &serviceList, &client.ListOptions{
 		LabelSelector: labels.Everything(),
 	}); err != nil {
-		compute.SystemError(err, "failed to list services when setting up env vars")
+		compute.SystemPanic(err, "failed to list services when setting up env vars")
 	}
 
 	var services []*corev1.Service
@@ -165,7 +166,7 @@ func FromEndpointSlices(ctx context.Context,  namespace string) []corev1.EnvVar 
 	if err := compute.K8SClient.List(ctx, &endpointSliceList, &client.ListOptions{
 		LabelSelector: labels.Everything(),
 	}); err != nil {
-		SystemError(err, "failed to list EndpointSlice when setting up env vars")
+		SystemPanic(err, "failed to list EndpointSlice when setting up env vars")
 	}
 
 	var endpointSlices []*discoveryv1.EndpointSlice

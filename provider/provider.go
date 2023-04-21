@@ -136,10 +136,10 @@ func (v *VirtualK8S) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	logger.Info("K8s -> CreatePod")
+	logger.Info("[K8s] -> CreatePod")
 
 	defer func() {
-		logger.Info("K8s <- CreatePod")
+		logger.Info("[K8s] <- CreatePod")
 	}()
 
 	/*---------------------------------------------------
@@ -160,9 +160,9 @@ func (v *VirtualK8S) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	go func() {
 		// run each request on a different thread to avoid blocking
 		// if the pod has failed, notify the k8s.
-		if err := slurm.CreatePod(ctx, pod, v.fileWatcher); err != nil {
-			v.updatedPod(pod)
-		}
+		slurm.CreatePod(ctx, pod, v.fileWatcher)
+
+		v.updatedPod(pod)
 	}()
 
 	/*
@@ -181,18 +181,18 @@ func (v *VirtualK8S) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	logger.Info("K8s -> UpdatePod",
+	logger.Info("[K8s] -> UpdatePod",
 		"version", pod.GetResourceVersion(),
 		"phase", pod.Status.Phase,
 	)
 
-	defer logger.Info("K8s <- UpdatePod")
+	defer logger.Info("[K8s] <- UpdatePod")
 
 	/*---------------------------------------------------
 	 * Ensure that received pod is newer than the local
 	 *---------------------------------------------------*/
-	localPod := slurm.LoadPodFromDisk(podKey)
-	if localPod == nil {
+	localPod, err := slurm.LoadPodFromKey(podKey)
+	if err != nil {
 		return errdefs.NotFoundf("object not found")
 	}
 
@@ -219,7 +219,9 @@ func (v *VirtualK8S) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	}
 
 	/*-- Update the local status of Pod --*/
-	slurm.SavePodToDisk(ctx, pod)
+	if err := slurm.SavePodToFile(ctx, pod); err != nil {
+		compute.SystemPanic(err, "failed to set job id for pod '%s'", podKey)
+	}
 
 	return nil
 }
@@ -234,46 +236,15 @@ func (v *VirtualK8S) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	logger.Info("K8s -> DeletePod")
+	logger.Info("[K8s] -> DeletePod")
 
 	if !slurm.DeletePod(podKey, v.fileWatcher) {
-		logger.Info("K8s <- DeletePod (POD NOT FOUND)")
+		logger.Info("[K8s] <- DeletePod (POD NOT FOUND)")
 
 		return errdefs.NotFoundf("object not found")
 	}
 
-	/*---------------------------------------------------
-	 * Mark Containers and Pod as Terminated
-	 *---------------------------------------------------*/
-	/*
-		pod.Status.Phase = corev1.PodSucceeded
-		ready := false
-
-		for i := range pod.Status.InitContainerStatuses {
-			pod.Status.InitContainerStatuses[i].Started = &ready
-			pod.Status.InitContainerStatuses[i].Ready = ready
-			pod.Status.InitContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
-				Reason:     "PodIsDeleted",
-				Message:    "Pod is being deleted",
-				FinishedAt: metav1.Now(),
-			}
-		}
-
-		for i := range pod.Status.ContainerStatuses {
-			pod.Status.ContainerStatuses[i].Started = &ready
-			pod.Status.ContainerStatuses[i].Ready = ready
-			pod.Status.ContainerStatuses[i].State.Terminated = &corev1.ContainerStateTerminated{
-				Reason:     "PodIsDeleted",
-				Message:    "Pod is being deleted",
-				FinishedAt: metav1.Now(),
-			}
-		}
-
-		v.updatedPod(pod)
-
-	*/
-
-	logger.Info("K8s <- DeletePod (SUCCESS)")
+	logger.Info("[K8s] <- DeletePod (SUCCESS)")
 	return nil
 }
 
@@ -288,16 +259,16 @@ func (v *VirtualK8S) GetPod(ctx context.Context, namespace, name string) (*corev
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	logger.Info("K8s -> GetPod")
+	logger.Info("[K8s] -> GetPod")
 
-	pod := slurm.LoadPodFromDisk(podKey)
-	if pod == nil {
-		logger.Info("K8s <- GetPod (POD NOT FOUND)")
+	pod, err := slurm.LoadPodFromKey(podKey)
+	if err != nil {
+		logger.Info("[K8s] <- GetPod (POD NOT FOUND)")
 
 		return nil, errdefs.NotFoundf("object not found")
 	}
 
-	logger.Info("K8s <- GetPod",
+	logger.Info("[K8s] <- GetPod",
 		"version", pod.GetResourceVersion(),
 		"phase", pod.Status.Phase,
 	)
@@ -316,16 +287,16 @@ func (v *VirtualK8S) GetPodStatus(ctx context.Context, namespace, name string) (
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	logger.Info("K8s -> GetPodStatus")
+	logger.Info("[K8s] -> GetPodStatus")
 
-	pod := slurm.LoadPodFromDisk(podKey)
-	if pod == nil {
-		logger.Info("K8s <- GetPodStatus (POD NOT FOUND)")
+	pod, err := slurm.LoadPodFromKey(podKey)
+	if err != nil {
+		logger.Info("[K8s] <- GetPodStatus (POD NOT FOUND)")
 
 		return nil, errdefs.NotFoundf("object not found")
 	}
 
-	logger.Info("K8s <- GetPodStatus",
+	logger.Info("[K8s] <- GetPodStatus",
 		"version", pod.GetResourceVersion(),
 		"phase", pod.Status.Phase,
 	)
@@ -341,8 +312,8 @@ func (v *VirtualK8S) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	v.Logger.Info("K8s -> GetPods")
-	defer v.Logger.Info("K8s <- GetPods")
+	v.Logger.Info("[K8s] -> GetPods")
+	defer v.Logger.Info("[K8s] <- GetPods")
 
 	/*---------------------------------------------------
 	 * Iterate the filesystem and extract local pods
@@ -350,12 +321,13 @@ func (v *VirtualK8S) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
 	var pods []*corev1.Pod
 
 	if err := slurm.WalkPodDirectories(func(path compute.PodPath) error {
+
 		encodedPod, err := os.ReadFile(path.EncodedJSONPath())
 		if err != nil {
-			v.Logger.Error(err, "potentially corrupted dir. cannot read pod description file",
-				"path", path)
+			v.Logger.Info("Ignore Corrupted Pod Dir", "path", path, "error", err)
 
-			return errors.Wrapf(err, "corrupted dir")
+			// continue with the rest of pods
+			return nil
 		}
 
 		var pod corev1.Pod
@@ -381,7 +353,7 @@ func (v *VirtualK8S) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
 // the pod status changes. It should be called when a pod's status changes.
 //
 // The provided pointer to a Pod is guaranteed to be used in a read-only
-// fashion. The provided pod's PodStatus should be up to date when
+// fashion. The provided pod's PodStatus should be up-to-date when
 // this function is called.
 //
 // NotifyPods must not block the caller since it is only used to register the callback.
@@ -390,8 +362,8 @@ func (v *VirtualK8S) NotifyPods(ctx context.Context, f func(*corev1.Pod)) {
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	v.Logger.Info("K8s -> NotifyPods")
-	defer v.Logger.Info("K8s <- NotifyPods")
+	v.Logger.Info("[K8s] -> NotifyPods")
+	defer v.Logger.Info("[K8s] <- NotifyPods")
 
 	/*---------------------------------------------------
 	 * Listen for Slurm Events caused by Pods.
@@ -405,14 +377,19 @@ func (v *VirtualK8S) NotifyPods(ctx context.Context, f func(*corev1.Pod)) {
 	})
 
 	go eh.Run(ctx, job.PodControl{
-		SyncStatus:   slurm.SyncPodStatus,
-		LoadFromDisk: slurm.LoadPodFromDisk,
+		UpdateStatus: slurm.SyncPodStatus,
+		LoadFromDisk: slurm.LoadPodFromKey,
 		NotifyVirtualKubelet: func(pod *corev1.Pod) {
 			if pod == nil {
 				panic("this should not happen")
 			}
 
 			f(pod)
+
+			v.Logger.Info(" * K8s status is synchronized",
+				"version", pod.ResourceVersion,
+				"phase", pod.Status.Phase,
+			)
 		},
 	})
 
@@ -447,8 +424,8 @@ func (v *VirtualK8S) GetStatsSummary(context.Context) (*statsv1alpha1.Summary, e
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	v.Logger.Info("K8s -> GetStatsSummary")
-	defer v.Logger.Info("K8s <- GetStatsSummary")
+	v.Logger.Info("[K8s] -> GetStatsSummary")
+	defer v.Logger.Info("[K8s] <- GetStatsSummary")
 
 	panic("not yet supported")
 }
@@ -461,20 +438,13 @@ func (v *VirtualK8S) GetContainerLogs(ctx context.Context, namespace, podName, c
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	logger.Info("K8s -> GetContainerLogs", "container", containerName)
-
-	pod := slurm.LoadPodFromDisk(podKey)
-	if pod == nil {
-		logger.Info("K8s <- GetContainerLogs (POD NOT FOUND)")
-
-		return nil, errdefs.NotFoundf("object not found")
-	}
+	logger.Info("[K8s] -> GetContainerLogs", "container", containerName)
 
 	podDir := compute.PodRuntimeDir(podKey)
 
 	logfile := podDir.Container(containerName).LogsPath()
 
-	logger.Info("K8s <- GetContainerLogs", "logfile", logfile)
+	logger.Info("[K8s] <- GetContainerLogs", "container", containerName)
 
 	// if it fails to open the container's logfile, then may be something with the pod.
 	// in this case, try return the pod stderr
@@ -502,8 +472,8 @@ func (v *VirtualK8S) RunInContainer(ctx context.Context, namespace, podName, con
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	logger.Info("K8s -> RunInContainer", "container", containerName)
-	defer logger.Info("K8s <- RunInContainer", "container", containerName)
+	logger.Info("[K8s] -> RunInContainer", "container", containerName)
+	defer logger.Info("[K8s] <- RunInContainer", "container", containerName)
 
 	defer func() {
 		if attach.Stdout() != nil {

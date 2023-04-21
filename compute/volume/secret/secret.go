@@ -21,8 +21,8 @@ import (
 	"fmt"
 
 	"github.com/carv-ics-forth/hpk/compute"
-	"github.com/carv-ics-forth/hpk/compute/slurm/volume"
-	volumeutil "github.com/carv-ics-forth/hpk/compute/slurm/volume/util"
+	"github.com/carv-ics-forth/hpk/compute/volume"
+	"github.com/carv-ics-forth/hpk/compute/volume/util"
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -43,8 +43,6 @@ type VolumeMounter struct {
 }
 
 func (b *VolumeMounter) SetUpAt(ctx context.Context, dir string) error {
-	b.Logger.Info("Setting up volume for Pod", "volume", b.Volume.Name, "dir", dir)
-
 	var secret corev1.Secret
 
 	source := b.Volume.Secret
@@ -73,14 +71,6 @@ func (b *VolumeMounter) SetUpAt(ctx context.Context, dir string) error {
 		}
 	}
 
-	totalBytes := totalSecretBytes(&secret)
-
-	b.Logger.Info("Received secret",
-		"secret", source.SecretName,
-		"data", len(secret.Data),
-		"total", totalBytes,
-	)
-
 	/*---------------------------------------------------
 	 * Mount Resource to the host
 	 *---------------------------------------------------*/
@@ -89,7 +79,7 @@ func (b *VolumeMounter) SetUpAt(ctx context.Context, dir string) error {
 		return err
 	}
 
-	if err := volumeutil.MakeNestedMountpoints(b.Volume.Name, dir, b.Pod); err != nil {
+	if err := util.MakeNestedMountpoints(b.Volume.Name, dir, b.Pod); err != nil {
 		return err
 	}
 
@@ -97,7 +87,7 @@ func (b *VolumeMounter) SetUpAt(ctx context.Context, dir string) error {
 
 	writerContext := fmt.Sprintf("Pod %v/%v volume %v", b.Pod.Namespace, b.Pod.Name, b.Volume.Name)
 
-	writer, err := volumeutil.NewAtomicWriter(dir, writerContext)
+	writer, err := util.NewAtomicWriter(dir, writerContext)
 	if err != nil {
 		return errors.Wrapf(err, "Error creating atomic writer")
 	}
@@ -112,13 +102,13 @@ func (b *VolumeMounter) SetUpAt(ctx context.Context, dir string) error {
 }
 
 // MakePayload function is exported so that it can be called from the projection volume driver
-func MakePayload(mappings []corev1.KeyToPath, secret *corev1.Secret, defaultMode *int32, optional bool) (map[string]volumeutil.FileProjection, error) {
+func MakePayload(mappings []corev1.KeyToPath, secret *corev1.Secret, defaultMode *int32, optional bool) (map[string]util.FileProjection, error) {
 	if defaultMode == nil {
 		return nil, errors.Errorf("no defaultMode used, not even the default value for it")
 	}
 
-	payload := make(map[string]volumeutil.FileProjection, len(secret.Data))
-	var fileProjection volumeutil.FileProjection
+	payload := make(map[string]util.FileProjection, len(secret.Data))
+	var fileProjection util.FileProjection
 
 	if len(mappings) == 0 {
 		for name, data := range secret.Data {

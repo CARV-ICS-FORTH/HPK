@@ -71,8 +71,8 @@ func (v *VirtualK8S) ConfigureNode(ctx context.Context, node *corev1.Node) {
 	/*---------------------------------------------------
 	 * Preamble used for Request tracing on the logs
 	 *---------------------------------------------------*/
-	v.Logger.Info("K8s -> ConfigureNode")
-	defer v.Logger.Info("K8s <- ConfigureNode")
+	v.Logger.Info("[K8s] -> ConfigureNode")
+	defer v.Logger.Info("[K8s] <- ConfigureNode")
 
 	panic("not yet supported")
 }
@@ -143,8 +143,8 @@ func (v *VirtualK8S) NodeAddresses(_ context.Context) []corev1.NodeAddress {
 }
 
 func (v *VirtualK8S) NodeDaemonEndpoints(_ context.Context) corev1.NodeDaemonEndpoints {
-	v.Logger.Info("K8s -> NodeDaemonEndpoints")
-	defer v.Logger.Info("K8s <- NodeDaemonEndpoints")
+	v.Logger.Info("[K8s] -> NodeDaemonEndpoints")
+	defer v.Logger.Info("[K8s] <- NodeDaemonEndpoints")
 
 	return corev1.NodeDaemonEndpoints{
 		KubeletEndpoint: corev1.DaemonEndpoint{

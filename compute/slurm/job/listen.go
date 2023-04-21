@@ -17,6 +17,7 @@ package job
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"sync"
 
@@ -67,7 +68,9 @@ func (h *EventHandler) Push(event fsnotify.Event) {
 	defer h.locker.RUnlock()
 
 	if h.Finished {
-		compute.DefaultLogger.Error(ErrClosedQueue, "event queue is closed")
+		compute.DefaultLogger.Info("drop event due to queue being closed.",
+			"event", event.String(),
+		)
 		return
 	}
 
@@ -75,8 +78,8 @@ func (h *EventHandler) Push(event fsnotify.Event) {
 }
 
 type PodControl struct {
-	SyncStatus           func(pod *corev1.Pod)
-	LoadFromDisk         func(podRef client.ObjectKey) *corev1.Pod
+	UpdateStatus         func(pod *corev1.Pod)
+	LoadFromDisk         func(podRef client.ObjectKey) (*corev1.Pod, error)
 	NotifyVirtualKubelet func(pod *corev1.Pod)
 }
 
@@ -106,7 +109,11 @@ func (h *EventHandler) Run(ctx context.Context, control PodControl) {
 				case event := <-h.Queue:
 					podkey, file, invalid := compute.ParsePath(event.Name)
 					if invalid {
-						compute.DefaultLogger.Info("SLURM: omit unexpected event", "op", event.Op, "event", event.Name)
+						compute.DefaultLogger.V(5).Info("SLURM: omit unexpected event",
+							"op", event.Op,
+							"event", event.Name,
+						)
+
 						continue
 					}
 
@@ -119,7 +126,7 @@ func (h *EventHandler) Run(ctx context.Context, control PodControl) {
 					file readers must retry if there are no contents in the file.
 					*/
 					if !(event.Op.Has(fsnotify.Create) || event.Op.Has(fsnotify.Write)) {
-						logger.Info("SLURM: omit known event", "op", event.Op, "file", file)
+						logger.V(5).Info("SLURM: omit known event", "op", event.Op, "file", file)
 						continue
 					}
 
@@ -130,36 +137,41 @@ func (h *EventHandler) Run(ctx context.Context, control PodControl) {
 					switch ext {
 					case compute.ExtensionSysError:
 						/*-- Sbatch failed. Pod should fail immediately without other checks --*/
-						logger.Info("SLURM -> Pod initialization error", "op", event.Op, "file", file)
+						logger.Info("[Slurm] -> Pod initialization error", "op", event.Op, "file", file)
 
-						pod := control.LoadFromDisk(podkey)
-						if pod == nil {
-							compute.SystemError(errors.Errorf("pod '%s' does not exist", podkey), "ERR")
+						pod, err := control.LoadFromDisk(podkey)
+						if err != nil {
+							compute.SystemPanic(err, "pod '%s' does not exist", podkey)
 						}
 
-						compute.PodError(pod, "SYSERROR", "Here should go the content of the file")
+						sysErrFile := compute.PodRuntimeDir(podkey).SysErrorFilePath()
+
+						reason, err := os.ReadFile(sysErrFile)
+						if err != nil {
+							compute.SystemPanic(err, "failed to read file '%s'", sysErrFile)
+						}
+
+						// FIXME: print only the last few lined
+						logger.Info("[SYSERROR]", "details", string(reason))
+
+						compute.PodError(pod, "SYSERROR", "Pod initialization has failed")
 
 						/*-- Update the remote Copy --*/
 						control.NotifyVirtualKubelet(pod)
-
-						logger.Info("** K8s Status Updated (SYSERR) **",
-							"version", pod.ResourceVersion,
-							"phase", pod.Status.Phase,
-						)
 
 						continue
 
 					case compute.ExtensionIP:
 						/*-- Sbatch Started --*/
-						logger.Info("SLURM Event: New Pod IP", "op", event.Op, "file", file)
+						logger.Info("[Slurm] -> Pod received IP", "op", event.Op, "file", file)
 
 					case compute.ExtensionJobID:
 						/*-- Container Started --*/
-						logger.Info("SLURM Event: Container Started", "op", event.Op, "file", file)
+						logger.Info("[Slurm] -> Container Started", "op", event.Op, "file", file)
 
 					case compute.ExtensionExitCode:
-						/*-- Container Terminated --*/
-						logger.Info("SLURM Event: Container Terminated", "op", event.Op, "file", file)
+						/*-- Container Exited --*/
+						logger.Info("[Slurm] -> Container Exited", "op", event.Op, "file", file)
 
 					default:
 						/*-- Any other file gnored --*/
@@ -173,23 +185,27 @@ func (h *EventHandler) Run(ctx context.Context, control PodControl) {
 					 *---------------------------------------------------*/
 
 					/*-- Load Pod from reference --*/
-					pod := control.LoadFromDisk(podkey)
-					if pod == nil {
+					pod, err := control.LoadFromDisk(podkey)
+					if err != nil {
 						// Race conditions may between the deletion of a pod and Slurm events.
 						logger.Info("pod was not found. this is probably a conflict. omit event")
 						continue
 					}
 
+					if pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded {
+						logger.Info("Ignore event since Pod is in terminal phase",
+							"event", event,
+							"phase", pod.Status.Phase,
+						)
+					}
+
 					/*-- Recalculate the Pod status from locally stored containers --*/
-					control.SyncStatus(pod)
+					control.UpdateStatus(pod)
 
 					/*-- Update the remote Copy --*/
 					control.NotifyVirtualKubelet(pod)
 
-					logger.Info("** K8s Status Updated **",
-						"version", pod.ResourceVersion,
-						"phase", pod.Status.Phase,
-					)
+					logger.Info("[Slurm] <- Listen for events")
 				}
 			}
 		}()

@@ -57,12 +57,12 @@ func PullImage(transport Transport, image string) (string, error) {
 	// otherwise, download a fresh copy
 	downloadcmd := []string{"pull", "--dir", compute.ImageDir, string(transport) + image}
 
-	compute.DefaultLogger.Info("Downloading container image",
+	compute.DefaultLogger.Info(" * Downloading container image",
 		"image", image,
 		"path", imagePath,
 	)
 
 	_, _ = process.Execute(compute.Environment.ApptainerBin, downloadcmd...)
-	
+
 	return imagePath, nil
 }

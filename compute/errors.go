@@ -18,8 +18,10 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/carv-ics-forth/hpk/pkg/crdtools"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var escapeScripts = regexp.MustCompile(`(--[A-Za-z0-9\-]+=)(\$[{\(][A-Za-z0-9_]+[\)\}])`)
@@ -42,9 +44,18 @@ func PodError(pod *corev1.Pod, reason string, msgFormat string, msgArgs ...any) 
 	pod.Status.Phase = corev1.PodFailed
 	pod.Status.Reason = reason
 	pod.Status.Message = fmt.Sprintf(msgFormat, msgArgs...)
+
+	crdtools.SetPodStatusCondition(&pod.Status.Conditions, corev1.PodCondition{
+		Type:   corev1.PodReady,
+		Status: corev1.ConditionFalse,
+		// LastProbeTime:      metav1.Time{},
+		LastTransitionTime: metav1.Now(),
+		Reason:             "PodUnready",
+		Message:            "Pod Has Failed.",
+	})
 }
 
-func SystemError(err error, errFormat string, errArgs ...any) {
+func SystemPanic(err error, errFormat string, errArgs ...any) {
 	werr := errors.Wrapf(err, errFormat, errArgs...)
 
 	DefaultLogger.Error(werr, "SystemERROR")

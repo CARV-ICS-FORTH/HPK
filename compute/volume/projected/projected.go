@@ -20,11 +20,11 @@ import (
 	"fmt"
 
 	"github.com/carv-ics-forth/hpk/compute"
-	"github.com/carv-ics-forth/hpk/compute/slurm/volume"
-	"github.com/carv-ics-forth/hpk/compute/slurm/volume/configmap"
-	"github.com/carv-ics-forth/hpk/compute/slurm/volume/downwardapi"
-	"github.com/carv-ics-forth/hpk/compute/slurm/volume/secret"
-	volumeutil "github.com/carv-ics-forth/hpk/compute/slurm/volume/util"
+	"github.com/carv-ics-forth/hpk/compute/volume"
+	"github.com/carv-ics-forth/hpk/compute/volume/configmap"
+	"github.com/carv-ics-forth/hpk/compute/volume/downwardapi"
+	"github.com/carv-ics-forth/hpk/compute/volume/secret"
+	"github.com/carv-ics-forth/hpk/compute/volume/util"
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	authenticationv1 "k8s.io/api/authentication/v1"
@@ -53,7 +53,7 @@ func (b *VolumeMounter) SetUpAt(ctx context.Context, dir string) error {
 		return errors.Errorf("no defaultMode used, not even the default value for it")
 	}
 
-	var data map[string]volumeutil.FileProjection
+	var data map[string]util.FileProjection
 	var errCollect error
 
 	if err := retry.OnError(volume.NotFoundBackoff, k8errors.IsNotFound,
@@ -69,12 +69,12 @@ func (b *VolumeMounter) SetUpAt(ctx context.Context, dir string) error {
 	/*---------------------------------------------------
 	 * Mount Resource to the host
 	 *---------------------------------------------------*/
-	if err := volumeutil.MakeNestedMountpoints(b.Volume.Name, dir, b.Pod); err != nil {
+	if err := util.MakeNestedMountpoints(b.Volume.Name, dir, b.Pod); err != nil {
 		return err
 	}
 
 	writerContext := fmt.Sprintf("pod %s volume %v", podKey, b.Volume.Name)
-	writer, err := volumeutil.NewAtomicWriter(dir, writerContext)
+	writer, err := util.NewAtomicWriter(dir, writerContext)
 	if err != nil {
 		return errors.Wrapf(err, "Error creating atomic writer")
 	}
@@ -89,9 +89,9 @@ func (b *VolumeMounter) SetUpAt(ctx context.Context, dir string) error {
 	return nil
 }
 
-func (b *VolumeMounter) collectData(ctx context.Context) (map[string]volumeutil.FileProjection, error) {
+func (b *VolumeMounter) collectData(ctx context.Context) (map[string]util.FileProjection, error) {
 	var errlist []error
-	payload := make(map[string]volumeutil.FileProjection)
+	payload := make(map[string]util.FileProjection)
 
 	for _, source := range b.Volume.Projected.Sources {
 		switch {
@@ -221,7 +221,7 @@ func (b *VolumeMounter) collectData(ctx context.Context) (map[string]volumeutil.
 				continue
 			}
 
-			payload[source.ServiceAccountToken.Path] = volumeutil.FileProjection{
+			payload[source.ServiceAccountToken.Path] = util.FileProjection{
 				Data: []byte(tokenRequest.Status.Token),
 				Mode: *b.Volume.Projected.DefaultMode,
 			}
