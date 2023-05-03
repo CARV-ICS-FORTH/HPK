@@ -40,3 +40,10 @@ ssh -t ${LOGIN_NODE} -L ${LOCAL_PORT}:127.0.0.1:${LOCAL_PORT} ssh -L ${LOCAL_POR
 ```
 
 and then you can access the service from your browser `http://localhost:18080/minio/login`
+
+
+# To copy data to remote node
+
+```
+scp -o ProxyJump=thegates -r  Makefile bin/ test/ jedi1:~/
+```

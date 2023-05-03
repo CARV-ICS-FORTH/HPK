@@ -116,8 +116,8 @@ func AddAdmissionWebhooks(c Opts, virtualk8s *provider.VirtualK8S) {
 		}
 	}()
 
-	DefaultLogger.Info("Mutation Webhooks are ready",
-		"address", advertisedAddr,
+	DefaultLogger.Info("KubeWebhooks are ready",
+		"Address", advertisedAddr,
 		"cert", c.K8sAPICertFilepath,
 		"key", c.K8sAPIKeyFilepath,
 	)

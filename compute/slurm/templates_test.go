@@ -173,7 +173,7 @@ func TestSBatch(t *testing.T) {
 	submitTpl, err := template.New("test").
 		Funcs(sprig.FuncMap()).
 		Option("missingkey=error").
-		Parse(slurm.SlurmScriptTemplate)
+		Parse(slurm.JobScriptTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -21,7 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-const SlurmScriptTemplate = `#!/bin/bash
+const JobScriptTemplate = `#!/bin/bash
 #SBATCH --job-name={{.Pod.Name}}
 #SBATCH --output={{.VirtualEnv.StdoutPath}}
 #SBATCH --error={{.VirtualEnv.StderrPath}}
@@ -36,12 +36,6 @@ const SlurmScriptTemplate = `#!/bin/bash
 {{- if .ResourceRequest.Memory}}
 #SBATCH --mem={{.ResourceRequest.Memory}} 
 {{end}} 
-
-# exit when any command fails
-set -eum pipeline
-
-export apptainer={{.ComputeEnv.ApptainerBin}}
-echo "Using ApptainerBin: ${apptainer}"
 
 #### BEGIN SECTION: VirtualEnvironment Builder ####
 # Description
@@ -64,6 +58,7 @@ debug_info() {
 	echo "* Hostname:" $(hostname)
 	echo "* HostIPs:" $(hostname -I)
 	echo "* DNS: {{.ComputeEnv.KubeDNS}}"
+	echo "* Runtime: " $(ls ${XDG_RUNTIME_DIR}) 
 	echo "=============================="
 }
 
@@ -101,9 +96,6 @@ reset_env() {
 
 	unset APPTAINER_BIND
 	unset SINGULARITY_BIND
-
-
-	export POD_NAMESPACE={{.Pod.Namespace}}
 }
 
 handle_init_containers() {
@@ -117,7 +109,7 @@ handle_init_containers() {
 	# Mark the beginning of an init job (all get the shell's pid).  
 	echo pid://$$ > {{$container.JobIDPath}}
 
-	${apptainer} {{ $container.ApptainerMode }} --cleanenv --pid --compat --no-mount tmp,home --unsquash \
+	{{$.ComputeEnv.ApptainerBin}} {{ $container.ApptainerMode }} --cleanenv --pid --compat --no-mount tmp,home --unsquash \
 	--bind /scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts,{{join "," $container.Binds}} \
 	{{- if $container.EnvFilePath}}
 	--env-file /scratch/{{$container.InstanceName}}.env \
@@ -148,7 +140,7 @@ handle_containers() {
 	{{- end}}
 
 	# Internal fakeroot is needed for appropriate permissions within the container
-	$(${apptainer} {{ $container.ApptainerMode }} --cleanenv --pid --compat --no-mount tmp,home --unsquash \
+	$({{$.ComputeEnv.ApptainerBin}} {{ $container.ApptainerMode }} --cleanenv --pid --compat --no-mount tmp,home --unsquash \
 	--bind /scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts,{{join "," $container.Binds}} \
 	{{- if $container.EnvFilePath}}
 	--env-file /scratch/{{$container.InstanceName}}.env \
@@ -227,10 +219,21 @@ PAUSE_EOF
 # Description
 # 	Stuff to run outside the virtual environment
 
+# exit when any command fails
+set -eum pipeline
+
+cleanup() {
+#	echo "[HOST] Waiting for the Virtual Environment to Exit"
+#	wait -n ${PAUSE_PID}
+
+	echo "[HOST] Cleanup Signal files"
+	rm /dev/shm/signal_${PPID}
+}
+
 env_failed() {
 	echo -e "\n[Host] Signal received: Virtual Environment Has Failed\n"
 
-	reap
+	cleanup
 
 	echo "-- Exit with 255--"
 	exit 255
@@ -239,61 +242,46 @@ env_failed() {
 env_running() {
 	echo -e "\n[Host] Signal received: Virtual Environment is Running\n"
 
-	reap
+	cleanup
 
 	echo "-- Exit with 0 --"
 	exit 0
 }
 
-reap() {
-	echo "[HOST] Waiting for the Virtual Environment to Exit"
-	wait ${VPID}
+event_dispatcher() {
+	# Wait on a dummy descriptor. When the signal arrives, the read will get interrupted
+	echo "[Host] Waiting for virtual environment to become ready ..."
+	tail -F /dev/shm/signal_${PPID} 2>/dev/null | grep -q "env_"
 
-	echo "[HOST] Cleanup Signal files"
-	rm /dev/shm/signal_${PPID}
-}
-
-sigdown() {
-	echo -e "\n[Host] Shutting down the Virtual Environment, got signal \n"
-
-	echo -e "\n[Host] Kill Virtual Environment \n"
-	kill -TERM ${VPID} 
-
-	# sync filesystems
-	sync
+	# dispatch to the appropriate waiting function
+	$(cat /dev/shm/signal_${PPID})
 }
 
 
-echo "== Submit Environment =="
+echo "[Host] Starting Event Dispatcher ..."
+event_dispatcher &
+
+
+echo "[Host] Starting the Constructor for the Virtual Environment ..."
 chmod +x  {{.VirtualEnv.ConstructorFilePath}}
-
-echo "[Host] Setting Signal Traps for Virtual Environment [Abort (TERM,INT), Failed (USR1), Running (USR2)]..."
-trap sigdown SIGTERM SIGINT
-
-echo "[Host] Starting the constructor the Virtual Environment ..."
-
-# External fakeroot is needed for the networking  
-${apptainer} exec  --net --fakeroot --scratch /scratch \
---apply-cgroups {{.VirtualEnv.CgroupFilePath}}		\
+{{$.ComputeEnv.ApptainerBin}} exec  --net --fakeroot --scratch /scratch \
+--apply-cgroups {{.VirtualEnv.CgroupFilePath}} 		\
 --env PARENT=${PPID}								 \
---bind $HOME		  								 \
+--bind $HOME,/run					 				\
 --hostname {{.Pod.Name}}							 \
-docker://icsforth/pause {{.VirtualEnv.ConstructorFilePath}} &
+docker://icsforth/pause {{.VirtualEnv.ConstructorFilePath}} 
 
-# return the PID of Apptainer running the virtual environment
-VPID=$!
 
-# Wait on a dummy descriptor. When the signal arrives, the read will get interrupted
-echo "[Host] Waiting for virtual environment to become ready ..."
-tail -F /dev/shm/signal_${PPID} 2>/dev/null | grep -q "env_"
-
-# dispatch to the appropriate function
-$(cat /dev/shm/signal_${PPID})
+if [[ $? -eq 0 ]]; then
+	echo "[HOST] Gracefully exit the Virtual Environment. All resources will be released."
+else
+	echo "[HOST] **SYSTEMERROR** ${BASH_COMMAND} command filed with exit code ${exitCode}" | tee {{.VirtualEnv.SysErrorFilePath}} 
+fi
 
 #### END SECTION: Host Environment ####
 `
 
-// JobFields provide the inputs to SlurmScriptTemplate.
+// JobFields provide the inputs to JobScriptTemplate.
 type JobFields struct {
 	Pod types.NamespacedName
 

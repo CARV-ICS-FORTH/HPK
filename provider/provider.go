@@ -15,6 +15,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
@@ -372,8 +373,8 @@ func (v *VirtualK8S) NotifyPods(ctx context.Context, f func(*corev1.Pod)) {
 
 	/*-- start event handler --*/
 	eh := job.NewEventHandler(job.Options{
-		MaxWorkers:   1,
-		MaxQueueSize: 10,
+		MaxWorkers:   5,
+		MaxQueueSize: 20,
 	})
 
 	go eh.Run(ctx, job.PodControl{
@@ -454,7 +455,10 @@ func (v *VirtualK8S) GetContainerLogs(ctx context.Context, namespace, podName, c
 
 		podStderr, err := os.Open(podDir.StderrPath())
 		if err != nil {
-			return nil, errors.Wrapf(err, "unable to load either container's or pod's logs")
+			logger.Info("Could not find container's or pod's logs")
+
+			// return an empty response instead of an error
+			return io.NopCloser(bytes.NewReader([]byte{})), nil
 		}
 
 		return podStderr, nil

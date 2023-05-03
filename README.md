@@ -41,6 +41,11 @@ To run the Kubernetes Master:
 make run-kubemaster
 ```
 
+In case that you are behind DNS-restricting network, you use set the external DNS server before running the kube-master.
+```
+export EXTERNAL_DNS=192.168.1.225
+```
+
 Once the installation is complete, you can start the Virtual Kubelet:
 
 ```bash

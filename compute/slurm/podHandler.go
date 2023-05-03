@@ -292,7 +292,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 
 	scriptTemplate, err := template.New(h.Name).
 		Funcs(sprig.TxtFuncMap()).
-		Option("missingkey=error").Parse(SlurmScriptTemplate)
+		Option("missingkey=error").Parse(JobScriptTemplate)
 	if err != nil {
 		compute.SystemPanic(err, "sbatch template error")
 	}
