@@ -76,6 +76,7 @@ build-race: ## Build HPK binary with race condition detector
 
 run-kubemaster: ## Run the Kubernetes Master
 	mkdir -p ${K8SFS_PATH}/log
+
 	apptainer run --net --dns ${EXTERNAL_DNS} --fakeroot \
 	--cleanenv --pid --containall \
 	--no-init --no-umask --no-eval \
@@ -90,7 +91,9 @@ run-kubelet: HOST_ADDRESS = $(shell ip route get 1 | sed -n 's/.*src \([0-9.]\+\
 run-kubelet: ## Run the HPK Virtual Kubelet
 	@echo "===> Generate HPK Certificates <==="
 	mkdir -p ./bin
+
 	if [ ! -f bin/kubelet.key ]; then openssl genrsa -out bin/kubelet.key 2048; fi
+
 	openssl req -x509 -key bin/kubelet.key -CA ${KUBE_PATH}/pki/ca.crt -CAkey ${KUBE_PATH}/pki/ca.key \
 	-days 365 -nodes -out bin/kubelet.crt -subj "/CN=hpk-kubelet" \
 	-addext "basicConstraints=CA:FALSE" \

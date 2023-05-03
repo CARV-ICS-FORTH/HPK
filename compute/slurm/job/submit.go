@@ -26,11 +26,14 @@ import (
 // ExcludeNodes EXISTS ONLY FOR DEBUGGING PURPOSES of Inotify on NFS.
 var ExcludeNodes = "--exclude="
 
+// NewUserEnv is used to generate the /run/user/ folder required by cgroups.
+var NewUserEnv = "--get-user-env"
+
 func SubmitJob(scriptFile string) (string, error) {
 	// Submit Job
-	out, err := process.ExecuteInDir(compute.UserHomeDir, Slurm.SubmitCmd, ExcludeNodes, scriptFile)
+	out, err := process.ExecuteInDir(compute.UserHomeDir, Slurm.SubmitCmd, ExcludeNodes, NewUserEnv, scriptFile)
 	if err != nil {
-		compute.SystemPanic(err, "sbatch submission error. out : '%s'", out)
+		compute.SystemPanic(err, "job submission error. out : '%s'", out)
 	}
 
 	// Parse Job ID

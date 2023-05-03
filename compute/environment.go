@@ -28,11 +28,19 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
+// SystemD includes the configuration for the systemd.
+type SystemD struct {
+	User string
+}
+
+// HPCEnvironment containers information about the execution environment.
 type HPCEnvironment struct {
 	KubeMasterHost    string
 	KubeDNS           string
 	ContainerRegistry string
 	ApptainerBin      string
+
+	SystemD
 }
 
 var Environment HPCEnvironment
@@ -58,7 +66,7 @@ const (
 var (
 	UserHomeDir, _ = os.UserHomeDir()
 	RuntimeDir     = filepath.Join(UserHomeDir, ".hpk")
-	ImageDir       = filepath.Join(RuntimeDir, "images")
+	ImageDir       = filepath.Join(RuntimeDir, ".images")
 )
 
 const (

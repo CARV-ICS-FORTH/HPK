@@ -56,14 +56,14 @@ func (b *VolumeMounter) SetUpAt(ctx context.Context, dir string) error {
 	var data map[string]util.FileProjection
 	var errCollect error
 
-	if err := retry.OnError(volume.NotFoundBackoff, k8errors.IsNotFound,
-		func() error {
+	if err := retry.OnError(volume.NotFoundBackoff,
+		k8errors.IsNotFound, // retry condition
+		func() error { // execution
 			data, errCollect = b.collectData(ctx)
 			return errCollect
 		},
-	); err != nil {
-		return errors.Wrapf(err, "error preparing data for project volume. volume:'%s' pod:'%s'",
-			b.Volume.Name, podKey)
+	); err != nil { // error checking
+		return errors.Wrapf(err, "error preparing data for project volume. volume:'%s' pod:'%s'", b.Volume.Name, podKey)
 	}
 
 	/*---------------------------------------------------
@@ -100,27 +100,24 @@ func (b *VolumeMounter) collectData(ctx context.Context) (map[string]util.FilePr
 			 * Projected Secret
 			 *---------------------------------------------------*/
 			var secretAPI corev1.Secret
+			secretAPI.Namespace = b.Pod.GetNamespace()
+			secretAPI.Name = source.Secret.Name
 
 			optional := source.Secret.Optional != nil && *source.Secret.Optional
 			key := types.NamespacedName{Namespace: b.Pod.GetNamespace(), Name: source.Secret.Name}
 
 			{ // get the resource
-				err := retry.OnError(volume.NotFoundBackoff, k8errors.IsNotFound,
-					func() error {
+				if err := retry.OnError(volume.NotFoundBackoff,
+					k8errors.IsNotFound, // retry condition
+					func() error { // execution
 						return compute.K8SClient.Get(ctx, key, &secretAPI)
-					})
-				if err != nil {
+					},
+				); err != nil { // error checking
 					if !(k8errors.IsNotFound(err) && optional) {
-						b.Logger.Error(err, "Couldn't get projected.secret", "key", key)
+						b.Logger.Info("Couldn't get projected.secret", "key", key)
+
 						errlist = append(errlist, err)
 						continue
-					}
-
-					secretAPI = corev1.Secret{
-						ObjectMeta: metav1.ObjectMeta{
-							Namespace: b.Pod.GetNamespace(),
-							Name:      source.Secret.Name,
-						},
 					}
 				}
 			}
@@ -141,27 +138,24 @@ func (b *VolumeMounter) collectData(ctx context.Context) (map[string]util.FilePr
 			 * Projected ConfigMap
 			 *---------------------------------------------------*/
 			var configMapAPI corev1.ConfigMap
+			configMapAPI.Namespace = b.Pod.GetNamespace()
+			configMapAPI.Name = source.ConfigMap.Name
 
 			optional := source.ConfigMap.Optional != nil && *source.ConfigMap.Optional
 			key := types.NamespacedName{Namespace: b.Pod.GetNamespace(), Name: source.ConfigMap.Name}
 
 			{ // get the resource
-				err := retry.OnError(volume.NotFoundBackoff, k8errors.IsNotFound,
-					func() error {
+				if err := retry.OnError(volume.NotFoundBackoff,
+					k8errors.IsNotFound, // retry condition
+					func() error { // execution
 						return compute.K8SClient.Get(ctx, key, &configMapAPI)
-					})
-				if err != nil {
+					},
+				); err != nil { // error checking
 					if !(k8errors.IsNotFound(err) && optional) {
-						b.Logger.Error(err, "Couldn't get projected.configmap", "key", key)
+						b.Logger.Info("Couldn't get projected.configmap", "key", key)
+
 						errlist = append(errlist, err)
 						continue
-					}
-
-					configMapAPI = corev1.ConfigMap{
-						ObjectMeta: metav1.ObjectMeta{
-							Namespace: b.Pod.GetNamespace(),
-							Name:      source.ConfigMap.Name,
-						},
 					}
 				}
 			}

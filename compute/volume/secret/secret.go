@@ -54,11 +54,12 @@ func (b *VolumeMounter) SetUpAt(ctx context.Context, dir string) error {
 
 	key := types.NamespacedName{Namespace: b.Pod.GetNamespace(), Name: source.SecretName}
 
-	err := retry.OnError(volume.NotFoundBackoff, k8errors.IsNotFound,
-		func() error {
+	if err := retry.OnError(volume.NotFoundBackoff,
+		k8errors.IsNotFound, // retry condition
+		func() error { // execution
 			return compute.K8SClient.Get(ctx, key, &secret)
-		})
-	if err != nil {
+		},
+	); err != nil { // error checking
 		if !(k8errors.IsNotFound(err) && optional) {
 			return errors.Wrapf(err, "Couldn't get secret '%s'", key)
 		}

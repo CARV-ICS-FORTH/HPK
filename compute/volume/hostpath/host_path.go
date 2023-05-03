@@ -24,6 +24,7 @@ import (
 	"github.com/carv-ics-forth/hpk/compute/volume/util/validation"
 	hostutil2 "github.com/carv-ics-forth/hpk/pkg/hostutil"
 	"github.com/go-logr/logr"
+	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -41,11 +42,7 @@ func (b *VolumeMounter) SetUpAt(ctx context.Context) error {
 	source := b.Volume.HostPath
 
 	if err := validation.ValidatePathNoBacksteps(source.Path); err != nil {
-		return fmt.Errorf("invalid HostPath `%s`: %v", source.Path, err)
-	}
-
-	if source.Type == nil || *source.Type == corev1.HostPathUnset {
-		return nil
+		return errors.Wrapf(err, "invalid HostPath '%s'", source.Path)
 	}
 
 	return checkType(source.Path, source.Type, hostutil2.NewHostUtil())
@@ -71,32 +68,44 @@ func checkType(path string, pathType *corev1.HostPathType, hu hostutil2.HostUtil
 func checkTypeInternal(ftc hostPathTypeChecker, pathType *corev1.HostPathType) error {
 	switch *pathType {
 	case corev1.HostPathDirectoryOrCreate:
+		// In this mode, if no content is found in the specified path, an empty directory is created on demand.
+		// The permission on the created directory is set to 0755. The directory has the same group
+		// and ownership with kubelet.
 		if !ftc.Exists() {
 			return ftc.MakeDir()
 		}
 		fallthrough
 	case corev1.HostPathDirectory:
+		// A directory must exist in the specified path.
 		if !ftc.IsDir() {
 			return fmt.Errorf("hostPath type check failed: %s is not a directory", ftc.GetPath())
 		}
 	case corev1.HostPathFileOrCreate:
+		// In this mode, if no content is found in the specified path, an empty file is created.
+		// The permission of the created file is set to 0644. The file has the same group and ownership with kubelet.
+
 		if !ftc.Exists() {
 			return ftc.MakeFile()
 		}
 		fallthrough
 	case corev1.HostPathFile:
+		// A file must exist in the specified path.
 		if !ftc.IsFile() {
 			return fmt.Errorf("hostPath type check failed: %s is not a file", ftc.GetPath())
 		}
 	case corev1.HostPathSocket:
+		// A UNIX socket must exist at the given path
 		if !ftc.IsSocket() {
 			return fmt.Errorf("hostPath type check failed: %s is not a socket file", ftc.GetPath())
 		}
 	case corev1.HostPathCharDev:
+		// A character device must exist at the given path
 		if !ftc.IsChar() {
 			return fmt.Errorf("hostPath type check failed: %s is not a character device", ftc.GetPath())
 		}
 	case corev1.HostPathBlockDev:
+		// A block device must exist at the given path
+
 		if !ftc.IsBlock() {
 			return fmt.Errorf("hostPath type check failed: %s is not a block device", ftc.GetPath())
 		}

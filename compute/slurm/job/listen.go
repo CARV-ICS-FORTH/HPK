@@ -193,6 +193,8 @@ func (h *EventHandler) Run(ctx context.Context, control PodControl) {
 					}
 
 					if pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded {
+						// TODO: Should I remove the watcher now, or when the pod is deleted ?
+
 						logger.Info("Ignore event since Pod is in terminal phase",
 							"event", event,
 							"phase", pod.Status.Phase,

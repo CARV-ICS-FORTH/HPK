@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os/user"
 	"time"
 
 	"github.com/carv-ics-forth/hpk/cmd/hpk/commands"
@@ -118,6 +119,16 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	defer cancel()
 
 	/*---------------------------------------------------
+	 * Discover System information
+	 *---------------------------------------------------*/
+	userInfo, err := user.Current()
+	if err != nil {
+		return errors.Wrapf(err, "unable to get user information")
+	}
+
+	compute.Environment.SystemD.User = userInfo.Uid
+
+	/*---------------------------------------------------
 	 * Setup a client to Kubernetes API
 	 *---------------------------------------------------*/
 	restConfig, err := config.GetConfig()
@@ -147,11 +158,12 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		}
 		compute.Environment.KubeMasterHost = kubemaster.Hostname()
 
-		DefaultLogger.Info("Kubernetes Client is ready",
-			"APIServer", restConfig.Host,
+		DefaultLogger.Info("KubeClient is ready",
+			"Address", restConfig.Host,
 			"ContainerRegistry", compute.Environment.ContainerRegistry,
 		)
 	}
+
 	/*---------------------------------------------------
 	 * Discover Kubernetes DNS server
 	 *---------------------------------------------------*/
@@ -171,8 +183,8 @@ func runRootCommand(ctx context.Context, c Opts) error {
 
 		compute.Environment.KubeDNS = dnsEndpoint.Subsets[0].Addresses[0].IP
 
-		DefaultLogger.Info("DNS connection is ready",
-			"k8sDNS", compute.Environment.KubeDNS,
+		DefaultLogger.Info("KubeDNS client is ready",
+			"address", compute.Environment.KubeDNS,
 		)
 	}
 
@@ -193,8 +205,8 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	AddAdmissionWebhooks(c, virtualk8s)
 
 	DefaultLogger.Info("Virtual Node Provisioner is ready",
-		"internalIP", virtualk8s.InternalIP,
-		"daemonPort", virtualk8s.DaemonPort,
+		"Address", virtualk8s.InternalIP,
+		"DaemonPort", virtualk8s.DaemonPort,
 	)
 
 	/*---------------------------------------------------

@@ -88,7 +88,14 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) {
 		}
 
 		if err = mounter.SetUpAt(ctx, configMapDir); err != nil {
-			compute.SystemPanic(err, "mount configmap volume to dir '%s' has failed", configMapDir)
+			compute.DefaultLogger.Info("mount configMap volume has failed",
+				"volume", vol.Name,
+				"dir", configMapDir,
+			)
+
+			compute.PodError(h.Pod, "ConfigMapVolumeError", "reason: %w", err)
+
+			return
 		}
 
 		h.logger.Info("  * ConfigMap Volume is mounted", "name", vol.Name)
@@ -109,7 +116,14 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) {
 		}
 
 		if err = mounter.SetUpAt(ctx, secretDir); err != nil {
-			compute.SystemPanic(err, "mount secret volume to dir '%s' has failed", secretDir)
+			compute.DefaultLogger.Info("mount secret volume has failed",
+				"volume", vol.Name,
+				"dir", secretDir,
+			)
+
+			compute.PodError(h.Pod, "SecretVolumeError", "reason: %w", err)
+
+			return
 		}
 
 		h.logger.Info("  * Secret Volume is mounted", "name", vol.Name)
@@ -127,14 +141,13 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) {
 		 * HostPath
 		 *---------------------------------------------------*/
 		if vol.VolumeSource.HostPath.Type == nil || *vol.VolumeSource.HostPath.Type == corev1.HostPathUnset {
-			// For backwards compatible, leave it empty if unset
+			// Empty string (default) is for backward compatibility,
+			// which means that no checks will be performed before mounting the hostPath volume.
 			if path, err := h.podDirectory.CreateVolumeLink(vol.VolumeSource.HostPath.Path, vol.Name); err != nil {
-				compute.SystemPanic(err, "cannot create HostPathDirectoryOrCreate at path '%s'", path)
+				compute.SystemPanic(err, "cannot link HostPath at path '%s'", path)
 			}
 
-			h.logger.Info("  * HostPath Volume is mounted", "name", vol.Name)
-
-			break
+			return
 		}
 
 		mounter := hostpath.VolumeMounter{
@@ -173,7 +186,11 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) {
 		}
 
 		if err = mounter.SetUpAt(ctx, projectedDir); err != nil {
-			compute.SystemPanic(err, "mount projected volume to dir '%s' has failed", projectedDir)
+			compute.PodError(h.Pod, "Volume",
+				"mount projected volume to dir '%s' has failed due to '%w'",
+				projectedDir, err)
+
+			return
 		}
 
 		h.logger.Info("  * Projected Volume is mounted", "name", vol.Name)
@@ -217,12 +234,10 @@ func (h *podHandler) PersistentVolumeClaimSource(ctx context.Context, vol corev1
 		key := types.NamespacedName{Namespace: h.Pod.GetNamespace(), Name: source.ClaimName}
 
 		if errPVC := retry.OnError(NotFoundBackoff,
-			// retry condition
-			func(err error) bool {
+			func(err error) bool { // retry condition
 				return k8errors.IsNotFound(err) || errors.Is(err, compute.ErrUnboundedPVC)
 			},
-			// execution
-			func() error {
+			func() error { // execution
 				if err := compute.K8SClient.Get(ctx, key, &pvc); err != nil {
 					compute.DefaultLogger.Info("Failed to get PVC", "pvcName", pvc.GetName())
 
@@ -247,11 +262,8 @@ func (h *podHandler) PersistentVolumeClaimSource(ctx context.Context, vol corev1
 
 				return nil
 			},
-		); errPVC != nil {
-			compute.PodError(h.Pod, "PVCError", "PVC (%s) has failed. error:'%W'",
-				pvc.GetName(),
-				errPVC,
-			)
+		); errPVC != nil { // error cehcking
+			compute.PodError(h.Pod, "PVCError", "PVC (%s) has failed. error:'%W'", pvc.GetName(), errPVC)
 
 			return
 		}
@@ -265,15 +277,13 @@ func (h *podHandler) PersistentVolumeClaimSource(ctx context.Context, vol corev1
 		key := types.NamespacedName{Namespace: h.Pod.GetNamespace(), Name: pvc.Spec.VolumeName}
 
 		if errPV := retry.OnError(NotFoundBackoff,
-			// retry condition
-			func(err error) bool {
+			func(err error) bool { // retry condition
 				return k8errors.IsNotFound(err)
 			},
-			// execution
-			func() error {
+			func() error { // execution
 				return compute.K8SClient.Get(ctx, key, &pv)
 			},
-		); errPV != nil {
+		); errPV != nil { // error checking
 			compute.PodError(h.Pod, "PVError", "PV (%s) has failed. err:'%W'",
 				pv.GetName(),
 				errPV,
