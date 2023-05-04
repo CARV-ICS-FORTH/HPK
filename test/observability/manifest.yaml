@@ -27,7 +27,10 @@ spec:
         - |  # Multi-line str
           set -eux
 
-          # Start the monitoring
+          # Start the monitoring   
+          # Flags
+          # --docker_only=false - do not report raw cgroup metrics, except the root cgroup.
+          # --disable_root_cgroup_stats=false - disable collecting root Cgroup stats.
           cadvisor --port=9442                  \
           --store_container_labels=false        \
           --log_cadvisor_usage=false            \
@@ -82,4 +85,3 @@ spec:
           --disable_root_cgroup_stats=true     \
           --disable_metrics=advtcp,cpuLoad,cpu_topology,cpuset,hugetlb,memory_numa,process,referenced_memory,resctrl,sched,percpu,process,perf_event,tcp,udp  \
           --enable_metrics=cpu,memory,disk,diskIO,network,accelerator,oom_event
-
