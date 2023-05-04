@@ -24,12 +24,12 @@ spec:
               name: hello-world
               volumeMounts:
                 - name: binaries-volume
-                  mountPath: /skata
+                  mountPath: /mpibins
               command:
                 - sh
                 - -c
                 - |
-                  mpirun /skata/hello_c -n 2          
+                  mpirun /mpibins/hello_c -n 2          
 
     Worker:
       replicas: 2
