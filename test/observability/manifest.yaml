@@ -2,11 +2,62 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: telemetry-sidecar
+  name: stressor
   annotations:
     prometheus.io/scrape: "true"
 spec:
   containers:
+    - name: app
+      image: alexeiled/stress-ng
+      args:
+        - --cpu
+        -  "4"
+        - --metrics-brief
+
+    - name: cadvisor
+      image: icsforth/cadvisor
+      ports:
+        - name: tel-sys
+          containerPort: 9442
+      securityContext:
+        privileged: true
+      command:
+        - /bin/sh # Run shell
+        - -c # Read from string
+        - |  # Multi-line str
+          set -eux
+
+          # Start the monitoring
+          cadvisor --port=9442                  \
+          --store_container_labels=false        \
+          --log_cadvisor_usage=false            \
+          --profiling=false                     \
+          --docker_only=true                    \
+          --allow_dynamic_housekeeping=true     \
+          --housekeeping_interval=2s            \
+          --disable_root_cgroup_stats=true     \
+          --disable_metrics=advtcp,cpuLoad,cpu_topology,cpuset,hugetlb,memory_numa,process,referenced_memory,resctrl,sched,percpu,process,perf_event,tcp,udp  \
+          --enable_metrics=cpu,memory,disk,diskIO,network,accelerator,oom_event
+
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: idle
+  annotations:
+    prometheus.io/scrape: "true"
+spec:
+  containers:
+    - name: app
+      image: busybox
+      command:
+        - /bin/sh # Run shell
+        - -c # Read from string
+        - |  # Multi-line str
+          # Do nothing
+          tail -f /dev/null
+
     - name: cadvisor
       image: icsforth/cadvisor
       ports:
@@ -25,9 +76,10 @@ spec:
           --store_container_labels=false        \
           --log_cadvisor_usage=false            \
           --profiling=false                     \
+          --docker_only=true                    \
           --allow_dynamic_housekeeping=true     \
           --housekeeping_interval=2s            \
-          --disable_root_cgroup_stats=false     \
+          --disable_root_cgroup_stats=true     \
           --disable_metrics=advtcp,cpuLoad,cpu_topology,cpuset,hugetlb,memory_numa,process,referenced_memory,resctrl,sched,percpu,process,perf_event,tcp,udp  \
           --enable_metrics=cpu,memory,disk,diskIO,network,accelerator,oom_event
-          
+
