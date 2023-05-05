@@ -13,7 +13,7 @@ To allow users to run HPK, the HPC environment should have Apptainer configured 
   use [flannel](https://github.com/flannel-io/flannel) and
   the [flannel CNI plug-in](https://github.com/flannel-io/cni-plugin)).
 
-In contrast to a "typical" Kubernetes installation at the Cloud:
+In contrast to a typical Kubernetes installation at the Cloud:
 
 * HPK uses a pass-through scheduler, which assigns all pods to the single `hpk-kubelet` that represents the cluster. In
   practice, this means that all scheduling is delegated to Slurm.
@@ -22,18 +22,19 @@ In contrast to a "typical" Kubernetes installation at the Cloud:
   need for internal, virtual cluster IPs that would need special handling at the network level. As a side effect, HPK
   services that map to multiple pods are load-balanced at the DNS level if clients support it.
 
-## Compile
+HPK is a continuation of the [KNoC](https://github.com/CARV-ICS-FORTH/knoc) project, a Virtual Kubelet Provider implementation that can be used to bridge Kubernetes and HPC environments.
 
-Compile using `make`.
+## Trying it out
+
+First you need to configure Apptainer for HPK. The [install-environment.sh](test/install-environment.sh) script showcases how we implement the requirements in a single node for testing.
+
+Once setup, compile the `hpk-kubelet` using `make`.
 
 ```bash
 make build
 ```
 
-## Running
-
-HPK consists of two components. The Kubernetes Master and the Virtual Kubelet.
-These components must start separately.
+Then you need to start the Kubernetes Master and `hpk-kubelet` seperately.
 
 To run the Kubernetes Master:
 
@@ -41,22 +42,18 @@ To run the Kubernetes Master:
 make run-kubemaster
 ```
 
-In case that you are behind DNS-restricting network, you use set the external DNS server before running the kube-master.
-```
-export EXTERNAL_DNS=192.168.1.225
-```
-
-Once the installation is complete, you can start the Virtual Kubelet:
+Once the master is up and running, you can start the `hpk-kubelet`:
 
 ```bash
 make run-kubelet
 ```
 
-and then your common kubectl commands
-```basah
+Now you can configure and use `kubectl`:
+
+```bash
 export KUBE_PATH=~/.k8sfs/kubernetes/
-export HOST_ADDRESS=$(ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p')
-kubectl apply -f test/argo/install.yaml
+export KUBECONFIG=${KUBE_PATH}/admin.conf
+kubectl get nodes
 ```
 
 ## Acknowledgements
