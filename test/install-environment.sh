@@ -15,13 +15,14 @@ CORES_PER_SOCKET=$(lscpu | grep -E '^Core' | cut -d':' -f2 | tr -d '[:space:]')
 THREADS_PER_CORE=$(lscpu | grep -E '^Thread' | cut -d':' -f2 | tr -d '[:space:]')
 
 # Requirements
-sudo apt-get update
-sudo apt-get install -y wget
+apt-get update
+apt-get install -y wget
 
 # Install Apptainer
 wget -q https://github.com/apptainer/apptainer/releases/download/v${APPTAINER_VERSION}/apptainer_${APPTAINER_VERSION}_amd64.deb
 wget -q https://github.com/apptainer/apptainer/releases/download/v${APPTAINER_VERSION}/apptainer-suid_${APPTAINER_VERSION}_amd64.deb
 apt-get install -y ./apptainer_${APPTAINER_VERSION}_amd64.deb ./apptainer-suid_${APPTAINER_VERSION}_amd64.deb
+rm -f apptainer_${APPTAINER_VERSION}_amd64.deb apptainer-suid_${APPTAINER_VERSION}_amd64.deb
 
 # Install etcd, needed by Flannel to store configuration
 apt-get install -y etcd-server etcd-client
@@ -35,7 +36,7 @@ systemctl restart etcd
 export ETCDCTL_API=3
 etcdctl --endpoints http://${HOST_ADDRESS}:2379 put /coreos.com/network/config '{"Network": "10.244.0.0/16", "Backend": {"Type": "vxlan"}}'
 
-# Install Flannel to distribute priate IPs across hosts
+# Install Flannel to distribute private IPs across hosts
 apt-get install -y nscd # https://github.com/flannel-io/flannel/issues/1512
 
 wget -q https://github.com/flannel-io/flannel/releases/download/v${FLANNEL_VERSION}/flanneld-amd64
@@ -86,7 +87,6 @@ cat > /etc/apptainer/network/40_fakeroot.conflist <<EOF
 EOF
 
 # Install Slurm
-
 apt-get install -y slurmd slurm-client slurmctld
 
 cat >/etc/slurm/slurm.conf << EOF
