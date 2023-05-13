@@ -15,7 +15,7 @@ VERSION_FLAGS := -ldflags='-X "main.buildVersion=$(BUILD_VERSION)" -X "main.buil
 
 # Deployment options
 K8SFS_PATH ?= ${HOME}/.k8sfs
-KUBE_PATH ?= ${K8SFS_PATH}/kubernetes/
+KUBE_PATH ?= ${K8SFS_PATH}/kubernetes
 EXTERNAL_DNS ?= 8.8.8.8
 
 define WEBHOOK_CONFIGURATION
@@ -54,6 +54,25 @@ webhooks:
     sideEffects: None
 endef
 export WEBHOOK_CONFIGURATION
+
+define CERTIFICATE_CONFIGURATION
+[req]
+req_extensions = v3_req
+distinguished_name = req_distinguished_name
+
+[req_distinguished_name]
+
+[v3_req]
+basicConstraints = CA:FALSE
+keyUsage = digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth, clientAuth
+subjectAltName = @alt_names
+
+[alt_names]
+IP.1 = 127.0.0.1
+IP.2 = ${HOST_ADDRESS}
+endef
+export CERTIFICATE_CONFIGURATION
 
 ##@ General
 
@@ -94,12 +113,13 @@ run-kubelet: ## Run the HPK Virtual Kubelet
 
 	if [ ! -f bin/kubelet.key ]; then openssl genrsa -out bin/kubelet.key 2048; fi
 
-	openssl req -x509 -key bin/kubelet.key -CA ${KUBE_PATH}/pki/ca.crt -CAkey ${KUBE_PATH}/pki/ca.key \
-	-days 365 -nodes -out bin/kubelet.crt -subj "/CN=hpk-kubelet" \
-	-addext "basicConstraints=CA:FALSE" \
-	-addext "keyUsage=digitalSignature,keyEncipherment" \
-	-addext "extendedKeyUsage=serverAuth,clientAuth" \
-	-addext "subjectAltName=IP:127.0.0.1,IP:${HOST_ADDRESS}"
+	echo "$$CERTIFICATE_CONFIGURATION" > bin/kubelet.cnf
+	openssl req -new -key bin/kubelet.key -subj "/CN=hpk-kubelet" \
+	-out bin/kubelet.csr -config bin/kubelet.cnf
+	openssl x509 -req -days 365 -set_serial 01 \
+	-CA ${KUBE_PATH}/pki/ca.crt -CAkey ${KUBE_PATH}/pki/ca.key \
+	-in bin/kubelet.csr -out bin/kubelet.crt \
+	-extfile bin/kubelet.cnf -extensions v3_req
 
 	@echo "===> Register Webhook <==="
 	export KUBECONFIG=${KUBE_PATH}/admin.conf; \
