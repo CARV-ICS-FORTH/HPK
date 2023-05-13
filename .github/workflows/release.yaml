@@ -25,7 +25,7 @@ jobs:
       - name: Build
         run: |
           make build
-          (cd bin && tar -zcvf hpk-kubelet_${{ github.ref }}_linux_amd64.tar.gz hpk-kubelet)
+          (cd bin && tar -zcvf hpk-kubelet_${{ github.ref_name }}_linux_amd64.tar.gz hpk-kubelet)
       - name: Create release
         uses: actions/create-release@v1
         id: create_release
@@ -34,14 +34,14 @@ jobs:
         with:
           draft: false
           prerelease: false
-          release_name: ${{ github.ref }}
-          tag_name: ${{ github.ref }}
+          release_name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
       - name: upload linux artifact
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./bin/hpk-kubelet_${{ github.ref }}_linux_amd64.tar.gz
-          asset_name: hpk-kubelet_${{ github.ref }}_linux_amd64.tar.gz
+          asset_path: ./bin/hpk-kubelet_${{ github.ref_name }}_linux_amd64.tar.gz
+          asset_name: hpk-kubelet_${{ github.ref_name }}_linux_amd64.tar.gz
           asset_content_type: application/gzip
