@@ -41,7 +41,8 @@ jobs:
           path: bin
       - name: Setup the environment
         run: |
-          sudo ./test/install-environment.sh
+          sudo ./test/install-slurm.sh
+          sudo ./aws/install-hpk-requirements.sh
           echo "HOME=$HOME" >> $GITHUB_ENV
           chmod +x bin/hpk-kubelet
       - name: Start Kubernetes

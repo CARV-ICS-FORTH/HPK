@@ -40,7 +40,7 @@ pcluster ssh --cluster-name hpk-cluster -i ./hpk-cluster-keypair.pem
 
 ## Run HPK
 
-Back to the head node, as the `ubuntu` user:
+Back to the head node, as the local user:
 ```sh
 git clone https://github.com/CARV-ICS-FORTH/HPK.git
 cd HPK

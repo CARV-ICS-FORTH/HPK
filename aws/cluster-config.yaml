@@ -4,7 +4,7 @@ Image:
 HeadNode:
   InstanceType: t2.medium
   Networking:
-    SubnetId: subnet-0d2e4616b4204dc3d
+    SubnetId: subnet-0d0899f8ee5f07fe5
   Ssh:
     KeyName: forthCluster-keypair
   CustomActions:
@@ -22,7 +22,7 @@ Scheduling:
       MaxCount: 2
     Networking:
       SubnetIds:
-      - subnet-0084d54d1250752e8
+      - subnet-055ecda57fa839264
     CustomActions:
       OnNodeConfigured:
         Script: s3://hpk-parallelcluster/install-hpk-requirements.sh
