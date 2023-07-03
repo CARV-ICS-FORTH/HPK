@@ -4,7 +4,7 @@ Image:
 HeadNode:
   InstanceType: t2.medium
   Networking:
-    SubnetId: subnet-0d0899f8ee5f07fe5
+    SubnetId: subnet-033628d96d018f1eb
   Ssh:
     KeyName: forthCluster-keypair
   CustomActions:
@@ -22,7 +22,7 @@ Scheduling:
       MaxCount: 2
     Networking:
       SubnetIds:
-      - subnet-055ecda57fa839264
+      - subnet-0f0e94ed7bbde6d68
     CustomActions:
       OnNodeConfigured:
         Script: https://raw.githubusercontent.com/CARV-ICS-FORTH/HPK/main/aws/install-hpk-requirements.sh

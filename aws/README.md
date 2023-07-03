@@ -38,6 +38,8 @@ Wait until the last command shows `CREATE_COMPLETE`, then login:
 pcluster ssh --cluster-name hpk-cluster -i ./hpk-cluster-keypair.pem
 ```
 
+You will have to reboot the nodes to enable cgroup v2.
+
 ## Run HPK
 
 Back to the head node, as the local user:

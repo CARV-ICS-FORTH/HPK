@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Install HPK requirements.
-# Tested on Ubuntu 20.04, 22.04 and CentOS 7.
+# Tested on Ubuntu 22.04 (CentOS 7 will be configured, but cgroup v2 not enabled).
 
 APPTAINER_VERSION=1.1.4
 FLANNEL_VERSION=0.20.2
