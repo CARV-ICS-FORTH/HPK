@@ -136,7 +136,7 @@ rm -f helm helm-v${HELM_VERSION}-linux-amd64.tar.gz
 if [[ "$(. /etc/os-release; echo $ID)" == "ubuntu" ]]; then
     sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="/&systemd.unified_cgroup_hierarchy=1 /' /etc/default/grub.d/50-cloudimg-settings.cfg
     update-grub
-    shutdown -r +1
+    # shutdown -r +1
 fi
 
 exit 0
