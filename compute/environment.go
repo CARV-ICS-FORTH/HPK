@@ -40,6 +40,8 @@ type HPCEnvironment struct {
 	ContainerRegistry string
 	ApptainerBin      string
 
+	EnableCgroupV2 bool
+
 	SystemD
 }
 
@@ -50,6 +52,27 @@ var K8SClient client.Client
 var K8SClientset *kubernetes.Clientset
 
 var DefaultLogger = zap.New(zap.UseDevMode(true))
+
+// The VirtualEnvironmentPaths create lightweight "virtual environments" that resemble "Pods" semantics.
+type VirtualEnvironmentPaths struct {
+	// CgroupFilePath points to the cgroup configuration for the virtual environment.
+	CgroupFilePath string
+
+	// ConstructorFilePath points to the script for creating the virtual environment for Pod.
+	ConstructorFilePath string
+
+	// IPAddressPath is where we store the internal Pod's ip.
+	IPAddressPath string
+
+	// StdoutPath instruct Slurm to write stdout into the specified path.
+	StdoutPath string
+
+	// StdoutPath instruct Slurm to write stderr into the specified path.
+	StderrPath string
+
+	// SysErrorFilePath indicate a system failure that cause the Pod to fail Immediately, bypassing any other checks.
+	SysErrorFilePath string
+}
 
 /************************************************************
 

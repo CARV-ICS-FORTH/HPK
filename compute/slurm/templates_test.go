@@ -124,7 +124,7 @@ func TestSBatch(t *testing.T) {
 					ContainerRegistry: "none",
 				},
 				Pod: podKey,
-				VirtualEnv: slurm.VirtualEnvironmentPaths{
+				VirtualEnv: compute.VirtualEnvironmentPaths{
 					ConstructorFilePath: podDir.ConstructorFilePath(),
 					IPAddressPath:       podDir.IPAddressPath(),
 					StdoutPath:          podDir.StdoutPath(),

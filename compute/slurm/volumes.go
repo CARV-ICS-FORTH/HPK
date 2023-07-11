@@ -93,7 +93,7 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) {
 				"dir", configMapDir,
 			)
 
-			compute.PodError(h.Pod, "ConfigMapVolumeError", "reason: %w", err)
+			compute.PodError(h.Pod, "ConfigMapVolumeError", "reason: %s", err)
 
 			return
 		}
@@ -121,7 +121,7 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) {
 				"dir", secretDir,
 			)
 
-			compute.PodError(h.Pod, "SecretVolumeError", "reason: %w", err)
+			compute.PodError(h.Pod, "SecretVolumeError", "reason: %s", err)
 
 			return
 		}
@@ -157,7 +157,7 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) {
 		}
 
 		if err := mounter.SetUpAt(ctx); err != nil {
-			compute.SystemPanic(err, "mount hostpath volum has failed")
+			compute.SystemPanic(err, "mount hostpath volume has failed")
 		}
 
 		h.logger.Info("  * HostPath Volume is mounted", "name", vol.Name)
@@ -187,7 +187,7 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) {
 
 		if err = mounter.SetUpAt(ctx, projectedDir); err != nil {
 			compute.PodError(h.Pod, "Volume",
-				"mount projected volume to dir '%s' has failed due to '%w'",
+				"mount projected volume to dir '%s' has failed due to '%s'",
 				projectedDir, err)
 
 			return

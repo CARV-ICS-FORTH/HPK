@@ -50,6 +50,8 @@ type Opts struct {
 	ApptainerBin      string
 	ContainerRegistry string
 
+	EnableCgroupV2 bool
+
 	FSPollingInterval time.Duration
 
 	// Number of workers to use to handle pod notifications
@@ -86,6 +88,7 @@ func installFlags(flags *pflag.FlagSet, c *Opts) {
 	flags.StringVar(&c.ApptainerBin, "apptainer", "apptainer", "path to Apptainer bin")
 	flags.StringVar(&c.ContainerRegistry, "registry", "docker://", "container registry")
 
+	flags.BoolVar(&c.EnableCgroupV2, "enable-cgroupv2", false, "Enable support for cgroupv2.")
 	flags.DurationVar(&c.FSPollingInterval, "poll", 5*time.Second, "if greater than 0, it will use a poll based approach to watch for file system changes")
 
 	flags.IntVar(&c.PodSyncWorkers, "pod-sync-workers", 1, `set the number of pod synchronization workers`)

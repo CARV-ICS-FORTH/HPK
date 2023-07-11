@@ -23,7 +23,7 @@ import (
 
 	"github.com/Masterminds/sprig"
 	"github.com/carv-ics-forth/hpk/compute"
-	"github.com/carv-ics-forth/hpk/compute/slurm/apptainer"
+	"github.com/carv-ics-forth/hpk/compute/slurm/image"
 	"github.com/carv-ics-forth/hpk/compute/slurm/job"
 	kubecontainer "github.com/carv-ics-forth/hpk/pkg/container"
 	"github.com/carv-ics-forth/hpk/pkg/hostutil"
@@ -37,6 +37,12 @@ import (
 // buildContainer replicates the behavior of
 // https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/kuberuntime/kuberuntime_container.go
 func (h *podHandler) buildContainer(container *corev1.Container, containerStatus *corev1.ContainerStatus) (Container, error) {
+	/*---------------------------------------------------
+	 * Determine the effective security context
+	 *---------------------------------------------------*/
+	effectiSecurityContext := DetermineEffectiveSecurityContext(h.Pod, container)
+	uid, gid := DetermineEffectiveRunAsUser(effectiSecurityContext)
+
 	/*---------------------------------------------------
 	 * Generate Environment Variables
 	 *---------------------------------------------------*/
@@ -133,9 +139,12 @@ func (h *podHandler) buildContainer(container *corev1.Container, containerStatus
 	 *---------------------------------------------------*/
 	containerID := fmt.Sprintf("%s_%s_%s", h.Pod.GetNamespace(), h.Pod.GetName(), container.Name)
 
-	imageID, _ := apptainer.PullImage(apptainer.Docker, container.Image)
+	imageID, err := image.PullImage(image.Docker, container.Image)
+	if err != nil {
+		compute.SystemPanic(err, "ImagePull error. Image: %s", container.Image)
+	}
 
-	apptainerMode := func() string {
+	executionMode := func() string {
 		if container.Command == nil {
 			return "run"
 		} else {
@@ -150,14 +159,16 @@ func (h *podHandler) buildContainer(container *corev1.Container, containerStatus
 
 	c := Container{
 		InstanceName:  containerID,
+		RunAsUser:     uid,
+		RunAsGroup:    gid,
 		ImageFilePath: imageID,
+		EnvFilePath:   containerPath.EnvFilePath(),
 		Binds:         binds,
 		Command:       kubecontainer.ExpandContainerCommandOnlyStatic(container.Command, container.Env),
 		Args:          kubecontainer.ExpandContainerCommandOnlyStatic(container.Args, container.Env),
-		ApptainerMode: apptainerMode,
-		EnvFilePath:   containerPath.EnvFilePath(),
-		JobIDPath:     containerPath.IDPath(),
+		ExecutionMode: executionMode,
 		LogsPath:      containerPath.LogsPath(),
+		JobIDPath:     containerPath.IDPath(),
 		ExitCodePath:  containerPath.ExitCodePath(),
 	}
 

@@ -151,6 +151,7 @@ func runRootCommand(ctx context.Context, c Opts) error {
 		compute.K8SClientset = k8sclientset
 		compute.Environment.ContainerRegistry = c.ContainerRegistry
 		compute.Environment.ApptainerBin = c.ApptainerBin
+		compute.Environment.EnableCgroupV2 = c.EnableCgroupV2
 
 		kubemaster, err := url.Parse(restConfig.Host)
 		if err != nil {
