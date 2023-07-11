@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package apptainer
+package image
 
 import (
+	"os"
 	"strings"
 
 	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/pkg/process"
+	"github.com/pkg/errors"
 )
 
 type Transport string
@@ -43,16 +45,46 @@ func imageFilePath(image string) string {
 	imageNameVersion := strings.Split(imageName, ":")
 	switch {
 	case len(imageNameVersion) == 1:
-		return compute.ImageDir + "/" + imageNameVersion[0] + "_" + "latest" + ".sif"
+		name := imageNameVersion[0]
+		version := "latest"
+
+		return compute.ImageDir + "/" + name + "_" + version + ".sif"
 	case len(imageNameVersion) == 2:
-		return compute.ImageDir + "/" + imageNameVersion[0] + "_" + imageNameVersion[1] + ".sif"
+		name := imageNameVersion[0]
+		version := imageNameVersion[1]
+
+		return compute.ImageDir + "/" + name + "_" + version + ".sif"
+
 	default:
-		panic("invalid version: " + image)
+		// keep the tag (version), but ignore the digest (sha256)
+		// registry.k8s.io/ingress-nginx/kube-webhook-certgen:v20230407@sha256:543c40fd093964bc9ab509d3e791f9989963021f1e9e4c9c7b6700b02bfb227b
+		imageNameVersionDigest := strings.Split(imageName, "@")
+		digest := imageNameVersionDigest[1]
+		_ = digest
+
+		imageNameVersion = strings.Split(imageNameVersionDigest[0], ":")
+		name := imageNameVersion[0]
+		version := imageNameVersion[1]
+
+		return compute.ImageDir + "/" + name + "_" + version + ".sif"
 	}
 }
 
 func PullImage(transport Transport, image string) (string, error) {
+	// Remove the digest form the image, because Singularity fails with
+	// "Docker references with both a tag and digest are currently not supported".
+	image = strings.Split(image, "@")[0]
 	imagePath := imageFilePath(image)
+
+	// check if image exists
+	file, err := os.Stat(imagePath)
+	if err == nil {
+		if file.Mode().IsRegular() {
+			return imagePath, nil
+		}
+
+		return "", errors.Errorf("imagePath '%s' is not a regular fie", imagePath)
+	}
 
 	// otherwise, download a fresh copy
 	downloadcmd := []string{"pull", "--dir", compute.ImageDir, string(transport) + image}
@@ -62,7 +94,7 @@ func PullImage(transport Transport, image string) (string, error) {
 		"path", imagePath,
 	)
 
-	_, _ = process.Execute(compute.Environment.ApptainerBin, downloadcmd...)
+	_, err = process.Execute(compute.Environment.ApptainerBin, downloadcmd...)
 
-	return imagePath, nil
+	return imagePath, err
 }

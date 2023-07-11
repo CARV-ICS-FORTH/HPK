@@ -97,7 +97,7 @@ handle_init_containers() {
 {{- range $index, $container := .InitContainers}}
 	echo "[Virtual]* Running init container {{$index}}"
 	
-	$(${apptainer} {{ $container.ApptainerMode }} --compat --cleanenv --pid --no-mount tmp,home  \ 
+	$(${apptainer} {{ $container.ExecutionMode }} --compat --cleanenv --pid --no-mount tmp,home  \ 
 	{{- if $container.EnvFilePath}}
 	--env-file {{$container.EnvFilePath}} \
 	{{- end}}
@@ -204,7 +204,7 @@ exec_containers() {
 	
 	echo instance://{{$container.InstanceName}} > {{$container.JobIDPath}}
 	
-	$(${apptainer} {{$container.ApptainerMode}} --compat --cleanenv \ 
+	$(${apptainer} {{$container.ExecutionMode}} --compat --cleanenv \ 
 	{{- if $container.EnvFilePath}}
 	--env-file {{$container.EnvFilePath}} \
 	{{- end}}

@@ -45,3 +45,31 @@ spec:
     - name: whoami-root
       image: ubuntu
       command: [ "whoami" ]
+
+
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: whoami-default
+spec:
+  containers:
+    - name: whoami-root
+      image: ubuntu
+      securityContext:
+        runAsUser: 1000
+      command: [ "whoami" ]
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: whoami-nobody
+spec:
+  containers:
+    - name: whoami-root
+      image: ubuntu
+      securityContext:
+        runAsNonRoot: true
+      command: [ "whoami" ]

@@ -85,10 +85,10 @@ help: ## Display this help
 ##@ Build
 
 build: ## Build HPK binary
-	GOOS=linux GOARCH=amd64 go build $(VERSION_FLAGS) -ldflags '-extldflags "-static"' -o bin/hpk-kubelet ./cmd/hpk
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(VERSION_FLAGS) -ldflags '-extldflags "-static"' -o bin/hpk-kubelet ./cmd/hpk
 
 build-race: ## Build HPK binary with race condition detector
-	GOOS=linux GOARCH=amd64 go build $(VERSION_FLAGS) -race -o bin/hpk-kubelet ./cmd/hpk
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(VERSION_FLAGS) -race -o bin/hpk-kubelet ./cmd/hpk
 
 
 ##@ Deployment
@@ -103,7 +103,7 @@ run-kubemaster: ## Run the Kubernetes Master
 	--env K8SFS_MOCK_KUBELET=0 \
 	--bind ${K8SFS_PATH}:/usr/local/etc \
 	--bind ${K8SFS_PATH}/log:/var/log \
-	docker://chazapis/kubernetes-from-scratch:20221217
+	docker://chazapis/kubernetes-from-scratch:20230425
 
 run-kubelet: CA_BUNDLE = $(shell cat ${KUBE_PATH}/pki/ca.crt | base64 | tr -d '\n')
 run-kubelet: HOST_ADDRESS = $(shell ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p')

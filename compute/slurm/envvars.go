@@ -32,7 +32,6 @@ import (
 // which tell the container where to find the services it may need, which are
 // provided as an argument.
 func FromServices(ctx context.Context, namespace string) []corev1.EnvVar {
-
 	/*---------------------------------------------------
 	 * Get all Service resources from master
 	 *---------------------------------------------------*/
@@ -70,19 +69,19 @@ func FromServices(ctx context.Context, namespace string) []corev1.EnvVar {
 		// Host
 		name := makeEnvVariableName(service.Name) + "_SERVICE_HOST"
 		if service.GetNamespace() == metav1.NamespaceDefault && service.GetName() == "kubernetes" {
-			/* because kubernetes is not managed by HPK, we must create the entry manually. */
+			// because kubernetes is not managed by HPK, we must create the entry manually.
 			service.Spec.ClusterIP = compute.Environment.KubeMasterHost
 		} else {
-			/* Look it up by DNS name*/
+			// Look it up by DNS name.
 			service.Spec.ClusterIP = service.GetName()
 		}
 		result = append(result, corev1.EnvVar{Name: name, Value: service.Spec.ClusterIP})
 
-		// First port - give it the backwards-compatible name
+		// First port - give it the backwards-compatible name.
 		name = makeEnvVariableName(service.Name) + "_SERVICE_PORT"
 		result = append(result, corev1.EnvVar{Name: name, Value: service.Spec.Ports[0].TargetPort.String()})
 
-		// All named ports (only the first may be unnamed, checked in validation)
+		// All named ports (only the first may be unnamed, checked in validation).
 		for i := range service.Spec.Ports {
 			sp := &service.Spec.Ports[i]
 			if sp.Name != "" {
@@ -148,89 +147,3 @@ func makeLinkVariables(service *corev1.Service) []corev1.EnvVar {
 	}
 	return all
 }
-
-/*
-// FromEndpointSlices makes a map[string]string of env vars for services a  pod in namespace ns should see.
-// However, the kubelet implementation works on for Services with ClusterIPs.
-// In our case, the Services point directly to Pod IP's, and the implementation does not work.
-// The solution is to retrieve services from Endpoints.
-//
-// Original:
-// https://github.com/kubernetes/kubernetes/blob/1139bb177b2b35611c5ca16cc82f0e41a8bb107e/pkg/kubelet/kubelet_pods.go#L575
-func FromEndpointSlices(ctx context.Context,  namespace string) []corev1.EnvVar {
-	/*---------------------------------------------------
-	 * Get all EndpointSlice resources from master
-	 *---------------------------------------------------* /
-	var endpointSliceList discoveryv1.EndpointSliceList
-
-	if err := compute.K8SClient.List(ctx, &endpointSliceList, &client.ListOptions{
-		LabelSelector: labels.Everything(),
-	}); err != nil {
-		SystemPanic(err, "failed to list EndpointSlice when setting up env vars")
-	}
-
-	var endpointSlices []*discoveryv1.EndpointSlice
-
-	for i, endpointSlice := range endpointSliceList.Items {
-		// We always want to add environment variabled for master services
-		// from the master service namespace, even if enableServiceLinks is false.
-		// We also add environment variables for other services in the same
-		// namespace, if enableServiceLinks is true.
-		if endpointSlice.GetNamespace() == namespace ||
-			endpointSlice.GetNamespace() == metav1.NamespaceDefault {
-			endpointSlices = append(endpointSlices, &endpointSliceList.Items[i])
-		}
-	}
-
-
-	/*---------------------------------------------------
-	 * Extract Environment Variables
-	 *---------------------------------------------------* /
-	var result []corev1.EnvVar
-	for _, endpointSlice := range endpointSlices {
-		// Host
-		name := makeEnvVariableName(endpointSlice.Name) + "_SERVICE_HOST"
-		result = append(result, corev1.EnvVar{Name: name, Value: endpointSlice.GetName() /*service.Spec.ClusterIP* /})
-		// First port - give it the backwards-compatible name
-		name = makeEnvVariableName(endpointSlice.Name) + "_SERVICE_PORT"
-		result = append(result, corev1.EnvVar{Name: name, Value: strconv.Itoa(int(endpointSlice.Spec.Ports[0].Port))})
-		// All named ports (only the first may be unnamed, checked in validation)
-		for i := range service.Spec.Ports {
-			sp := &service.Spec.Ports[i]
-			if sp.Name != "" {
-				pn := name + "_" + makeEnvVariableName(sp.Name)
-				result = append(result, corev1.EnvVar{Name: pn, Value: strconv.Itoa(int(sp.Port))})
-			}
-		}
-		// Docker-compatible vars.
-		result = append(result, makeLinkVariables(service)...)
-	}
-	return result
-
-}
-
-
-
-	/ *---------------------------------------------------
-	 * Populate services into service environment variables.
-	 *---------------------------------------------------* /
-var mappedEndpoints []*corev1.Endpoints
-
-for i, endpoint := range endpointsList.Items {
-// ignore endpoints without IPs
-if len(endpoint.Subsets) == 0 {
-continue
-}
-
-// We always want to add environment variabled for master services
-// from the master service namespace, even if enableServiceLinks is false.
-// We also add environment variables for other services in the same
-// namespace, if enableServiceLinks is true.
-if endpoint.GetNamespace() == namespace ||
-endpoint.GetNamespace() == metav1.NamespaceDefault {
-mappedEndpoints = append(mappedEndpoints, &endpointsList.Items[i])
-}
-}
-
-return crdtools.FromEndpoints(mappedEndpoints), nil
-*/

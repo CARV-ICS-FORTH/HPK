@@ -302,7 +302,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	if err := scriptTemplate.Execute(&scriptFileContent, JobFields{
 		Pod:        h.podKey,
 		ComputeEnv: compute.Environment,
-		VirtualEnv: VirtualEnvironmentPaths{
+		VirtualEnv: compute.VirtualEnvironmentPaths{
 			CgroupFilePath:      h.podDirectory.CgroupFilePath(),
 			ConstructorFilePath: h.podDirectory.ConstructorFilePath(),
 			IPAddressPath:       h.podDirectory.IPAddressPath(),

@@ -78,8 +78,8 @@ echo -e "127.0.0.1 localhost" >> /scratch/etc/hosts
 echo -e "$(hostname -I) $(hostname)" >> /scratch/etc/hosts
 }
 
-# If not removed, Flags will be consumed by the nested Apptainer and overwrite paths.
-# https://apptainer.org/user-docs/master/environment_and_metadata.html#environment-from-the-singularity-runtime
+# If not removed, Flags will be consumed by the nested Singularity and overwrite paths.
+# https://docs.sylabs.io/guides/3.11/user-guide/environment_and_metadata.html
 reset_env() {
     unset LD_LIBRARY_PATH
 
@@ -109,7 +109,10 @@ handle_init_containers() {
 	# Mark the beginning of an init job (all get the shell's pid).  
 	echo pid://$$ > {{$container.JobIDPath}}
 
-	{{$.ComputeEnv.ApptainerBin}} {{ $container.ApptainerMode }} --cleanenv --pid --compat --no-mount tmp,home --unsquash \
+	$(apptainer {{ $container.ExecutionMode }} --cleanenv --pid --compat --no-mount home --unsquash \
+	{{- if $container.RunAsUser}}
+	--security uid:{{$container.RunAsUser}},gid:{{$container.RunAsGroup}} \
+	{{- end}}
 	--bind /scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts,{{join "," $container.Binds}} \
 	{{- if $container.EnvFilePath}}
 	--env-file /scratch/{{$container.InstanceName}}.env \
@@ -139,8 +142,12 @@ handle_containers() {
 	sh -c {{$container.EnvFilePath}} > /scratch/{{$container.InstanceName}}.env
 	{{- end}}
 
+	# --no-home --compat --keep-privs --user-ns
 	# Internal fakeroot is needed for appropriate permissions within the container
-	$({{$.ComputeEnv.ApptainerBin}} {{ $container.ApptainerMode }} --cleanenv --pid --compat --no-mount tmp,home --unsquash \
+	$(apptainer {{ $container.ExecutionMode }} --cleanenv --pid --compat --no-mount home --unsquash \
+	{{- if $container.RunAsUser}}
+	--security uid:{{$container.RunAsUser}},gid:{{$container.RunAsGroup}} \
+	{{- end}}
 	--bind /scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts,{{join "," $container.Binds}} \
 	{{- if $container.EnvFilePath}}
 	--env-file /scratch/{{$container.InstanceName}}.env \
@@ -264,12 +271,16 @@ event_dispatcher &
 
 echo "[Host] Starting the Constructor for the Virtual Environment ..."
 chmod +x  {{.VirtualEnv.ConstructorFilePath}}
+
+# --network-args "portmap=8080:80/tcp"
 {{$.ComputeEnv.ApptainerBin}} exec  --net --fakeroot --scratch /scratch \
+{{- if .ComputeEnv.EnableCgroupV2}}
 --apply-cgroups {{.VirtualEnv.CgroupFilePath}} 		\
+{{- end}}
 --env PARENT=${PPID}								 \
 --bind $HOME,/run					 				\
 --hostname {{.Pod.Name}}							 \
-docker://icsforth/pause {{.VirtualEnv.ConstructorFilePath}} 
+docker://icsforth/pause:apptainer {{.VirtualEnv.ConstructorFilePath}} 
 
 
 if [[ $? -eq 0 ]]; then
@@ -286,7 +297,7 @@ type JobFields struct {
 	Pod types.NamespacedName
 
 	// VirtualEnv is the equivalent of a Pod.
-	VirtualEnv VirtualEnvironmentPaths
+	VirtualEnv compute.VirtualEnvironmentPaths
 
 	ComputeEnv compute.HPCEnvironment
 
@@ -303,31 +314,20 @@ type JobFields struct {
 	CustomFlags []string
 }
 
-// The VirtualEnvironmentPaths create lightweight "virtual environments" that resemble "Pods" semantics.
-type VirtualEnvironmentPaths struct {
-	// CgroupFilePath points to the cgroup configuration for the virtual environment.
-	CgroupFilePath string
-
-	// ConstructorFilePath points to the script for creating the virtual environment for Pod.
-	ConstructorFilePath string
-
-	// IPAddressPath is where we store the internal Pod's ip.
-	IPAddressPath string
-
-	// StdoutPath instruct Slurm to write stdout into the specified path.
-	StdoutPath string
-
-	// StdoutPath instruct Slurm to write stderr into the specified path.
-	StderrPath string
-
-	// SysErrorFilePath indicate a system failure that cause the Pod to fail Immediately, bypassing any other checks.
-	SysErrorFilePath string
-}
-
 // The Container creates new within the Pod and resemble the "Container" semantics.
 type Container struct {
 	// needed for apptainer start.
 	InstanceName string // instance://podName_containerName
+
+	// The UID to run the entrypoint of the container process.
+	// May also be set in PodSecurityContext.  If set in both SecurityContext and
+	// PodSecurityContext, the value specified in SecurityContext takes precedence.
+	RunAsUser int64
+
+	// The GID to run the entrypoint of the container process.
+	// May also be set in PodSecurityContext.  If set in both SecurityContext and
+	// PodSecurityContext, the value specified in SecurityContext takes precedence.
+	RunAsGroup int64
 
 	ImageFilePath string // format: REGISTRY://image:tag
 
@@ -339,7 +339,7 @@ type Container struct {
 
 	Args []string // space separated args
 
-	ApptainerMode string // exec or run
+	ExecutionMode string // exec or run
 
 	// LogsPath instructs process to write stdout and stderr into the specified path.
 	LogsPath string
