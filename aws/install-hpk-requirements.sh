@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Install HPK requirements.
-# Tested on Ubuntu 22.04 (CentOS 7 will be configured, but cgroup v2 not enabled).
+# Tested on Ubuntu 20.04, CentOS 7.
 
 APPTAINER_VERSION=1.1.4
 FLANNEL_VERSION=0.20.2
@@ -131,12 +131,5 @@ wget -q https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz
 tar -zxvf helm-v${HELM_VERSION}-linux-amd64.tar.gz --strip-components=1 linux-amd64/helm
 cp helm /usr/local/bin/helm
 rm -f helm helm-v${HELM_VERSION}-linux-amd64.tar.gz
-
-# Enable cgroup v2
-if [[ "$(. /etc/os-release; echo $ID)" == "ubuntu" ]]; then
-    sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="/&systemd.unified_cgroup_hierarchy=1 /' /etc/default/grub.d/50-cloudimg-settings.cfg
-    update-grub
-    # shutdown -r +1
-fi
 
 exit 0
