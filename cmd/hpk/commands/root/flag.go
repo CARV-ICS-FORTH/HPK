@@ -18,8 +18,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/spf13/pflag"
-	"github.com/virtual-kubelet/virtual-kubelet/errdefs"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -29,6 +29,8 @@ import (
 // You can set the default options by creating a new `Opts` struct and passing
 // it into `SetDefaultOpts`
 type Opts struct {
+	DefaultHostEnvironment compute.HostEnvironment
+
 	// KubeletAddress determines which address to tell API Server to use.
 	// Node listens on all of its IP addresses on port 10250 and advertises the value specified in KubeletAddress to other nodes.
 	KubeletAddress string
@@ -46,11 +48,6 @@ type Opts struct {
 
 	// Node name to use when creating a node in Kubernetes
 	NodeName string
-
-	ApptainerBin      string
-	ContainerRegistry string
-
-	EnableCgroupV2 bool
 
 	FSPollingInterval time.Duration
 
@@ -85,10 +82,11 @@ func installFlags(flags *pflag.FlagSet, c *Opts) {
 	flags.StringVar(&c.KubeNamespace, "namespace", corev1.NamespaceAll, "kubernetes namespace (default is 'all')")
 	flags.StringVar(&c.NodeName, "nodename", "hpk-kubelet", "kubernetes node name")
 
-	flags.StringVar(&c.ApptainerBin, "apptainer", "apptainer", "path to Apptainer bin")
-	flags.StringVar(&c.ContainerRegistry, "registry", "docker://", "container registry")
+	flags.StringVar(&c.DefaultHostEnvironment.ApptainerBin, "apptainer", "apptainer", "path to Apptainer bin")
+	flags.StringVar(&c.DefaultHostEnvironment.ContainerRegistry, "registry", "docker://", "container registry")
+	flags.StringVar(&c.DefaultHostEnvironment.HPKDir, "rootdir", GetUserHomeDir(), "the path for hpk to run")
 
-	flags.BoolVar(&c.EnableCgroupV2, "enable-cgroupv2", false, "Enable support for cgroupv2.")
+	flags.BoolVar(&c.DefaultHostEnvironment.EnableCgroupV2, "enable-cgroupv2", false, "Enable support for cgroupv2.")
 	flags.DurationVar(&c.FSPollingInterval, "poll", 5*time.Second, "if greater than 0, it will use a poll based approach to watch for file system changes")
 
 	flags.IntVar(&c.PodSyncWorkers, "pod-sync-workers", 1, `set the number of pod synchronization workers`)
@@ -100,27 +98,4 @@ func installFlags(flags *pflag.FlagSet, c *Opts) {
 	flags.StringVar(&c.TaintKey, "taint-key", "virtual-kubelet.io/provider", "Set node taint key")
 	flags.StringVar(&c.TaintValue, "taint-value", "hpk", "Set node taint value")
 	flags.StringVar(&c.TaintEffect, "taint-effect", string(corev1.TaintEffectNoSchedule), "Set node taint effect")
-}
-
-// getTaint creates a taint using the provided key/value.
-// Taint effect is read from the environment
-// The taint key/value may be overwritten by the environment.
-func getTaint(o Opts) (*corev1.Taint, error) {
-	var effect corev1.TaintEffect
-	switch o.TaintEffect {
-	case "NoSchedule":
-		effect = corev1.TaintEffectNoSchedule
-	case "NoExecute":
-		effect = corev1.TaintEffectNoExecute
-	case "PreferNoSchedule":
-		effect = corev1.TaintEffectPreferNoSchedule
-	default:
-		return nil, errdefs.InvalidInputf("taint effect %q is not supported", o.TaintEffect)
-	}
-
-	return &corev1.Taint{
-		Key:    o.TaintKey,
-		Value:  o.TaintValue,
-		Effect: effect,
-	}, nil
 }

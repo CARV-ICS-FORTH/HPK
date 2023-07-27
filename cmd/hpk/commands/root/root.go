@@ -19,13 +19,14 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"os/user"
+	"os"
 	"time"
 
 	"github.com/carv-ics-forth/hpk/cmd/hpk/commands"
 	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/hashicorp/go-multierror"
 	"github.com/sirupsen/logrus"
+	"github.com/virtual-kubelet/virtual-kubelet/errdefs"
 	vklog "github.com/virtual-kubelet/virtual-kubelet/log"
 	"github.com/virtual-kubelet/virtual-kubelet/log/klogv2"
 	"golang.org/x/time/rate"
@@ -119,16 +120,6 @@ func runRootCommand(ctx context.Context, c Opts) error {
 	defer cancel()
 
 	/*---------------------------------------------------
-	 * Discover System information
-	 *---------------------------------------------------*/
-	userInfo, err := user.Current()
-	if err != nil {
-		return errors.Wrapf(err, "unable to get user information")
-	}
-
-	compute.Environment.SystemD.User = userInfo.Uid
-
-	/*---------------------------------------------------
 	 * Setup a client to Kubernetes API
 	 *---------------------------------------------------*/
 	restConfig, err := config.GetConfig()
@@ -149,9 +140,8 @@ func runRootCommand(ctx context.Context, c Opts) error {
 
 		compute.K8SClient = k8sclient
 		compute.K8SClientset = k8sclientset
-		compute.Environment.ContainerRegistry = c.ContainerRegistry
-		compute.Environment.ApptainerBin = c.ApptainerBin
-		compute.Environment.EnableCgroupV2 = c.EnableCgroupV2
+
+		compute.Environment = c.DefaultHostEnvironment
 
 		kubemaster, err := url.Parse(restConfig.Host)
 		if err != nil {
@@ -369,4 +359,36 @@ func setNodeReady(n *corev1.Node) {
 		n.Status.Conditions[i] = c
 		return
 	}
+}
+
+// getTaint creates a taint using the provided key/value.
+// Taint effect is read from the environment
+// The taint key/value may be overwritten by the environment.
+func getTaint(o Opts) (*corev1.Taint, error) {
+	var effect corev1.TaintEffect
+	switch o.TaintEffect {
+	case "NoSchedule":
+		effect = corev1.TaintEffectNoSchedule
+	case "NoExecute":
+		effect = corev1.TaintEffectNoExecute
+	case "PreferNoSchedule":
+		effect = corev1.TaintEffectPreferNoSchedule
+	default:
+		return nil, errdefs.InvalidInputf("taint effect %q is not supported", o.TaintEffect)
+	}
+
+	return &corev1.Taint{
+		Key:    o.TaintKey,
+		Value:  o.TaintValue,
+		Effect: effect,
+	}, nil
+}
+
+func GetUserHomeDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		DefaultLogger.Info("Failed to infer UserHome", "err", err)
+	}
+
+	return home
 }

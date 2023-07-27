@@ -8,76 +8,187 @@ setup() {
     export TEST_DIR="$( cd "$( dirname "$BATS_TEST_FILENAME" )" >/dev/null 2>&1 && pwd )"
 }
 
-@test "diagnostics -> networking -> privileged-ports" {
-    run kubectl create ns iperf
+@test "diagnostics -> scripting -> quotes" {
+    DETIK_CLIENT_NAMESPACE="scripting-quotes"
+    cd "./examples/diagnostics/${DETIK_CLIENT_NAMESPACE}"
+
+    # clean-up any previous environment
+    ./uninstall.sh || echo "No previous installation was found"
+
+    # deploy the app
+    run ./install.sh
     assert_success
 
-    DETIK_CLIENT_NAMESPACE="iperf"
+    # Ensure that containers complete
+    try "at most 5 times every 30s to get pods named 'double-quotes' and verify that 'status' is 'succeeded'"
+    try "at most 5 times every 30s to get pods named 'mixed-quotes' and verify that 'status' is 'succeeded'"
 
-    run kubectl apply -f $TEST_DIR/diagnostics/networking/privileged-ports.yaml
+    # undeploy the app
+    run ./uninstall.sh
     assert_success
-    
-    sleep 3
+}
 
-    run verify "there is 1 pod named 'privileged-server'"
-    assert_success
-    run verify "there is 1 pod named 'privileged-client'"
-    assert_success
-    run verify "there is 1 service named 'privileged-server-service'"
-    assert_success
+@test "diagnostics -> volumes -> hostpath" {
+    DETIK_CLIENT_NAMESPACE="volume-hostpath"
+    cd "./examples/diagnostics/${DETIK_CLIENT_NAMESPACE}"
 
-    sleep 30
+    # clean-up any previous environment
+    ./uninstall.sh || echo "No previous installation was found"
 
-    run try "at most 10 times every 10s to find 1 pod named 'privileged-client' with 'status' being 'succeeded'"
-    assert_success
-    run verify "'status' is 'running' for pod named 'privileged-server'"
+    # deploy the app
+    run ./install.sh
     assert_success
 
-    run kubectl logs -n iperf privileged-server
-    assert_output --partial "Server listening"
-    run kubectl logs -n iperf privileged-client
-    assert_output --partial "Connecting to host"
-    assert_output --partial "iperf Done"
+    # Ensure that containers complete
+    try "at most 5 times every 30s to get pods named 'entire-volume' and verify that 'status' is 'succeeded'"
+    try "at most 5 times every 30s to get pods named 'subpath' and verify that 'status' is 'succeeded'"
+    try "at most 5 times every 30s to get pods named 'wrongpath' and verify that 'status' is 'failed'"
 
-    run kubectl delete -f $TEST_DIR/diagnostics/networking/privileged-ports.yaml
+    # Ensure that containers behave correctly
+    run kubectl logs -n ${DETIK_CLIENT_NAMESPACE} entire-volume
+    assert_output --partial "pirate"
+    assert_output --partial "privateer"
+
+    run kubectl logs -n ${DETIK_CLIENT_NAMESPACE} subpath
+    assert_output --partial "pirate"
+
+    # undeploy the app
+    run ./uninstall.sh
     assert_success
-    run kubectl delete ns iperf
+}
+
+
+
+@test "diagnostics -> webhooks -> cert-manager" {
+    DETIK_CLIENT_NAMESPACE="webhooks"
+    cd "./examples/diagnostics/${DETIK_CLIENT_NAMESPACE}"
+
+    # clean-up any previous environment
+    ./uninstall.sh || echo "No previous installation was found"
+
+    # deploy the app
+    run ./install.sh
+    assert_success
+
+    # Ensure that containers complete
+    try "at most 5 times every 30s to get pods named 'cert-manager' and verify that 'status' is 'running'"
+    try "at most 5 times every 30s to get pods named 'cert-manager-cainjector' and verify that 'status' is 'running'"
+    try "at most 5 times every 30s to get pods named 'cert-manager-webhook' and verify that 'status' is 'running'"
+
+    # The following causes fluctuations and is excluded.
+    # try "at most 5 times every 30s to get pods named 'cert-manager-startupapicheck' and verify that 'status' is 'running'"
+
+    # undeploy the app
+    run ./uninstall.sh
+    assert_success
+}
+
+
+@test "diagnostics -> users -> custom-users" {
+    DETIK_CLIENT_NAMESPACE="custom-users"
+    cd "./examples/diagnostics/${DETIK_CLIENT_NAMESPACE}"
+
+    # clean-up any previous environment
+    ./uninstall.sh || echo "No previous installation was found"
+
+    # deploy the app
+    run ./install.sh
+    assert_success
+
+    # Ensure that containers complete
+    try "at most 5 times every 30s to get pods named 'whoami-adduser' and verify that 'status' is 'succeeded'"
+    try "at most 5 times every 30s to get pods named 'whoami-default' and verify that 'status' is 'succeeded'"
+    try "at most 5 times every 30s to get pods named 'whoami-newuser' and verify that 'status' is 'succeeded'"
+    try "at most 5 times every 30s to get pods named 'whoami-nobody' and verify that 'status' is 'succeeded'"
+    try "at most 5 times every 30s to get pods named 'whoami-root' and verify that 'status' is 'succeeded'"
+
+    # Ensure that containers behave correctly
+    run kubectl logs -n ${DETIK_CLIENT_NAMESPACE} whoami-default
+    assert_output --partial "newuser"
+
+    run kubectl logs -n ${DETIK_CLIENT_NAMESPACE} whoami-newuser
+    assert_output --partial "newuser"
+
+    run kubectl logs -n ${DETIK_CLIENT_NAMESPACE} whoami-nobody
+    assert_output --partial "nobody"
+
+    run kubectl logs -n ${DETIK_CLIENT_NAMESPACE} whoami-root
+    assert_output --partial "root"
+
+    # undeploy the app
+    run ./uninstall.sh
+    assert_success
+}
+
+@test "diagnostics -> networking -> localhost" {
+    DETIK_CLIENT_NAMESPACE="networking-localhost"
+    cd "./examples/diagnostics/${DETIK_CLIENT_NAMESPACE}"
+
+    # clean-up any previous environment
+    ./uninstall.sh || echo "No previous installation was found"
+
+    # deploy the app
+    run ./install.sh
+    assert_success
+
+    echo "Ensure that the deployment becomes running"
+    verify "there is 1 pod named 'iperf.localhost'"
+
+    # Ensure that client completes
+    try "at most 10 times every 30s to get pods named 'iperf.localhost' and verify that 'status' is 'succeeded'"
+
+    # undeploy the app
+    run ./uninstall.sh
     assert_success
 }
 
 @test "diagnostics -> networking -> unprivileged-ports" {
-    run kubectl create ns iperf
+    DETIK_CLIENT_NAMESPACE="networking-unprivileged"
+    cd "./examples/diagnostics/${DETIK_CLIENT_NAMESPACE}"
+
+    # clean-up any previous environment
+    ./uninstall.sh || echo "No previous installation was found"
+
+    # deploy the app
+    run ./install.sh
     assert_success
 
-    DETIK_CLIENT_NAMESPACE="iperf"
+    echo "Ensure that the deployment becomes running"
+    verify "there is 1 service named 'server-service'"
+    verify "there is 1 pod named 'server'"
+    verify "there is 1 pod named 'client'"
 
-    run kubectl apply -f $TEST_DIR/diagnostics/networking/unprivileged-ports.yaml
-    assert_success
+    # Ensure that client completes
+    try "at most 5 times every 30s to get pods named 'client' and verify that 'status' is 'succeeded'"
+    try "at most 5 times every 5s to get pods named 'server' and verify that 'status' is 'running'"
 
-    sleep 3
-
-    run verify "there is 1 pod named 'unprivileged-server'"
-    assert_success
-    run verify "there is 1 pod named 'unprivileged-client'"
-    assert_success
-    run verify "there is 1 service named 'unprivileged-server-service'"
-    assert_success
-
-    sleep 30
-
-    run try "at most 10 times every 10s to find 1 pod named 'unprivileged-client' with 'status' being 'succeeded'"
-    assert_success
-    run verify "'status' is 'running' for pod named 'unprivileged-server'"
-    assert_success
-
-    run kubectl logs -n iperf unprivileged-server
-    assert_output --partial "Server listening"
-    run kubectl logs -n iperf unprivileged-client
-    assert_output --partial "Connecting to host"
-    assert_output --partial "iperf Done"
-
-    run kubectl delete -f $TEST_DIR/diagnostics/networking/unprivileged-ports.yaml
-    assert_success
-    run kubectl delete ns iperf
+    # undeploy the app
+    run ./uninstall.sh
     assert_success
 }
+
+@test "diagnostics -> networking -> privileged-ports" {
+    DETIK_CLIENT_NAMESPACE="networking-privileged"
+    cd "./examples/diagnostics/${DETIK_CLIENT_NAMESPACE}"
+
+    # clean-up any previous environment
+    ./uninstall.sh || echo "No previous installation was found"
+
+    # deploy the app
+    run ./install.sh
+    assert_success
+
+    echo "Ensure that the deployment becomes running"
+    verify "there is 1 service named 'server-service'"
+    verify "there is 1 pod named 'server'"
+    verify "there is 1 pod named 'client'"
+
+    # Ensure that client completes
+    try "at most 5 times every 30s to get pods named 'client' and verify that 'status' is 'succeeded'"
+    try "at most 5 times every 5s to get pods named 'server' and verify that 'status' is 'running'"
+
+    # undeploy the app
+    run ./uninstall.sh
+    assert_success
+}
+

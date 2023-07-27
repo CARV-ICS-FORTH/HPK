@@ -19,8 +19,7 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/carv-ics-forth/hpk/compute/slurm/job"
-	"github.com/carv-ics-forth/hpk/compute/slurm/stats"
+	"github.com/carv-ics-forth/hpk/compute/slurm"
 	"github.com/matishsiao/goInfo"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -54,13 +53,13 @@ func (v *VirtualK8S) NewVirtualNode(ctx context.Context, nodename string, taint 
 			DaemonEndpoints: v.NodeDaemonEndpoints(ctx),
 			Conditions:      NodeConditions(ctx),
 			Phase: func() corev1.NodePhase {
-				if job.ConnectionOK() {
+				if slurm.ConnectionOK() {
 					return corev1.NodeRunning
 				}
 				return corev1.NodePending
 			}(),
-			Capacity:    stats.TotalResources(),
-			Allocatable: stats.AllocatableResources(ctx),
+			Capacity:    slurm.TotalResources(),
+			Allocatable: slurm.AllocatableResources(ctx),
 		},
 	}
 }

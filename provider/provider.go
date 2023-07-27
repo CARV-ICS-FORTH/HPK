@@ -17,18 +17,24 @@ package provider
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
-	"github.com/carv-ics-forth/hpk/compute/slurm/job"
+	"github.com/carv-ics-forth/hpk/compute/events"
+	"github.com/carv-ics-forth/hpk/compute/paths"
+	"github.com/carv-ics-forth/hpk/compute/podhandler"
+	"github.com/carv-ics-forth/hpk/compute/runtime"
+	"github.com/carv-ics-forth/hpk/pkg/container"
 	"github.com/virtual-kubelet/virtual-kubelet/node/api/statsv1alpha1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 
 	"github.com/carv-ics-forth/hpk/compute"
-	"github.com/carv-ics-forth/hpk/compute/slurm"
 	"github.com/carv-ics-forth/hpk/pkg/filenotify"
 	"github.com/go-logr/logr"
 	"github.com/niemeyer/pretty"
@@ -64,7 +70,7 @@ type VirtualK8S struct {
 }
 
 // NewVirtualK8S reads a kubeconfig file and sets up a client to interact
-// with Slurm cluster.
+// with Slurm cluster. It is designed to restore missing state after a restart.
 func NewVirtualK8S(config InitConfig) (*VirtualK8S, error) {
 	var err error
 	var watcher filenotify.FileWatcher
@@ -81,28 +87,66 @@ func NewVirtualK8S(config InitConfig) (*VirtualK8S, error) {
 	}
 
 	/*---------------------------------------------------
-	 * Restore missing state after a restart
+	 * Initialize HPK Environment
 	 *---------------------------------------------------*/
-	// create the ~/.hpk directory, if it does not exist.
-	if err := os.MkdirAll(compute.RuntimeDir, compute.PodGlobalDirectoryPermissions); err != nil {
-		return nil, errors.Wrapf(err, "Failed to create RuntimeDir '%s'", compute.RuntimeDir)
+	if err := runtime.Initialize(); err != nil {
+		return nil, errors.Wrapf(err, "Failed to initiaze HPK paths '%s'", compute.HPK.String())
 	}
 
-	// create the ~/.hpk/image directory, if it does not exist.
-	if err := os.MkdirAll(compute.ImageDir, compute.PodGlobalDirectoryPermissions); err != nil {
-		return nil, errors.Wrapf(err, "Failed to create ImageDir '%s'", compute.ImageDir)
-	}
+	/*---------------------------------------------------
+	 * Handle Corrupted Pods (With missing state)
+	 *---------------------------------------------------*/
+	var corruptedPods []paths.PodPath
 
-	// restore fsnotify watchers for valid pods. Valid are considered the pods with a Pod description
-	if err := slurm.WalkPodDirectories(func(path compute.PodPath) error {
-		ok, info := compute.PodEnvironmentIsOK(path)
+	// move corrupted pods to a centralized dir for inspection.
+	// Valid are considered the pods with a Pod description.
+	if err := compute.HPK.WalkPodDirectories(func(podpath paths.PodPath) error {
+		ok, info := podpath.PodEnvironmentIsOK()
 		if !ok {
-			compute.DefaultLogger.Info("Omit pod", "path", path, "info", info)
+			corruptedPods = append(corruptedPods, podpath)
 
-			// continue with the next item
-			return nil
+			compute.DefaultLogger.Info("Corrupted Pod has been detected",
+				"reason", info,
+				"path", podpath,
+			)
 		}
 
+		return nil
+	}); err != nil {
+		return nil, errors.Wrapf(err, "pod scanning has failed")
+	}
+
+	for _, path := range corruptedPods {
+		archivedPodPath := strings.ReplaceAll(string(path), compute.HPK.String(), compute.HPK.CorruptedDir())
+
+		// ensure that path prefix exists.
+		archivedNamespacePath := filepath.Dir(archivedPodPath)
+
+		if err := os.MkdirAll(archivedNamespacePath, paths.PodGlobalDirectoryPermissions); err != nil {
+			return nil, errors.Wrapf(err, "basepath '%s' error", archivedNamespacePath)
+		}
+
+		// move corrupted pod to the archived namespace.
+	retry:
+		if err := os.Rename(string(path), archivedPodPath); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				// retry to rename the pod
+				archivedPodPath = fmt.Sprintf("%s-%d", archivedPodPath, time.Now().Second())
+				goto retry
+			}
+			return nil, errors.Wrapf(err, "moving error of corrupted pod")
+		}
+
+		logger.Info("Moved corrupted pod to archive",
+			"from", path,
+			"to", archivedPodPath,
+		)
+	}
+
+	/*---------------------------------------------------
+	 * Set fsnotify watchers for Pods
+	 *---------------------------------------------------*/
+	if err := compute.HPK.WalkPodDirectories(func(path paths.PodPath) error {
 		// register the watcher
 		return watcher.Add(path.String())
 	}); err != nil {
@@ -161,7 +205,7 @@ func (v *VirtualK8S) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	go func() {
 		// run each request on a different thread to avoid blocking
 		// if the pod has failed, notify the k8s.
-		slurm.CreatePod(ctx, pod, v.fileWatcher)
+		podhandler.CreatePod(ctx, pod, v.fileWatcher)
 
 		v.updatedPod(pod)
 	}()
@@ -192,7 +236,7 @@ func (v *VirtualK8S) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Ensure that received pod is newer than the local
 	 *---------------------------------------------------*/
-	localPod, err := slurm.LoadPodFromKey(podKey)
+	localPod, err := podhandler.LoadPodFromKey(podKey)
 	if err != nil {
 		return errdefs.NotFoundf("object not found")
 	}
@@ -220,7 +264,7 @@ func (v *VirtualK8S) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	}
 
 	/*-- Update the local status of Pod --*/
-	if err := slurm.SavePodToFile(ctx, pod); err != nil {
+	if err := podhandler.SavePodToFile(ctx, pod); err != nil {
 		compute.SystemPanic(err, "failed to set job id for pod '%s'", podKey)
 	}
 
@@ -239,7 +283,7 @@ func (v *VirtualK8S) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 	 *---------------------------------------------------*/
 	logger.Info("[K8s] -> DeletePod")
 
-	if !slurm.DeletePod(podKey, v.fileWatcher) {
+	if !podhandler.DeletePod(podKey, v.fileWatcher) {
 		logger.Info("[K8s] <- DeletePod (POD NOT FOUND)")
 
 		return errdefs.NotFoundf("object not found")
@@ -262,7 +306,7 @@ func (v *VirtualK8S) GetPod(ctx context.Context, namespace, name string) (*corev
 	 *---------------------------------------------------*/
 	logger.Info("[K8s] -> GetPod")
 
-	pod, err := slurm.LoadPodFromKey(podKey)
+	pod, err := podhandler.LoadPodFromKey(podKey)
 	if err != nil {
 		logger.Info("[K8s] <- GetPod (POD NOT FOUND)")
 
@@ -290,7 +334,7 @@ func (v *VirtualK8S) GetPodStatus(ctx context.Context, namespace, name string) (
 	 *---------------------------------------------------*/
 	logger.Info("[K8s] -> GetPodStatus")
 
-	pod, err := slurm.LoadPodFromKey(podKey)
+	pod, err := podhandler.LoadPodFromKey(podKey)
 	if err != nil {
 		logger.Info("[K8s] <- GetPodStatus (POD NOT FOUND)")
 
@@ -321,8 +365,7 @@ func (v *VirtualK8S) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
 	 *---------------------------------------------------*/
 	var pods []*corev1.Pod
 
-	if err := slurm.WalkPodDirectories(func(path compute.PodPath) error {
-
+	if err := compute.HPK.WalkPodDirectories(func(path paths.PodPath) error {
 		encodedPod, err := os.ReadFile(path.EncodedJSONPath())
 		if err != nil {
 			v.Logger.Info("Ignore Corrupted Pod Dir", "path", path, "error", err)
@@ -372,14 +415,14 @@ func (v *VirtualK8S) NotifyPods(ctx context.Context, f func(*corev1.Pod)) {
 	v.updatedPod = f
 
 	/*-- start event handler --*/
-	eh := job.NewEventHandler(job.Options{
+	eh := events.NewEventHandler(events.Options{
 		MaxWorkers:   5,
 		MaxQueueSize: 20,
 	})
 
-	go eh.Run(ctx, job.PodControl{
-		UpdateStatus: slurm.SyncPodStatus,
-		LoadFromDisk: slurm.LoadPodFromKey,
+	go eh.Listen(ctx, events.PodControl{
+		SyncPodStatus: podhandler.SyncPodStatus,
+		LoadFromDisk:  podhandler.LoadPodFromKey,
 		NotifyVirtualKubelet: func(pod *corev1.Pod) {
 			if pod == nil {
 				panic("this should not happen")
@@ -436,35 +479,114 @@ func (v *VirtualK8S) GetContainerLogs(ctx context.Context, namespace, podName, c
 	podKey := client.ObjectKey{Namespace: namespace, Name: podName}
 	logger := v.Logger.WithValues("obj", podKey)
 
-	/*---------------------------------------------------
-	 * Preamble used for Request tracing on the logs
-	 *---------------------------------------------------*/
 	logger.Info("[K8s] -> GetContainerLogs", "container", containerName)
+	defer logger.Info("[K8s] <- GetContainerLogs", "container", containerName)
 
-	podDir := compute.PodRuntimeDir(podKey)
+	logfilePath := compute.HPK.Pod(podKey).Container(containerName).LogsPath()
 
-	logfile := podDir.Container(containerName).LogsPath()
+	/*---------------------------------------------------
+	 * Log Streaming (With Follow)
+	 *---------------------------------------------------*/
+	if opts.Follow {
+		return io.NopCloser(strings.NewReader("Follow is not yet supported by HPK.\n")), nil
 
-	logger.Info("[K8s] <- GetContainerLogs", "container", containerName)
+		/*
+			seek := tail.SeekInfo{
+				Offset: 0,
+				Whence: 0,
+			}
 
-	// if it fails to open the container's logfile, then may be something with the pod.
-	// in this case, try return the pod stderr
-	containerLog, err := os.Open(logfile)
-	if err != nil {
-		logger.Info("Unable to find container's log. Fallback to pod's stderr")
+			// whence 0=origin, 2=end
+			if opts.Tail >= 0 {
+				seek.Whence = 2
+			}
 
-		podStderr, err := os.Open(podDir.StderrPath())
-		if err != nil {
-			logger.Info("Could not find container's or pod's logs")
+			tailConfig := tail.Config{
+				MustExist: true,
+				Poll:      true,
+				Follow:    opts.Follow,
+				Location:  &seek,
+				DefaultLogger:    tail.DefaultLogger,
+				ReOpen:    opts.Follow,
+			}
 
-			// return an empty response instead of an error
-			return io.NopCloser(bytes.NewReader([]byte{})), nil
-		}
+			// tail the file and stream it to a pipe (that ends to a network socket).
+			t, err := tail.TailFile(logfilePath, tailConfig)
+			if err != nil {
+				return nil, errors.Wrapf(err, "unable to stream log file")
+			}
 
-		return podStderr, nil
+			pr, pw := io.Pipe()
+
+			go func() {
+				defer pw.Close()
+
+				var line *tail.Line
+				var ok bool
+
+				for {
+					select {
+					case <-ctx.Done():
+						// the consumer has cancelled
+						t.Kill(errors.New("hangup by client"))
+						return
+					case line, ok = <-t.Lines:
+						if !ok {
+							// channel was closed
+							return
+						}
+					}
+
+					n, err := pw.Write([]byte(line.Text))
+					if err != nil {
+						panic("this should never happen:" + err.Error())
+					}
+
+					// Unfortunately this pience of code does not seem to work
+					// because virtual kubelet does not support streaming.
+					// Nonethess, it stays here for further investigation.
+				}
+			}()
+
+			return io.NopCloser(pr), nil
+		*/
 	}
 
-	return containerLog, nil
+	/*---------------------------------------------------
+	 * Log Batch (Without Follow)
+	 *---------------------------------------------------*/
+	if opts.Tail == 0 {
+		// return everything
+		logs, err := os.Open(logfilePath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				// return an empty response instead of an error
+				return io.NopCloser(bytes.NewReader([]byte{})), nil
+			}
+
+			return nil, errors.Wrapf(err, "unable to batch logs")
+		}
+
+		return logs, nil
+	}
+
+	if opts.Tail > 0 {
+		logs, err := container.GetTailLog(logfilePath, opts.Tail)
+		if err != nil {
+			return nil, errors.Wrapf(err, "unable to batch logs")
+		}
+
+		results := bytes.NewBuffer(nil)
+
+		for _, nll := range logs {
+			results.WriteString(nll + "\n")
+		}
+
+		return io.NopCloser(bytes.NewReader(results.Bytes())), nil
+	}
+
+	// return an empty response instead of an error
+	return io.NopCloser(bytes.NewReader([]byte{})), nil
 }
 
 // RunInContainer executes a command in a container in the pod, copying data

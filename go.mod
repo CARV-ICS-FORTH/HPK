@@ -4,6 +4,7 @@ go 1.18
 
 require (
 	github.com/Masterminds/sprig v2.22.0+incompatible
+	github.com/alessio/shellescape v1.4.2
 	github.com/dimiro1/banner v1.1.0
 	github.com/frankban/quicktest v1.14.4
 	github.com/fsnotify/fsnotify v1.6.0

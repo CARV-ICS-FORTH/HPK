@@ -1,0 +1,73 @@
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: entire-volume
+spec:
+  volumes:
+    - name: local-dir
+      hostPath:
+        path: /tmp/sea # created by install.sh
+  containers:
+    - name: main
+      image: busybox
+      volumeMounts:
+        - name: local-dir
+          mountPath: /sea
+      command:
+        - sh
+        - -c
+        - |
+          echo "-- Pirate --"
+          cat /sea/pirate
+          
+          echo "-- Privateer --"
+          cat /sea/privateer
+
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: subpath
+spec:
+  volumes:
+    - name: local-dir
+      hostPath:
+        path: /tmp/sea # created by install.sh
+  containers:
+    - name: main
+      image: busybox
+      volumeMounts:
+        - name: local-dir
+          subPath: pirate
+          mountPath: /pirate
+      command:
+        - sh
+        - -c
+        - |
+          echo "-- Pirate --"
+          cat /pirate
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: wrongpath
+spec:
+  volumes:
+    - name: local-dir
+      hostPath:
+        path: /I_am_a_random_path # created by install.sh
+  containers:
+    - name: main
+      image: busybox
+      volumeMounts:
+        - name: local-dir
+          subPath: pirate
+          mountPath: /pirate
+      command:
+        - sh
+        - -c
+        - |
+          echo "-- Pirate --"
+          cat /pirate

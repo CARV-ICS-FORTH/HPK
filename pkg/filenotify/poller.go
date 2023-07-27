@@ -15,6 +15,7 @@ import (
 var (
 	// errPollerClosed is returned when the poller is closed
 	errPollerClosed = errors.New("poller is closed")
+	ErrWatchExists  = errors.New("watch exists")
 )
 
 // filePoller is used to poll files for changes, especially in cases where fsnotify
@@ -59,7 +60,7 @@ func (w *filePoller) Add(name string) error {
 		w.watches = make(map[string]struct{})
 	}
 	if _, exists := w.watches[name]; exists {
-		return fmt.Errorf("watch exists")
+		return ErrWatchExists
 	}
 	w.watches[name] = struct{}{}
 
