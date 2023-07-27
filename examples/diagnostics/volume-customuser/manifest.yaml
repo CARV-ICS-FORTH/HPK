@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: volume-user
+spec:
+  containers:
+    - name: reviews
+      image: docker.io/istio/examples-bookinfo-reviews-v2:1.16.2
+      env:
+        - name: LOG_DIR
+          value: "/tmp/logs"
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: wlp-output
+          mountPath: /opt/ibm/wlp/output
+      securityContext:
+        runAsUser: 1000
+  volumes:
+    - name: wlp-output
+      emptyDir: {}
+    - name: tmp
+      emptyDir: {}
