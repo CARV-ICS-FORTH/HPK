@@ -139,9 +139,6 @@ function cleanup() {
 	echo "[Virtual] Ensure all background jobs are terminated".
 	wait
 
-	echo "[Volume] Remapping volume ownership to the host user (fakeroot)".
-	chown -R root:root {{.VirtualEnv.PodDirectory}} || echo "failed to reclaim ownership"
-
 	if [[ $exitCode -eq 0 ]]; then
 		echo "[Virtual] Gracefully exit the Virtual Environment. All resources will be released."
 	else
@@ -151,20 +148,7 @@ function cleanup() {
 	exit ${exitCode}
 }
 
-function killall() {
-	trap '' INT TERM   # ignore signals while shutting down
-	echo "**** Shutting down... ****"     # added double quotes
-
-	kill $(jobs -p)         # fixed order, send TERM not INT
-	wait
-	echo DONE
-}
-
-
 function handle_init_containers() {
-	echo "[Virtual] Setting Cleanup Handler ..."
-	trap 'cleanup "${BASH_COMMAND}" "$?"'  EXIT
-
 {{range $index, $container := .InitContainers}}
 	echo "[Virtual] Spawning InitContainer: {{$container.InstanceName}}"
 	 
@@ -175,9 +159,13 @@ function handle_init_containers() {
 	# Mark the beginning of an init job (all get the shell's pid).  
 	echo pid://$$ > {{$container.JobIDPath}}
 
+	# --userns is need to maintain the user's permissions.
 	$(apptainer {{ $container.ExecutionMode }} --cleanenv --pid --compat --no-mount home --unsquash \
 	{{- if $container.RunAsUser}}
-	--security uid:{{$container.RunAsUser}},gid:{{$container.RunAsGroup}} \
+	--security uid:{{$container.RunAsUser}},gid:{{$container.RunAsUser}} --userns \
+	{{- end}}
+	{{- if $container.RunAsGroup}}
+	--security gid:{{$container.RunAsGroup}} --userns \
 	{{- end}}
 	--bind /scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts,{{join "," $container.Binds}} \
 	{{- if $container.EnvFilePath}}
@@ -201,19 +189,19 @@ function handle_init_containers() {
 }
 
 function handle_containers() {
-	echo "[Virtual] Setting Cleanup Handler ..."
-	#trap 'cleanup "${BASH_COMMAND}" "$?"'  EXIT
-
 {{range $index, $container := .Containers}}
 	{{- if $container.EnvFilePath}}
 	sh -c {{$container.EnvFilePath}} > /scratch/{{$container.InstanceName}}.env
 	{{- end}}
 
-	# --no-home --compat --keep-privs --user-ns
 	# Internal fakeroot is needed for appropriate permissions within the container
+	# --userns is need to maintain the user's permissions.
 	$(apptainer {{ $container.ExecutionMode }} --cleanenv --pid --compat --no-mount home --unsquash \
 	{{- if $container.RunAsUser}}
-	--security uid:{{$container.RunAsUser}},gid:{{$container.RunAsGroup}} \
+	--security uid:{{$container.RunAsUser}},gid:{{$container.RunAsUser}} --userns \
+	{{- end}}
+	{{- if $container.RunAsGroup}}
+	--security gid:{{$container.RunAsGroup}} --userns \
 	{{- end}}
 	--bind /scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts,{{join "," $container.Binds}} \
 	{{- if $container.EnvFilePath}}
@@ -253,8 +241,11 @@ echo $(hostname -I) > {{.VirtualEnv.IPAddressPath}}
 echo "[Virtual] Setting DNS ..."
 handle_dns
 
-#echo "[Virtual] Setting Signal Handler ..."
-#trap killall INT TERM
+echo "[Virtual] Setting Volume Ownership ..."
+chown -R 666:666 {{.VirtualEnv.PodDirectory}}/.virtualenv/volumes
+
+echo "[Virtual] Setting Cleanup Handler ..."
+trap 'cleanup "${BASH_COMMAND}" "$?"'  EXIT
 
 {{if gt (len .InitContainers) 0 }} handle_init_containers {{end}}
 
@@ -296,7 +287,8 @@ PAUSE_EOF
 # 	Stuff to run outside the virtual environment
 
 # exit when any command fails
-set -um pipeline
+#set -um pipeline
+set -u
 
 echo "[Host] Starting the Constructor for the Virtual Environment ..."
 chmod +x  {{.VirtualEnv.ConstructorFilePath}}
@@ -306,9 +298,9 @@ exec {{$.HostEnv.ApptainerBin}} exec  --net --fakeroot --scratch /scratch \
 {{- if .HostEnv.EnableCgroupV2}}
 --apply-cgroups {{.VirtualEnv.CgroupFilePath}} 		\
 {{- end}}
---env PARENT=${PPID}								 \
---bind $HOME,/run					 				\
---hostname {{.Pod.Name}}							 \
+--env PARENT=${PPID}								\
+--bind $HOME										\
+--hostname {{.Pod.Name}}							\
 {{$.PauseImageFilePath}} sh -ci {{.VirtualEnv.ConstructorFilePath}} ||
 echo "[HOST] **SYSTEMERROR** apptainer exited with code $?" | tee {{.VirtualEnv.SysErrorFilePath}}
 

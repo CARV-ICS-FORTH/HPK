@@ -32,6 +32,10 @@ var SignalChildren = "--full"
 // https://slurm.schedmd.com/scancel.html#OPT_batch
 var SignalParentOnly = "--batch"
 
+var ErrRety = errors.New("retry later")
+
+var ErrInvalidJob = errors.New("invalid job id")
+
 func CancelJob(args string) (string, error) {
 	/*
 	 Install trap for the signals INT and TERM to
@@ -39,11 +43,17 @@ func CancelJob(args string) (string, error) {
 	 Send SIGTERM using kill to the internal script's
 	 process and wait for it to close gracefully.
 	*/
-	out, err := process.Execute(Slurm.CancelCmd, Signal, SignalChildren, args)
+	out, err := process.Execute(Slurm.CancelCmd /*Signal, SignalChildren,*/, args)
 	if err != nil {
+		outStr := string(out)
+
 		// in this case, the job does not exist, so for what it matters it is terminated.
-		if strings.Contains(string(out), "Invalid job id specified") {
-			return "", nil
+		if strings.Contains(outStr, "Invalid job id specified") {
+			return outStr, ErrInvalidJob
+		}
+
+		if strings.Contains(outStr, "Job can not be altered now, try again later") {
+			return outStr, ErrRety
 		}
 
 		return string(out), errors.Wrap(err, "Could not run scancel")

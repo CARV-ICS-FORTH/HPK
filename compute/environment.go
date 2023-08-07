@@ -29,7 +29,7 @@ type HostEnvironment struct {
 
 	EnableCgroupV2 bool
 
-	HPKDir string
+	WorkingDirectory string
 
 	// KubeDNS points to the internal DNS of a Kubernetes cluster.
 	KubeDNS string

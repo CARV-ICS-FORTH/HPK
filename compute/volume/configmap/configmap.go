@@ -70,13 +70,7 @@ func (b *VolumeMounter) SetUpAt(ctx context.Context, dir string) error {
 		}
 	}
 
-	totalBytes := totalBytes(&configMap)
-
-	b.Logger.Info("Received configMap",
-		"configMap", source.Name,
-		"data", len(configMap.Data)+len(configMap.BinaryData),
-		"total", totalBytes,
-	)
+	// totalBytes := totalBytes(&configMap)
 
 	/*---------------------------------------------------
 	 * Mount Resource to the host

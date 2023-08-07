@@ -195,28 +195,32 @@ func SyncContainerStatuses(pod *corev1.Pod) {
 	 * Generic Handler for ContainerStatus
 	 *---------------------------------------------------*/
 	handleStatus := func(containerStatus *corev1.ContainerStatus) {
-		if containerStatus.RestartCount > 0 {
-			panic("Restart is not yet supported")
-		}
-
 		/*-- Presence of Exit Code indicates Terminated  State--*/
 		exitCodePath := podDir.Container(containerStatus.Name).ExitCodePath()
 		exitCode, exitCodeExists := readIntFromFile(exitCodePath)
 
 		if exitCodeExists {
+			// prepare some messages
+			var reason, message string
+			var restartCount int32
+
+			if exitCode == 0 {
+				reason = "Success"
+				message = "Container successfully terminated"
+			} else {
+				reason = "Error(" + containerStatus.Name + ")"
+				message = HumanReadableCode(exitCode)
+				restartCount = containerStatus.RestartCount + 1
+			}
+
+			// set current status to terminate.
 			containerStatus.State.Waiting = nil
 			containerStatus.State.Running = nil
 			containerStatus.State.Terminated = &corev1.ContainerStateTerminated{
 				ExitCode: int32(exitCode),
 				Signal:   0,
-				Reason: func() string {
-					if exitCode == 0 {
-						return "Success"
-					} else {
-						return "Error(" + containerStatus.Name + ")"
-					}
-				}(),
-				Message: HumanReadableCode(exitCode),
+				Reason:   reason,
+				Message:  message,
 				StartedAt: func() metav1.Time {
 					if containerStatus.State.Running != nil {
 						return containerStatus.State.Running.StartedAt
@@ -228,7 +232,11 @@ func SyncContainerStatuses(pod *corev1.Pod) {
 				ContainerID: containerStatus.ContainerID,
 			}
 
+			// update the last status.
 			containerStatus.LastTerminationState = containerStatus.State
+
+			// increase the restart counter.
+			containerStatus.RestartCount = restartCount
 
 			return
 		}

@@ -1,4 +1,4 @@
-package image_test
+package podhandler_test
 
 import (
 	"os"

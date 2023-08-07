@@ -1,0 +1,139 @@
+############################
+# Volume with SSH keys
+############################
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ssh-config
+data:
+  sshd_config: |
+    PidFile /home/mpiuser/sshd.pid
+    HostKey /home/mpiuser/.ssh/id_rsa
+    StrictModes no
+    Port 2222
+  id_rsa: |
+    -----BEGIN EC PRIVATE KEY-----
+    MIHcAgEBBEIAmzcWt1r1eqapBzFSvmyo4CkwlTfoDdj2EJB8kBNm4xoNfc7XNIa+
+    DvzgMAcCFmnMa87b3tvCPManAI+F6Ly9r7KgBwYFK4EEACOhgYkDgYYABAAsy5YZ
+    uCEstHwZXepXcZ0II0bbeJp/N1qUPjTF7h79/ca31qtAzDolgpJjaFCFtuX3cCQt
+    O9I4zHcGmPoapZ3VjAHi8LMP8MmyROwLcZCLpcS2pjlnRfytmFWipmqD8O0zl2NQ
+    C7LyWNexA+Z2n+QfUkzQ8ufyohPPzC7PmbXKR0EqhQ==
+    -----END EC PRIVATE KEY-----
+  id_rsa.pub: |
+    ecdsa-sha2-nistp521 AAAAE2VjZHNhLXNoYTItbmlzdHA1MjEAAAAIbmlzdHA1MjEAAACFBAAsy5YZuCEstHwZXepXcZ0II0bbeJp/N1qUPjTF7h79/ca31qtAzDolgpJjaFCFtuX3cCQtO9I4zHcGmPoapZ3VjAHi8LMP8MmyROwLcZCLpcS2pjlnRfytmFWipmqD8O0zl2NQC7LyWNexA+Z2n+QfUkzQ8ufyohPPzC7PmbXKR0EqhQ==
+  authorized_keys: |
+    ecdsa-sha2-nistp521 AAAAE2VjZHNhLXNoYTItbmlzdHA1MjEAAAAIbmlzdHA1MjEAAACFBAAsy5YZuCEstHwZXepXcZ0II0bbeJp/N1qUPjTF7h79/ca31qtAzDolgpJjaFCFtuX3cCQtO9I4zHcGmPoapZ3VjAHi8LMP8MmyROwLcZCLpcS2pjlnRfytmFWipmqD8O0zl2NQC7LyWNexA+Z2n+QfUkzQ8ufyohPPzC7PmbXKR0EqhQ==
+
+---
+############################
+# Worker Services
+############################
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: workers-1
+spec:
+  ports:
+    - port: 2222
+      name: ssh
+  selector:
+    app: workers-1
+---
+############################
+# Worker Pods
+############################
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: workers-1
+  labels:
+    app: workers-1
+spec:
+  volumes:
+    # declare ssh volume
+    - name: ssh-volume
+      configMap:
+        name: ssh-config
+  containers:
+    - image: icsforth/pi # mpioperator/mpi-pi:openmpi
+      name: main
+      volumeMounts:
+        # ss authentication path
+        - name: ssh-volume
+          subPath: sshd_config
+          mountPath: /home/mpiuser/.sshd_config
+        - name: ssh-volume
+          mountPath: /home/mpiuser/.ssh
+      securityContext:
+        runAsUser: 1000
+      command:
+        - /bin/sh
+        - -c
+        - |
+          set -eux
+          usermod -p '*' mpiuser
+          /usr/sbin/sshd -De -f  /home/mpiuser/.sshd_config
+
+---
+############################
+# Launcher
+############################
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: launcher
+spec:
+  # Prepare volumes for ssh keys and hostfile (mpi server)
+  volumes:
+    # declare ssh volume
+    - name: ssh-volume
+      configMap:
+        name: ssh-config
+    # declare mpi volume
+    - name: mpi-volume
+      emptyDir: {}
+   # Populate the hostfile with workers.
+  initContainers:
+    - name: discover-workers
+      image: busybox
+      volumeMounts:
+        - name: mpi-volume
+          mountPath: /etc/mpi/
+      command:
+        - /bin/sh
+        - -c
+        - |
+          set -eux
+          
+          export numOfWorkers=1
+          
+          for i in $( seq 1 $numOfWorkers); do
+            echo "workers-${i}.openmpi.default.svc slots=1" > /etc/mpi/hostfile
+            echo "Added worker $i"
+          done
+
+  # Dispatch job to workers
+  containers:
+    - name: main
+      image: icsforth/pi #mpioperator/mpi-pi:openmpi
+      volumeMounts:
+        # ssh
+        - name: ssh-volume
+          mountPath: /home/mpiuser/.ssh
+        # mpi / hostfile
+        - name: mpi-volume
+          mountPath: /etc/mpi
+      securityContext:
+        runAsUser: 1000
+      command:
+        - /bin/sh
+        - -c
+        - |
+          set -eux
+          
+          export numOfWorkers=1
+          mpirun -n ${numOfWorkers} --hostfile /etc/mpi/hostfile /home/mpiuser/pi

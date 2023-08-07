@@ -1,0 +1,44 @@
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: volume-initializer
+spec:
+  # Create temporary volume
+  volumes:
+    - name: mpi-volume
+      emptyDir: {}
+  # Write the volume as the default user.
+  initContainers:
+    - name: populate-workers
+      image: busybox
+      volumeMounts:
+        - name: mpi-volume
+          mountPath: /etc/mpi/
+      command:
+        - /bin/sh
+        - -c
+        - |
+          set -eux
+          
+          export numOfWorkers=5
+          for i in $( seq 1 $numOfWorkers); do
+            echo "workers-${i}.my-namespace.default.svc slots=1" >> /etc/mpi/hostfile
+            echo "Added worker $i"
+          done
+  # Read the volume as a different user
+  containers:
+    - image: icsforth/opengadget3:boxes_32
+      name: main
+      volumeMounts:
+        - name: mpi-volume
+          mountPath: /etc/mpi
+      securityContext:
+        runAsUser: 1000
+      command:
+        - /bin/bash
+        - -c
+        - |
+          set -eux
+          
+          cat /etc/mpi/hostfile

@@ -84,7 +84,7 @@ func installFlags(flags *pflag.FlagSet, c *Opts) {
 
 	flags.StringVar(&c.DefaultHostEnvironment.ApptainerBin, "apptainer", "apptainer", "path to Apptainer bin")
 	flags.StringVar(&c.DefaultHostEnvironment.ContainerRegistry, "registry", "docker://", "container registry")
-	flags.StringVar(&c.DefaultHostEnvironment.HPKDir, "rootdir", GetUserHomeDir(), "the path for hpk to run")
+	flags.StringVar(&c.DefaultHostEnvironment.WorkingDirectory, "working-dir", GetUserHomeDir(), "sets up the HPK's working directory")
 
 	flags.BoolVar(&c.DefaultHostEnvironment.EnableCgroupV2, "enable-cgroupv2", false, "Enable support for cgroupv2.")
 	flags.DurationVar(&c.FSPollingInterval, "poll", 5*time.Second, "if greater than 0, it will use a poll based approach to watch for file system changes")

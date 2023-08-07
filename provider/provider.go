@@ -28,7 +28,9 @@ import (
 	"github.com/carv-ics-forth/hpk/compute/paths"
 	"github.com/carv-ics-forth/hpk/compute/podhandler"
 	"github.com/carv-ics-forth/hpk/compute/runtime"
+	"github.com/carv-ics-forth/hpk/compute/slurm"
 	"github.com/carv-ics-forth/hpk/pkg/container"
+	"github.com/sirupsen/logrus"
 	"github.com/virtual-kubelet/virtual-kubelet/node/api/statsv1alpha1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -178,9 +180,6 @@ func (v *VirtualK8S) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	podKey := client.ObjectKeyFromObject(pod)
 	logger := v.Logger.WithValues("obj", podKey)
 
-	/*---------------------------------------------------
-	 * Preamble used for Request tracing on the logs
-	 *---------------------------------------------------*/
 	logger.Info("[K8s] -> CreatePod")
 
 	defer func() {
@@ -190,7 +189,6 @@ func (v *VirtualK8S) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Compromise with Virtual Kubernetes Conventions
 	 *---------------------------------------------------*/
-
 	/*
 		Match the IPs between host and pod.
 		This is needed so that node-level logging requests
@@ -200,11 +198,11 @@ func (v *VirtualK8S) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	pod.Status.HostIP = v.InitConfig.InternalIP
 
 	/*---------------------------------------------------
-	 * Asynchronously execute the Pod creation request
+	 * Create the pod Asynchronously.
 	 *---------------------------------------------------*/
 	go func() {
-		// run each request on a different thread to avoid blocking
-		// if the pod has failed, notify the k8s.
+		// acknowledge the creation request and do the creation in the background.
+		// if the creation fails, the pod should be marked as failed and returned to the provider.
 		podhandler.CreatePod(ctx, pod, v.fileWatcher)
 
 		v.updatedPod(pod)
@@ -223,9 +221,6 @@ func (v *VirtualK8S) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	podKey := client.ObjectKeyFromObject(pod)
 	logger := v.Logger.WithValues("obj", podKey)
 
-	/*---------------------------------------------------
-	 * Preamble used for Request tracing on the logs
-	 *---------------------------------------------------*/
 	logger.Info("[K8s] -> UpdatePod",
 		"version", pod.GetResourceVersion(),
 		"phase", pod.Status.Phase,
@@ -242,17 +237,24 @@ func (v *VirtualK8S) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	}
 
 	if localPod.ResourceVersion >= pod.ResourceVersion {
-		/*-- The received pod is old, so we can safely discard it --*/
+		// The received pod is old, so we can safely discard it
 		logger.Info("Discard update since its ResourceVersion is older than the local")
 
+		return nil
+	}
+
+	if !slurm.HasJobID(pod) {
+		// If the pod has not a received a job id, it means that it still being in the Slurm queue.
+		logger.Info("Discard update because job is still in the queue")
 		return nil
 	}
 
 	/*---------------------------------------------------
 	 * Identify any intermediate actions that must taken
 	 *---------------------------------------------------*/
-	if metaDiff := pretty.Diff(localPod.ObjectMeta, pod.ObjectMeta); len(metaDiff) > 0 {
+	if metaDiff := pretty.Diff(localPod.ObjectMeta.Annotations, pod.ObjectMeta.Annotations); len(metaDiff) > 0 {
 		/* ... */
+		logrus.Warn("DIFFERENCES ", metaDiff)
 	}
 
 	if specDiff := pretty.Diff(localPod.Spec, pod.Spec); len(specDiff) > 0 {
@@ -278,9 +280,6 @@ func (v *VirtualK8S) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 	podKey := client.ObjectKeyFromObject(pod)
 	logger := v.Logger.WithValues("obj", podKey)
 
-	/*---------------------------------------------------
-	 * Preamble used for Request tracing on the logs
-	 *---------------------------------------------------*/
 	logger.Info("[K8s] -> DeletePod")
 
 	if !podhandler.DeletePod(podKey, v.fileWatcher) {
@@ -301,9 +300,6 @@ func (v *VirtualK8S) GetPod(ctx context.Context, namespace, name string) (*corev
 	podKey := client.ObjectKey{Namespace: namespace, Name: name}
 	logger := v.Logger.WithValues("obj", podKey)
 
-	/*---------------------------------------------------
-	 * Preamble used for Request tracing on the logs
-	 *---------------------------------------------------*/
 	logger.Info("[K8s] -> GetPod")
 
 	pod, err := podhandler.LoadPodFromKey(podKey)
@@ -327,11 +323,8 @@ func (v *VirtualK8S) GetPod(ctx context.Context, namespace, name string) (*corev
 // to return a version after DeepCopy.
 func (v *VirtualK8S) GetPodStatus(ctx context.Context, namespace, name string) (*corev1.PodStatus, error) {
 	podKey := client.ObjectKey{Namespace: namespace, Name: name}
-	logger := v.Logger.WithValues("obj", podKey)
+	logger := v.Logger.WithValues("obj", podKey, "job")
 
-	/*---------------------------------------------------
-	 * Preamble used for Request tracing on the logs
-	 *---------------------------------------------------*/
 	logger.Info("[K8s] -> GetPodStatus")
 
 	pod, err := podhandler.LoadPodFromKey(podKey)
@@ -354,9 +347,6 @@ func (v *VirtualK8S) GetPodStatus(ctx context.Context, namespace, name string) (
 // concurrently outside the calling goroutine. Therefore, it is recommended
 // to return a version after DeepCopy.
 func (v *VirtualK8S) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
-	/*---------------------------------------------------
-	 * Preamble used for Request tracing on the logs
-	 *---------------------------------------------------*/
 	v.Logger.Info("[K8s] -> GetPods")
 	defer v.Logger.Info("[K8s] <- GetPods")
 
@@ -403,9 +393,6 @@ func (v *VirtualK8S) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
 // NotifyPods must not block the caller since it is only used to register the callback.
 // The callback passed into `NotifyPods` may block when called.
 func (v *VirtualK8S) NotifyPods(ctx context.Context, f func(*corev1.Pod)) {
-	/*---------------------------------------------------
-	 * Preamble used for Request tracing on the logs
-	 *---------------------------------------------------*/
 	v.Logger.Info("[K8s] -> NotifyPods")
 	defer v.Logger.Info("[K8s] <- NotifyPods")
 
@@ -443,12 +430,15 @@ func (v *VirtualK8S) NotifyPods(ctx context.Context, f func(*corev1.Pod)) {
 			select {
 			case event, ok := <-v.fileWatcher.Events():
 				if !ok {
+					v.Logger.Info("Failed to push event")
 					return
 				}
 				eh.Push(event)
 
 			case err, ok := <-v.fileWatcher.Errors():
 				if !ok {
+					v.Logger.Info("Failed to push error event")
+
 					return
 				}
 
@@ -465,9 +455,6 @@ func (v *VirtualK8S) NotifyPods(ctx context.Context, f func(*corev1.Pod)) {
 ************************************************************/
 
 func (v *VirtualK8S) GetStatsSummary(context.Context) (*statsv1alpha1.Summary, error) {
-	/*---------------------------------------------------
-	 * Preamble used for Request tracing on the logs
-	 *---------------------------------------------------*/
 	v.Logger.Info("[K8s] -> GetStatsSummary")
 	defer v.Logger.Info("[K8s] <- GetStatsSummary")
 

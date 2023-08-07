@@ -15,7 +15,7 @@ var (
 )
 
 func Initialize() error {
-	compute.HPK = paths.HPK(compute.Environment.HPKDir)
+	compute.HPK = paths.HPK(compute.Environment.WorkingDirectory)
 
 	// create the ~/.hpk directory, if it does not exist.
 	if err := os.MkdirAll(compute.HPK.String(), paths.PodGlobalDirectoryPermissions); err != nil {
@@ -40,7 +40,7 @@ func Initialize() error {
 	DefaultPauseImage = img
 
 	compute.DefaultLogger.Info("Runtime info",
-		"HPKDir", compute.HPK.String(),
+		"WorkingDirectory", compute.HPK.String(),
 		"PauseImagePath", DefaultPauseImage,
 	)
 
