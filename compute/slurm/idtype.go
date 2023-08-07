@@ -21,12 +21,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-/************************************************************
-
-		Known Job Types
-
-************************************************************/
-
 type JobIDType string
 
 const (
@@ -36,7 +30,7 @@ const (
 
 	JobIDTypeSlurm JobIDType = "slurm://"
 
-	JobIDTypeEmpty JobIDType = ""
+	JobIDTypeEmpty JobIDType = "Empty"
 )
 
 func SetPodID(pod *corev1.Pod, idType JobIDType, value string) {
@@ -45,31 +39,48 @@ func SetPodID(pod *corev1.Pod, idType JobIDType, value string) {
 
 func SetContainerStatusID(status *corev1.ContainerStatus, typedValue string) {
 	// ensure that the value follows an expected format.
-	_, _ = parseIDType(typedValue)
+	_ = parseIDType(typedValue)
 
 	status.ContainerID = typedValue
 }
 
-func ParsePodID(pod *corev1.Pod) (idType JobIDType, value string) {
+func HasJobID(pod *corev1.Pod) bool {
+	_, exists := pod.GetAnnotations()["pod.hpk/id"]
+
+	return exists
+}
+
+func GetJobID(pod *corev1.Pod) string {
 	raw, exists := pod.GetAnnotations()["pod.hpk/id"]
 
 	if !exists {
-		return JobIDTypeEmpty, ""
+		panic("this should not happen")
 	}
 
 	return parseIDType(raw)
 }
 
-func parseIDType(raw string) (idType JobIDType, value string) {
-	/*-- Extract id from raw format '<type>://<job_id>'. --*/
+func parseIDType(raw string) string {
+	if strings.HasPrefix(raw, string(JobIDTypeSlurm)) {
+		return strings.Split(raw, string(JobIDTypeSlurm))[1]
+	}
+
+	if strings.HasPrefix(raw, string(JobIDTypeProcess)) {
+		return strings.Split(raw, string(JobIDTypeProcess))[1]
+	}
+
+	panic("unknown id format: " + raw)
+
+	/*-- Extract id from raw format '<type>://<job_id>'.
 	switch {
-	case strings.HasPrefix(raw, string(JobIDTypeSlurm)):
-		return JobIDTypeSlurm, strings.Split(raw, string(JobIDTypeSlurm))[1]
+
 	case strings.HasPrefix(raw, string(JobIDTypeInstance)):
 		return JobIDTypeInstance, strings.Split(raw, string(JobIDTypeInstance))[1]
 	case strings.HasPrefix(raw, string(JobIDTypeProcess)):
 		return JobIDTypeProcess, strings.Split(raw, string(JobIDTypeProcess))[1]
 	default:
-		panic("unknown id format: " + raw)
+
 	}
+
+	*/
 }

@@ -57,6 +57,24 @@ setup() {
     assert_success
 }
 
+@test "diagnostics -> volumes -> init" {
+    DETIK_CLIENT_NAMESPACE="volume-init"
+    cd "./examples/diagnostics/${DETIK_CLIENT_NAMESPACE}"
+
+    # clean-up any previous environment
+    ./uninstall.sh || echo "No previous installation was found"
+
+    # deploy the app
+    run ./install.sh
+    assert_success
+
+    # Ensure that containers complete
+    try "at most 5 times every 30s to get pods named 'volume-initializer' and verify that 'status' is 'succeeded'"
+
+    # undeploy the app
+    run ./uninstall.sh
+    assert_success
+}
 
 
 @test "diagnostics -> webhooks -> cert-manager" {
@@ -135,7 +153,7 @@ setup() {
     verify "there is 1 pod named 'iperf.localhost'"
 
     # Ensure that client completes
-    try "at most 10 times every 30s to get pods named 'iperf.localhost' and verify that 'status' is 'succeeded'"
+    try "at most 10 times every 30s to get pods named 'iperf.localhost' and verify that 'status' is 'Running'"
 
     # undeploy the app
     run ./uninstall.sh

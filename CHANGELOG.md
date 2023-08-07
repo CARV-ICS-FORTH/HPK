@@ -10,7 +10,7 @@
 - ...
 
 ### New Features & Functionality
-- Added several examples
+- Added several examples with respective tests.
 - New corrupted pods to a central location for inspection
 - ...
 
@@ -19,5 +19,6 @@
 - Fixed issues with non-existing HostPath
 - Fix exiting of sbatch script when there is an issue with the constructor script.
 - Fix issue with quotas inside the sbatch script.
+- Work on how objects are being deleted (Slurm jobs, strange permissions on volumes, ...)
 
 ## 0.1.0 \[2023-05-13\]

@@ -127,7 +127,6 @@ func (h *EventHandler) Listen(ctx context.Context, control PodControl) {
 						continue
 					}
 
-					compute.DefaultLogger.Info("New event", "details", event)
 					/*---------------------------------------------------
 					 * Declare events that warrant Pod reconciliation
 					 *---------------------------------------------------*/
@@ -172,11 +171,13 @@ func (h *EventHandler) Listen(ctx context.Context, control PodControl) {
 						logger.Info("[Slurm] -> Container Exited", "op", event.Op, "file", file)
 
 					default:
-						/*-- Any other file gnored --*/
-						// logger.Info("Ignore fsnotify event", "op", event.Op, "file", file)
+						/*-- Any other file is ignored --*/
+						compute.DefaultLogger.Info("Ignore event", "details", event)
 
 						continue
 					}
+
+					compute.DefaultLogger.Info("New event", "details", event)
 
 					/*---------------------------------------------------
 					 * Reconcile Pod and Notify Virtual Kubelet

@@ -3,6 +3,7 @@ package image_test
 import (
 	"testing"
 
+	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/compute/image"
 )
 
@@ -30,4 +31,32 @@ func Test_ParseImageName(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPull(t *testing.T) {
+
+	imageDir := compute.HPK.ImageDir()
+
+	tests := []struct {
+		name      string
+		imageName string
+		wantErr   bool
+	}{
+		{
+			name:      "cert",
+			imageName: "quay.io/jetstack/cert-manager-cainjector:v1.12.3",
+			wantErr:   false,
+		},
+		// TODO: Add test cases.
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := image.Pull(imageDir, image.Docker, tt.imageName)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Pull() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+		})
+	}
+
 }

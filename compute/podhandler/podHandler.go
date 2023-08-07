@@ -19,6 +19,7 @@ import (
 	"context"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/carv-ics-forth/hpk/compute"
@@ -101,16 +102,12 @@ Notice that by using the reference, we operate on the local copy instead of the 
 func DeletePod(podKey client.ObjectKey, watcher filenotify.FileWatcher) bool {
 	logger := compute.DefaultLogger.WithValues("pod", podKey)
 
-	podDir := compute.HPK.Pod(podKey)
-
 	localPod, err := LoadPodFromKey(podKey)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			logger.Info("Pod marked for deletion but it does not exist.")
-
 			// This behavior may raise when trying to delete a deleted pod.
-			// So for idempotency, we return the Pod as being (now) deleted.
-			// However, it may be possible to leave rogue jobs running on slurm.
+			// However, deleting a pod from the fs does not guarantee deletion from Slurm.
+			// For this reason, we just need to continue.
 			return true
 		}
 
@@ -120,27 +117,43 @@ func DeletePod(podKey client.ObjectKey, watcher filenotify.FileWatcher) bool {
 	/*---------------------------------------------------
 	 * Cancel Slurm Job
 	 *---------------------------------------------------*/
-	idType, podID := slurm.ParsePodID(localPod)
+	if slurm.HasJobID(localPod) {
+		jodID := slurm.GetJobID(localPod)
 
-	if idType != slurm.JobIDTypeEmpty {
-		out, err := slurm.CancelJob(podID)
+		out, err := slurm.CancelJob(jodID)
 		if err != nil {
-			compute.SystemPanic(err, "failed to cancel job '%s'. out: '%s'", podID, out)
+			if errors.Is(err, slurm.ErrInvalidJob) {
+				logger.Info(" * No such Slurm job", "job", jodID, "pod", podKey)
+
+				// the job does not exist, so it can be considered as deleted.
+				goto remove_pod
+			}
+
+			if errors.Is(err, slurm.ErrRety) {
+				logger.Info(" * Slurm job cannot be deleted. Retry later", "job", jodID, "pod", podKey, "out", out)
+
+				return false
+			}
+
+			compute.SystemPanic(err, "failed to cancel job '%s' (%s). out: '%s'", jodID, podKey, out)
 		}
 
-		logger.Info(" * Slurm job is cancelled", "job", podID)
-	} else {
-		logger.Info(" * No Slurm ID was found.")
+		logger.Info(" * Slurm job is cancelled", "job", jodID, "pod", podKey, "out", out)
 	}
 
 	/*---------------------------------------------------
 	 * Remove watcher for Pod Directory
 	 *---------------------------------------------------*/
+remove_pod:
+	podDir := compute.HPK.Pod(podKey)
+
 	// because fswatch does not work recursively, we cannot have the container directories nested within the pod.
 	// instead, we use a flat directory in the format "podir/containername.{jid,stdout,stdour,...}"
 	if err := watcher.Remove(podDir.String()); err != nil {
 		compute.SystemPanic(err, "deregister watcher for path '%s' has failed", podDir)
 	}
+
+	logger.Info(" * Pod Watcher has been removed.")
 
 	/*---------------------------------------------------
 	 * Remove Pod Directory
@@ -179,6 +192,16 @@ func DeletePod(podKey client.ObjectKey, watcher filenotify.FileWatcher) bool {
 
 removed:
 	logger.Info(" * Pod directory is removed")
+
+	/*---------------------------------------------------
+	 * Garbage Collect Namespace
+	 *---------------------------------------------------*/
+	namespaceDir := filepath.Dir(podDir.String())
+	if empty, _ := paths.IsEmpty(namespaceDir); empty {
+		os.RemoveAll(namespaceDir)
+
+		logger.Info(" * Namespace directory is removed")
+	}
 
 	return true
 }
@@ -240,7 +263,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 		}
 	}
 
-	h.logger.Info(" * Volumes have been mounted")
+	h.logger.Info(" * All volumes have been mounted")
 
 	/*---------------------------------------------------
 	 * Build Container Commands
@@ -376,4 +399,6 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	if err := SavePodToFile(ctx, h.Pod); err != nil {
 		compute.SystemPanic(err, "failed to persistent pod")
 	}
+
+	logger.Info("SKATA ", "jobid", slurm.GetJobID(h.Pod))
 }

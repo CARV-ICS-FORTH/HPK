@@ -22,7 +22,7 @@ import (
 	"os"
 
 	"github.com/carv-ics-forth/hpk/compute/volume/util/validation"
-	hostutil2 "github.com/carv-ics-forth/hpk/pkg/hostutil"
+	"github.com/carv-ics-forth/hpk/pkg/hostutil"
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -45,7 +45,7 @@ func (b *VolumeMounter) SetUpAt(ctx context.Context) error {
 		return errors.Wrapf(err, "invalid HostPath '%s'", source.Path)
 	}
 
-	return checkType(source.Path, source.Type, hostutil2.NewHostUtil())
+	return checkType(source.Path, source.Type, hostutil.NewHostUtil())
 }
 
 type hostPathTypeChecker interface {
@@ -61,7 +61,7 @@ type hostPathTypeChecker interface {
 }
 
 // checkType checks whether the given path is the exact pathType
-func checkType(path string, pathType *corev1.HostPathType, hu hostutil2.HostUtils) error {
+func checkType(path string, pathType *corev1.HostPathType, hu hostutil.HostUtils) error {
 	return checkTypeInternal(newFileTypeChecker(path, hu), pathType)
 }
 
@@ -116,13 +116,13 @@ func checkTypeInternal(ftc hostPathTypeChecker, pathType *corev1.HostPathType) e
 	return nil
 }
 
-func newFileTypeChecker(path string, hu hostutil2.HostUtils) hostPathTypeChecker {
+func newFileTypeChecker(path string, hu hostutil.HostUtils) hostPathTypeChecker {
 	return &fileTypeChecker{path: path, hu: hu}
 }
 
 type fileTypeChecker struct {
 	path string
-	hu   hostutil2.HostUtils
+	hu   hostutil.HostUtils
 }
 
 func (ftc *fileTypeChecker) Exists() bool {
@@ -215,98 +215,3 @@ func makeFile(pathname string) error {
 	}
 	return nil
 }
-
-/*
-func (h *podHandler) HostPathVolumeSource(ctx context.Context, vol corev1.Volume) {
-	switch *vol.VolumeSource.HostPath.Type {
-	case corev1.HostPathUnset:
-		// For backwards compatible, leave it empty if unset
-		if path, err := h.podDirectory.CreateVolumeLink(vol.Name, vol.VolumeSource.HostPath.Path); err != nil {
-			SystemError(err, "cannot create HostPathDirectoryOrCreate at path '%s'", path)
-		}
-
-		h.podMountSymlinks[vol.Name] = vol.VolumeSource.HostPath.Path
-
-		h.logger.Info("Create Volume with Host Symlink",
-			"from ", vol.Name,
-			"to", vol.VolumeSource.HostPath.Path,
-		)
-
-	case corev1.HostPathDirectoryOrCreate:
-		// If nothing exists at the given path, an empty directory will be created there
-		// as needed with file mode 0755, having the same group and ownership with Kubelet.
-		if path, err := h.podDirectory.CreateVolume(vol.Name, compute.PodGlobalDirectoryPermissions); err != nil {
-			SystemError(err, "cannot create HostPathDirectoryOrCreate at path '%s'", path)
-		}
-	case corev1.HostPathDirectory:
-		// A directory must exist at the given path
-		info, err := h.podDirectory.PathExists(vol.Name)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				PodError(h.Pod, "VolumeNotFound", "volume '%s' was not found", vol.Name)
-				return
-			}
-			SystemError(err, "failed to inspect volume '%s'", vol.Name)
-		}
-
-		if !info.Mode().IsDir() {
-			PodError(h.Pod, "UnexpectedVolumeType", "volume '%s' was expected to be directory", vol.Name)
-			return
-		}
-
-	case corev1.HostPathFileOrCreate:
-		// If nothing exists at the given path, an empty file will be created there
-		// as needed with file mode 0644, having the same group and ownership with Kubelet.
-
-		_, err := h.podDirectory.PathExists(vol.Name)
-		if err == nil {
-			return
-		}
-
-		if errors.Is(err, os.ErrNotExist) {
-			if path, err := h.podDirectory.CreateFile(vol.Name); err != nil {
-				SystemError(err, "cannot apply HostPathDirectoryOrCreate at path '%s'", path)
-			}
-		} else {
-			SystemError(err, "failed to inspect volume '%s'", vol.Name)
-		}
-
-	case corev1.HostPathFile:
-		// A file must exist at the given path
-
-		info, err := h.podDirectory.PathExists(vol.Name)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				PodError(h.Pod, "VolumeNotFound", "volume '%s' was not found", vol.Name)
-				return
-			}
-			SystemError(err, "failed to inspect volume '%s'", vol.Name)
-		}
-
-		if !info.Mode().IsRegular() {
-			PodError(h.Pod, "UnexpectedVolumeType", "volume '%s' was expected to be file", vol.Name)
-			return
-		}
-
-	case corev1.HostPathSocket, corev1.HostPathCharDev, corev1.HostPathBlockDev:
-		// A UNIX socket/char device/ block device must exist at the given path
-
-		info, err := h.podDirectory.PathExists(vol.Name)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				PodError(h.Pod, "VolumeNotFound", "volume '%s' was not found", vol.Name)
-				return
-			}
-			SystemError(err, "failed to inspect volume '%s'", vol.Name)
-		}
-
-		// todo: perform the checks
-		_ = info
-	default:
-		logrus.Warn(vol.Projected)
-
-		panic("It seems I have missed a ProjectedVolume type")
-	}
-}
-
-*/

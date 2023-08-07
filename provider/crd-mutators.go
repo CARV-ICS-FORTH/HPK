@@ -9,10 +9,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func MutatePVC(ctx context.Context, _ *kwhmodel.AdmissionReview, obj metav1.Object) (*kwhmutating.MutatorResult, error) {
+func MutatePVC(ctx context.Context, review *kwhmodel.AdmissionReview, obj metav1.Object) (*kwhmutating.MutatorResult, error) {
+	// we are only interested in newly created PVCs.
+	if review.Operation != kwhmodel.OperationCreate {
+		return &kwhmutating.MutatorResult{}, nil
+	}
+
 	pvc, ok := obj.(*corev1.PersistentVolumeClaim)
 	if !ok {
-		panic("This should not happen")
 		return &kwhmutating.MutatorResult{}, nil
 	}
 
@@ -28,7 +32,12 @@ func MutatePVC(ctx context.Context, _ *kwhmodel.AdmissionReview, obj metav1.Obje
 // MutatePod is used to modify Pods requests before they arrive to the Virtual Kubelet Framework.
 // This is because the frameworks drops pods whose containers involve "valueFrom = .status.podIP" semantics.
 // Ref: https://github.com/Azure/AKS/issues/2427#issuecomment-1010354262
-func MutatePod(ctx context.Context, _ *kwhmodel.AdmissionReview, obj metav1.Object) (*kwhmutating.MutatorResult, error) {
+func MutatePod(ctx context.Context, review *kwhmodel.AdmissionReview, obj metav1.Object) (*kwhmutating.MutatorResult, error) {
+	// we are only interested in newly created Pods.
+	if review.Operation != kwhmodel.OperationCreate {
+		return &kwhmutating.MutatorResult{}, nil
+	}
+
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		return &kwhmutating.MutatorResult{}, nil
