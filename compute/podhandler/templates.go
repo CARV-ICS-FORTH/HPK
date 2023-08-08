@@ -241,9 +241,6 @@ echo $(hostname -I) > {{.VirtualEnv.IPAddressPath}}
 echo "[Virtual] Setting DNS ..."
 handle_dns
 
-echo "[Virtual] Setting Volume Ownership ..."
-chown -R 666:666 {{.VirtualEnv.PodDirectory}}/.virtualenv/volumes
-
 echo "[Virtual] Setting Cleanup Handler ..."
 trap 'cleanup "${BASH_COMMAND}" "$?"'  EXIT
 

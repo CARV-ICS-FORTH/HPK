@@ -8,12 +8,33 @@ setup() {
     export TEST_DIR="$( cd "$( dirname "$BATS_TEST_FILENAME" )" >/dev/null 2>&1 && pwd )"
 }
 
+@test "diagnostics -> openmpi " {
+    DETIK_CLIENT_NAMESPACE="openmpi"
+    cd "./examples/diagnostics/${DETIK_CLIENT_NAMESPACE}"
+
+    # clean-up any previous environment
+    run ./uninstall.sh || echo "No previous installation was found"
+
+    # deploy the app
+    run ./install.sh
+    assert_success
+
+    # Ensure that containers complete
+    try "at most 5 times every 30s to get pods named 'launcher' and verify that 'status' is 'succeeded'"
+    try "at most 5 times every 30s to get pods named 'workers-1' and verify that 'status' is 'running'"
+
+    # undeploy the app
+    run ./uninstall.sh
+    assert_success
+}
+
+
 @test "diagnostics -> scripting -> quotes" {
     DETIK_CLIENT_NAMESPACE="scripting-quotes"
     cd "./examples/diagnostics/${DETIK_CLIENT_NAMESPACE}"
 
     # clean-up any previous environment
-    ./uninstall.sh || echo "No previous installation was found"
+    run ./uninstall.sh || echo "No previous installation was found"
 
     # deploy the app
     run ./install.sh
@@ -33,7 +54,7 @@ setup() {
     cd "./examples/diagnostics/${DETIK_CLIENT_NAMESPACE}"
 
     # clean-up any previous environment
-    ./uninstall.sh || echo "No previous installation was found"
+    run ./uninstall.sh || echo "No previous installation was found"
 
     # deploy the app
     run ./install.sh
@@ -62,7 +83,7 @@ setup() {
     cd "./examples/diagnostics/${DETIK_CLIENT_NAMESPACE}"
 
     # clean-up any previous environment
-    ./uninstall.sh || echo "No previous installation was found"
+    run ./uninstall.sh || echo "No previous installation was found"
 
     # deploy the app
     run ./install.sh
@@ -82,7 +103,7 @@ setup() {
     cd "./examples/diagnostics/${DETIK_CLIENT_NAMESPACE}"
 
     # clean-up any previous environment
-    ./uninstall.sh || echo "No previous installation was found"
+    run ./uninstall.sh || echo "No previous installation was found"
 
     # deploy the app
     run ./install.sh
@@ -107,7 +128,7 @@ setup() {
     cd "./examples/diagnostics/${DETIK_CLIENT_NAMESPACE}"
 
     # clean-up any previous environment
-    ./uninstall.sh || echo "No previous installation was found"
+    run ./uninstall.sh || echo "No previous installation was found"
 
     # deploy the app
     run ./install.sh
@@ -143,7 +164,7 @@ setup() {
     cd "./examples/diagnostics/${DETIK_CLIENT_NAMESPACE}"
 
     # clean-up any previous environment
-    ./uninstall.sh || echo "No previous installation was found"
+    run ./uninstall.sh || echo "No previous installation was found"
 
     # deploy the app
     run ./install.sh
@@ -165,7 +186,7 @@ setup() {
     cd "./examples/diagnostics/${DETIK_CLIENT_NAMESPACE}"
 
     # clean-up any previous environment
-    ./uninstall.sh || echo "No previous installation was found"
+    run ./uninstall.sh || echo "No previous installation was found"
 
     # deploy the app
     run ./install.sh
@@ -190,7 +211,7 @@ setup() {
     cd "./examples/diagnostics/${DETIK_CLIENT_NAMESPACE}"
 
     # clean-up any previous environment
-    ./uninstall.sh || echo "No previous installation was found"
+    run ./uninstall.sh || echo "No previous installation was found"
 
     # deploy the app
     run ./install.sh
