@@ -158,39 +158,33 @@ remove_pod:
 	/*---------------------------------------------------
 	 * Remove Pod Directory
 	 *---------------------------------------------------*/
+
 	if err := os.RemoveAll(podDir.String()); err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			goto removed
-		}
+		// if trying to remove directory from the host fails, try to delete it using a fakeroot containera.
 		if errors.Is(err, fs.ErrPermission) {
-			compute.DefaultLogger.Info(" * Failed to remove directory due to permission issues. Retry with fakeroot container.",
-				"dir", podDir.String(),
+			compute.DefaultLogger.Info(" * Failed to remove directory from host. Try using fakeroot container.",
+				"err", err,
 			)
 
-			// try to delete directory using the fakeroot from pause container,.
+			// try to delete directory using the fakeroot from pause container.
 			out, err := runtime.DefaultPauseImage.FakerootExec(
-				[]string{"-B", podDir.String()},        // mount the pod directory in singularity
-				[]string{"rm", "-rf", podDir.String()}, // remove the pod directory using fakeroot
+				[]string{"--mount", "type=bind,src=" + podDir.String() + ",dst=/pod"}, // mount the pod directory in singularity
+				[]string{"rm", "-rf", "/pod/*"},                                       // remove the pod directory using fakeroot
 			)
 
-			compute.DefaultLogger.Info(" * Result", "out", string(out))
+			compute.DefaultLogger.Info(" * Result",
+				"out", out,
+				"debug", []string{"-B", podDir.String() + ":" + podDir.String() + ":rw"},
+			)
 
 			if err != nil {
 				compute.SystemPanic(err, "failed to forcible remove pod directory '%s'", podDir)
 			}
-
-			// ensure that pod directory is deleted
-			if _, err := os.Stat(podDir.String()); !os.IsNotExist(err) {
-				compute.SystemPanic(err, "failed to eventually delete pod directory '%s'", podDir)
-			}
-
-			goto removed
+		} else {
+			compute.SystemPanic(err, "failed to remove pod directory '%s'", podDir)
 		}
-
-		compute.SystemPanic(err, "failed to delete pod directory '%s'", podDir)
 	}
 
-removed:
 	logger.Info(" * Pod directory is removed")
 
 	/*---------------------------------------------------
@@ -399,6 +393,4 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	if err := SavePodToFile(ctx, h.Pod); err != nil {
 		compute.SystemPanic(err, "failed to persistent pod")
 	}
-
-	logger.Info("SKATA ", "jobid", slurm.GetJobID(h.Pod))
 }

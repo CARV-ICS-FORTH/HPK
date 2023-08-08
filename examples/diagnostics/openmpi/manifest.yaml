@@ -57,6 +57,7 @@ spec:
     - name: ssh-volume
       configMap:
         name: ssh-config
+        defaultMode: 0600
   containers:
     - image: icsforth/pi # mpioperator/mpi-pi:openmpi
       name: main
@@ -93,6 +94,7 @@ spec:
     - name: ssh-volume
       configMap:
         name: ssh-config
+        defaultMode: 0600
     # declare mpi volume
     - name: mpi-volume
       emptyDir: {}
