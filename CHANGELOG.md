@@ -12,6 +12,10 @@
 ### New Features & Functionality
 - Added several examples with respective tests.
 - New corrupted pods to a central location for inspection
+- Add examples for OpenGadget
+- Add support for IPC
+- Add snippets for cloud-native mpi executions with cgroup
+- Set temporary workdir for pause containers
 - ...
 
 ## Bug Fixes

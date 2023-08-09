@@ -8,6 +8,26 @@ setup() {
     export TEST_DIR="$( cd "$( dirname "$BATS_TEST_FILENAME" )" >/dev/null 2>&1 && pwd )"
 }
 
+@test "diagnostics -> ipc " {
+    DETIK_CLIENT_NAMESPACE="ipc"
+    cd "./examples/diagnostics/${DETIK_CLIENT_NAMESPACE}"
+
+    # clean-up any previous environment
+    run ./uninstall.sh || echo "No previous installation was found"
+
+    # deploy the app
+    run ./install.sh
+    assert_success
+
+    # Ensure that containers complete
+    try "at most 5 times every 30s to get pods named 'shared-memory' and verify that 'status' is 'succeeded'"
+
+    # undeploy the app
+    run ./uninstall.sh
+    assert_success
+}
+
+
 @test "diagnostics -> openmpi " {
     DETIK_CLIENT_NAMESPACE="openmpi"
     cd "./examples/diagnostics/${DETIK_CLIENT_NAMESPACE}"

@@ -325,7 +325,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	 *---------------------------------------------------*/
 	pauseImage, err := image.Pull(compute.HPK.ImageDir(), image.Docker, image.PauseImage)
 	if err != nil {
-		compute.SystemPanic(err, "ImagePull error. Image: %s", image.PauseImage)
+		compute.SystemPanic(err, "ImagePull error. Image:%s", image.PauseImage)
 	}
 
 	/*---------------------------------------------------

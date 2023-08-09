@@ -1,0 +1,37 @@
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: shared-memory
+spec:
+  containers:
+    - name: main
+      image: busybox
+      command:
+        - sh
+        - -c
+        - |
+          set -eu
+ 
+          # report our pid and block waiting
+          cut -d ' ' -f 4 /proc/self/stat > /dev/shm/app 
+
+    - name: sidecar
+      image: icsforth/cadvisor
+      command:
+        - sh
+        - -c
+        - |
+          set -eu
+          
+          get_main_pid() {
+            # Wait a bit to obtain the PID of the main container
+            [ -f "/dev/shm/app" ] || inotifywait /dev/shm --include 'app'
+
+            export mainPID=$(cat /dev/shm/app)
+          }
+
+
+          get_main_pid
+
+          echo "mainPID: ${mainPID}"

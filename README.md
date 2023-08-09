@@ -56,6 +56,15 @@ export KUBECONFIG=${KUBE_PATH}/admin.conf
 kubectl get nodes
 ```
 
+In case that you experience DNS issues, you should retry starting the Kubernetes Master with:
+```
+export EXTERNAL_DNS=<your dns server>
+make run-kubemaster
+```
+
+The above command will set CoreDNS to forward requests for external names to your DNS server.
+
+
 ## Acknowledgements
 
 We thankfully acknowledge the support of the European Commission and the Greek General Secretariat for Research and
