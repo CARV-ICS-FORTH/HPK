@@ -136,6 +136,9 @@ spec:
         - -c
         - |
           set -eux
-          
+         
+          # Wait a bit until workers become ready
+          sleep 20
+
           export numOfWorkers=1
           mpirun -n ${numOfWorkers} --hostfile /etc/mpi/hostfile /home/mpiuser/pi

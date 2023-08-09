@@ -138,7 +138,7 @@ func (h *podHandler) buildContainer(container *corev1.Container, containerStatus
 
 	img, err := image.Pull(compute.HPK.ImageDir(), image.Docker, container.Image)
 	if err != nil {
-		compute.SystemPanic(err, "ImagePull error. Image: %s", container.Image)
+		compute.SystemPanic(err, "ImagePull error. Image:%s ", container.Image)
 	}
 
 	executionMode := func() string {

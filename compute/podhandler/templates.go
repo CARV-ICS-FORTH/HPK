@@ -83,7 +83,6 @@ function debug_info() {
 	echo " Compute Environment Info"
 	echo "=============================="
 	echo "* DNS: {{.HostEnv.KubeDNS}}"
-	echo "* HostUser: ${XDG_RUNTIME_DIR}"
 	echo "* PodDir: {{.VirtualEnv.PodDirectory}}"
 	echo "=============================="
 	echo -e "\n"
@@ -150,6 +149,10 @@ function cleanup() {
 
 function handle_init_containers() {
 {{range $index, $container := .InitContainers}}
+	####################
+	##  New Container  #
+	####################
+
 	echo "[Virtual] Spawning InitContainer: {{$container.InstanceName}}"
 	 
 	{{- if $container.EnvFilePath}}
@@ -160,7 +163,7 @@ function handle_init_containers() {
 	echo pid://$$ > {{$container.JobIDPath}}
 
 	# --userns is need to maintain the user's permissions.
-	$(apptainer {{ $container.ExecutionMode }} --cleanenv --pid --compat --no-mount home --unsquash \
+	$(apptainer {{ $container.ExecutionMode }} --cleanenv --pid --writable-tmpfs --no-mount home --unsquash \
 	{{- if $container.RunAsUser}}
 	--security uid:{{$container.RunAsUser}},gid:{{$container.RunAsUser}} --userns \
 	{{- end}}
@@ -190,13 +193,15 @@ function handle_init_containers() {
 
 function handle_containers() {
 {{range $index, $container := .Containers}}
+	####################
+	##  New Container  # 
+	####################
+
 	{{- if $container.EnvFilePath}}
 	sh -c {{$container.EnvFilePath}} > /scratch/{{$container.InstanceName}}.env
 	{{- end}}
 
-	# Internal fakeroot is needed for appropriate permissions within the container
-	# --userns is need to maintain the user's permissions.
-	$(apptainer {{ $container.ExecutionMode }} --cleanenv --pid --compat --no-mount home --unsquash \
+	$(apptainer {{ $container.ExecutionMode }} --cleanenv --pid --writable-tmpfs --no-mount home --unsquash \
 	{{- if $container.RunAsUser}}
 	--security uid:{{$container.RunAsUser}},gid:{{$container.RunAsUser}} --userns \
 	{{- end}}
@@ -217,11 +222,14 @@ function handle_containers() {
 	&>> {{$container.LogsPath}}; \
 	echo $? > {{$container.ExitCodePath}}) &
 
-	# Mark the scheduling of a container.
 	pid=$!
 	echo pid://${pid} > {{$container.JobIDPath}}
 	echo "[Virtual] Container started: {{$container.InstanceName}} ${pid}"
 {{end}}
+
+	######################
+	##  Wait Containers  #
+	######################
 
 	echo "[Virtual] ... Waiting for containers to complete ..."
 	wait  || echo "[Virtual] ... wait failed with error: $?"
@@ -290,13 +298,19 @@ set -u
 echo "[Host] Starting the Constructor for the Virtual Environment ..."
 chmod +x  {{.VirtualEnv.ConstructorFilePath}}
 
+export workdir=/tmp/{{.Pod.Namespace}}_{{.Pod.Name}}
+echo "[Host] Creating workdir: ${workdir} "
+mkdir -p ${workdir}
+trap 'echo [HOST] Deleting workdir ${workdir}; rm -rf ${workdir}' EXIT
+
 # --network-args "portmap=8080:80/tcp"
-exec {{$.HostEnv.ApptainerBin}} exec  --net --fakeroot --scratch /scratch \
+# --container is needed to start a separate /dev/sh
+exec {{$.HostEnv.ApptainerBin}} exec --containall --net --fakeroot --scratch /scratch --workdir ${workdir} \
 {{- if .HostEnv.EnableCgroupV2}}
 --apply-cgroups {{.VirtualEnv.CgroupFilePath}} 		\
 {{- end}}
 --env PARENT=${PPID}								\
---bind $HOME										\
+--bind $HOME,/tmp										\
 --hostname {{.Pod.Name}}							\
 {{$.PauseImageFilePath}} sh -ci {{.VirtualEnv.ConstructorFilePath}} ||
 echo "[HOST] **SYSTEMERROR** apptainer exited with code $?" | tee {{.VirtualEnv.SysErrorFilePath}}
