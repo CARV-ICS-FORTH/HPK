@@ -7,7 +7,8 @@ spec:
   service:
     # Add monitoring sidecars
     decorators:
-      telemetry: [ frisbee.system.telemetry.resources ]
+      telemetry:
+        - frisbee.system.telemetry.resources
     volumes:
       # declare ssh volume
       - name: ssh-volume
