@@ -21,8 +21,8 @@ import (
 	"strings"
 
 	"github.com/carv-ics-forth/hpk/compute"
+	"github.com/carv-ics-forth/hpk/compute/endpoint"
 	"github.com/carv-ics-forth/hpk/compute/image"
-	"github.com/carv-ics-forth/hpk/compute/paths"
 	"github.com/carv-ics-forth/hpk/compute/slurm"
 	kubecontainer "github.com/carv-ics-forth/hpk/pkg/container"
 	"github.com/carv-ics-forth/hpk/pkg/hostutil"
@@ -63,7 +63,7 @@ func (h *podHandler) buildContainer(container *corev1.Container, containerStatus
 
 	envfilePath := h.podDirectory.Container(container.Name).EnvFilePath()
 
-	if err := os.WriteFile(envfilePath, []byte(envFileContent.String()), paths.PodGlobalDirectoryPermissions); err != nil {
+	if err := os.WriteFile(envfilePath, []byte(envFileContent.String()), endpoint.PodGlobalDirectoryPermissions); err != nil {
 		compute.SystemPanic(err, "cannot write env file for container '%s' of pod '%s'", container, h.podKey)
 	}
 
@@ -106,14 +106,14 @@ func (h *podHandler) buildContainer(container *corev1.Container, containerStatus
 				//
 				// For the particular case of Argo, we know that "0" are always dirs.
 				if mount.SubPath == "0" {
-					if err := hostutil.SafeMakeDir(subPath, hostPath, paths.PodGlobalDirectoryPermissions); err != nil {
+					if err := hostutil.SafeMakeDir(subPath, hostPath, endpoint.PodGlobalDirectoryPermissions); err != nil {
 						compute.SystemPanic(err, "failed to create dir placeholder. subpath:'%s'", subPathFile)
 					}
 				} else {
 					// A file is enough for all possible targets (symlink, device, pipe,
 					// socket, ...), bind-mounting them into a file correctly changes type
 					// of the target file.
-					if err = os.WriteFile(subPathFile, []byte{}, paths.PodGlobalDirectoryPermissions); err != nil {
+					if err = os.WriteFile(subPathFile, []byte{}, endpoint.PodGlobalDirectoryPermissions); err != nil {
 						compute.SystemPanic(err, "failed to create placeholder. subpath:'%s'", subPathFile)
 					}
 				}
@@ -132,7 +132,7 @@ func (h *podHandler) buildContainer(container *corev1.Container, containerStatus
 	}
 
 	/*---------------------------------------------------
-	 * Prepare Container Paths
+	 * Prepare Container Image
 	 *---------------------------------------------------*/
 	containerID := fmt.Sprintf("%s_%s_%s", h.Pod.GetNamespace(), h.Pod.GetName(), container.Name)
 
@@ -141,13 +141,12 @@ func (h *podHandler) buildContainer(container *corev1.Container, containerStatus
 		compute.SystemPanic(err, "ImagePull error. Image:%s ", container.Image)
 	}
 
-	executionMode := func() string {
-		if container.Command == nil {
-			return "run"
-		} else {
-			return "exec"
-		}
-	}()
+	// if there is no command, use the run mode, which will execute the runscript
+	// defined in the Entrypoint of the image.
+	executionMode := "exec"
+	if container.Command == nil {
+		executionMode = "run"
+	}
 
 	/*---------------------------------------------------
 	 * Prepare fields for Container Template

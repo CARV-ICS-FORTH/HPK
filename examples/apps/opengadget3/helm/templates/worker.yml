@@ -14,7 +14,9 @@ spec:
       - name: ssh-volume
         configMap:
           name: ssh-config
+          {{- if .Values.rootless.enabled}}
           defaultMode: 0600
+          {{- end}}
       # declare dataset volume
       - name: dataset-volume
         hostPath:
@@ -57,6 +59,13 @@ spec:
             set -eux
             cut -d ' ' -f 4 /proc/self/stat > /dev/shm/app # Sidecar: use it for entering the cgroup
 
+            {{- if .Values.rootless.enabled}}
             usermod -p '*' mpiuser
+            {{- end}}
 
             /usr/sbin/sshd -De -f  /home/mpiuser/.sshd_config
+
+        resources:
+          limits:
+            memory: {{.Values.limits.mem}}
+            cpu: {{.Values.limits.cpu}}

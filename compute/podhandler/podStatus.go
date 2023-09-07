@@ -31,7 +31,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func SyncPodStatus(pod *corev1.Pod) {
+// UpdateStatusFromRuntime performs a deep investigation of the running conditions of the pod to resolv its current status.
+func UpdateStatusFromRuntime(pod *corev1.Pod) {
 	podKey := client.ObjectKeyFromObject(pod)
 	podDir := compute.HPK.Pod(podKey)
 	logger := compute.DefaultLogger.WithValues("pod", podKey)
@@ -203,7 +204,7 @@ func SyncPodStatus(pod *corev1.Pod) {
 		if testcase.expression {
 			testcase.change(&pod.Status)
 
-			logger.Info(" * Local Pod status has changed",
+			logger.Info(" * Pod Status has been updated",
 				"phase", pod.Status.Phase,
 				"completed", state.ListSuccessfulJobs(),
 				"failed", state.ListFailedJobs(),

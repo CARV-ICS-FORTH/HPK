@@ -21,7 +21,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/carv-ics-forth/hpk/compute/paths"
+	"github.com/carv-ics-forth/hpk/compute/endpoint"
 	"github.com/carv-ics-forth/hpk/compute/volume/configmap"
 	"github.com/carv-ics-forth/hpk/compute/volume/emptydir"
 	"github.com/carv-ics-forth/hpk/compute/volume/hostpath"
@@ -60,9 +60,10 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) e
 		/*---------------------------------------------------
 		 * EmptyDir
 		 *---------------------------------------------------*/
-		emptyDir, err := h.podDirectory.CreateVolume(vol.Name, paths.PodGlobalDirectoryPermissions)
-		if err != nil {
-			compute.SystemPanic(err, "cannot create dir '%s' for emptyDir", emptyDir)
+		emptyDir := filepath.Join(h.podDirectory.VolumeDir(), vol.Name)
+
+		if err := os.MkdirAll(emptyDir, endpoint.PodGlobalDirectoryPermissions); err != nil {
+			compute.SystemPanic(err, "cannot create dir '%s'", emptyDir)
 		}
 
 		mounter := emptydir.VolumeMounter{
@@ -71,7 +72,7 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) e
 			Logger: h.logger,
 		}
 
-		if err = mounter.SetUpAt(ctx, emptyDir); err != nil {
+		if err := mounter.SetUpAt(ctx, emptyDir); err != nil {
 			compute.SystemPanic(err, "mount emptyDir volume to dir '%s' has failed", emptyDir)
 		}
 
@@ -83,9 +84,10 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) e
 		/*---------------------------------------------------
 		 * ConfigMap
 		 *---------------------------------------------------*/
-		configMapDir, err := h.podDirectory.CreateVolume(vol.Name, paths.PodGlobalDirectoryPermissions)
-		if err != nil {
-			compute.SystemPanic(err, "cannot create dir '%s' for configmap", configMapDir)
+		configMapDir := filepath.Join(h.podDirectory.VolumeDir(), vol.Name)
+
+		if err := os.MkdirAll(configMapDir, endpoint.PodGlobalDirectoryPermissions); err != nil {
+			compute.SystemPanic(err, "cannot create dir '%s'", configMapDir)
 		}
 
 		mounter := configmap.VolumeMounter{
@@ -94,7 +96,7 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) e
 			Logger: h.logger,
 		}
 
-		if err = mounter.SetUpAt(ctx, configMapDir); err != nil {
+		if err := mounter.SetUpAt(ctx, configMapDir); err != nil {
 			compute.DefaultLogger.Info("mount configMap volume has failed",
 				"volume", vol.Name,
 				"dir", configMapDir,
@@ -111,9 +113,10 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) e
 		/*---------------------------------------------------
 		 * Secret
 		 *---------------------------------------------------*/
-		secretDir, err := h.podDirectory.CreateVolume(vol.Name, paths.PodGlobalDirectoryPermissions)
-		if err != nil {
-			compute.SystemPanic(err, "cannot create dir '%s' for secrets", secretDir)
+		secretDir := filepath.Join(h.podDirectory.VolumeDir(), vol.Name)
+
+		if err := os.MkdirAll(secretDir, endpoint.PodGlobalDirectoryPermissions); err != nil {
+			compute.SystemPanic(err, "cannot create dir '%s'", secretDir)
 		}
 
 		mounter := secret.VolumeMounter{
@@ -122,7 +125,7 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) e
 			Logger: h.logger,
 		}
 
-		if err = mounter.SetUpAt(ctx, secretDir); err != nil {
+		if err := mounter.SetUpAt(ctx, secretDir); err != nil {
 			compute.DefaultLogger.Info("mount secret volume has failed",
 				"volume", vol.Name,
 				"dir", secretDir,
@@ -162,8 +165,10 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) e
 
 			// Empty string (default) is for backward compatibility,
 			// which means that no checks will be performed before mounting the hostPath volume.
-			if path, err := h.podDirectory.CreateVolumeLink(vol.VolumeSource.HostPath.Path, vol.Name); err != nil {
-				compute.SystemPanic(err, "cannot link HostPath at path '%s'", path)
+			dstFullPath := filepath.Join(h.podDirectory.VolumeDir(), vol.Name)
+
+			if err := os.Symlink(vol.VolumeSource.HostPath.Path, dstFullPath); err != nil {
+				compute.SystemPanic(err, "cannot link symlink at path '%s'", dstFullPath)
 			}
 
 			// nothing to do
@@ -198,9 +203,10 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) e
 		/*---------------------------------------------------
 		 * Projected
 		 *---------------------------------------------------*/
-		projectedDir, err := h.podDirectory.CreateVolume(vol.Name, paths.PodGlobalDirectoryPermissions)
-		if err != nil {
-			compute.SystemPanic(err, "cannot create dir '%s' for projected volumes", projectedDir)
+		projectedDir := filepath.Join(h.podDirectory.VolumeDir(), vol.Name)
+
+		if err := os.MkdirAll(projectedDir, endpoint.PodGlobalDirectoryPermissions); err != nil {
+			compute.SystemPanic(err, "cannot create dir '%s'", projectedDir)
 		}
 
 		mounter := projected.VolumeMounter{
@@ -209,7 +215,7 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) e
 			Logger: h.logger,
 		}
 
-		if err = mounter.SetUpAt(ctx, projectedDir); err != nil {
+		if err := mounter.SetUpAt(ctx, projectedDir); err != nil {
 			return errors.Wrapf(err, "failed to mount ProjectedVolume '%s'", vol.Name)
 		}
 
@@ -223,9 +229,10 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) e
 }
 
 func (h *podHandler) DownwardAPIVolumeSource(ctx context.Context, vol corev1.Volume) {
-	downApiDir, err := h.podDirectory.CreateVolume(vol.Name, paths.PodGlobalDirectoryPermissions)
-	if err != nil {
-		compute.SystemPanic(err, "cannot create dir '%s' for downwardApi", downApiDir)
+	downApiDir := filepath.Join(h.podDirectory.VolumeDir(), vol.Name)
+
+	if err := os.MkdirAll(downApiDir, endpoint.PodGlobalDirectoryPermissions); err != nil {
+		compute.SystemPanic(err, "cannot create dir '%s'", downApiDir)
 	}
 
 	for _, item := range vol.DownwardAPI.Items {
@@ -318,8 +325,10 @@ func (h *podHandler) PersistentVolumeClaimSource(ctx context.Context, vol corev1
 	 *---------------------------------------------------*/
 	switch {
 	case pv.Spec.Local != nil:
-		if path, err := h.podDirectory.CreateVolumeLink(pv.Spec.Local.Path, vol.Name); err != nil {
-			compute.SystemPanic(err, "cannot create local pv at path '%s'", path)
+		dstFullPath := filepath.Join(h.podDirectory.VolumeDir(), vol.Name)
+
+		if err := os.Symlink(pv.Spec.Local.Path, dstFullPath); err != nil {
+			compute.SystemPanic(err, "cannot link symlink at path '%s'", dstFullPath)
 		}
 
 		h.logger.Info("  * Local Volume is mounted", "name", vol.Name)
