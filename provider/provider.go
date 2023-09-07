@@ -24,8 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/carv-ics-forth/hpk/compute/endpoint"
 	"github.com/carv-ics-forth/hpk/compute/events"
-	"github.com/carv-ics-forth/hpk/compute/paths"
 	"github.com/carv-ics-forth/hpk/compute/podhandler"
 	"github.com/carv-ics-forth/hpk/compute/runtime"
 	"github.com/carv-ics-forth/hpk/compute/slurm"
@@ -98,11 +98,11 @@ func NewVirtualK8S(config InitConfig) (*VirtualK8S, error) {
 	/*---------------------------------------------------
 	 * Handle Corrupted Pods (With missing state)
 	 *---------------------------------------------------*/
-	var corruptedPods []paths.PodPath
+	var corruptedPods []endpoint.PodPath
 
 	// move corrupted pods to a centralized dir for inspection.
 	// Valid are considered the pods with a Pod description.
-	if err := compute.HPK.WalkPodDirectories(func(podpath paths.PodPath) error {
+	if err := compute.HPK.WalkPodDirectories(func(podpath endpoint.PodPath) error {
 		ok, info := podpath.PodEnvironmentIsOK()
 		if !ok {
 			corruptedPods = append(corruptedPods, podpath)
@@ -124,7 +124,7 @@ func NewVirtualK8S(config InitConfig) (*VirtualK8S, error) {
 		// ensure that path prefix exists.
 		archivedNamespacePath := filepath.Dir(archivedPodPath)
 
-		if err := os.MkdirAll(archivedNamespacePath, paths.PodGlobalDirectoryPermissions); err != nil {
+		if err := os.MkdirAll(archivedNamespacePath, endpoint.PodGlobalDirectoryPermissions); err != nil {
 			return nil, errors.Wrapf(err, "basepath '%s' error", archivedNamespacePath)
 		}
 
@@ -148,7 +148,7 @@ func NewVirtualK8S(config InitConfig) (*VirtualK8S, error) {
 	/*---------------------------------------------------
 	 * Set fsnotify watchers for Pods
 	 *---------------------------------------------------*/
-	if err := compute.HPK.WalkPodDirectories(func(path paths.PodPath) error {
+	if err := compute.HPK.WalkPodDirectories(func(path endpoint.PodPath) error {
 		// register the watcher
 		return watcher.Add(path.String())
 	}); err != nil {
@@ -355,7 +355,7 @@ func (v *VirtualK8S) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
 	 *---------------------------------------------------*/
 	var pods []*corev1.Pod
 
-	if err := compute.HPK.WalkPodDirectories(func(path paths.PodPath) error {
+	if err := compute.HPK.WalkPodDirectories(func(path endpoint.PodPath) error {
 		encodedPod, err := os.ReadFile(path.EncodedJSONPath())
 		if err != nil {
 			v.Logger.Info("Ignore Corrupted Pod Dir", "path", path, "error", err)
@@ -408,8 +408,8 @@ func (v *VirtualK8S) NotifyPods(ctx context.Context, f func(*corev1.Pod)) {
 	})
 
 	go eh.Listen(ctx, events.PodControl{
-		SyncPodStatus: podhandler.SyncPodStatus,
-		LoadFromDisk:  podhandler.LoadPodFromKey,
+		UpdateStatus: podhandler.UpdateStatusFromRuntime,
+		LoadFromDisk: podhandler.LoadPodFromKey,
 		NotifyVirtualKubelet: func(pod *corev1.Pod) {
 			if pod == nil {
 				panic("this should not happen")

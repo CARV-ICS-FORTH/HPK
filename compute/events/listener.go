@@ -21,7 +21,7 @@ import (
 	"sync"
 
 	"github.com/carv-ics-forth/hpk/compute"
-	"github.com/carv-ics-forth/hpk/compute/paths"
+	"github.com/carv-ics-forth/hpk/compute/endpoint"
 	"github.com/fsnotify/fsnotify"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
@@ -78,7 +78,7 @@ func (h *EventHandler) Push(event fsnotify.Event) {
 }
 
 type PodControl struct {
-	SyncPodStatus        func(pod *corev1.Pod)
+	UpdateStatus         func(pod *corev1.Pod)
 	LoadFromDisk         func(podRef client.ObjectKey) (*corev1.Pod, error)
 	NotifyVirtualKubelet func(pod *corev1.Pod)
 }
@@ -107,7 +107,16 @@ func (h *EventHandler) Listen(ctx context.Context, control PodControl) {
 
 					return
 				case event := <-h.Queue:
-					podkey, file, invalid := compute.HPK.ParseAbsPath(event.Name)
+					// filter events other than creations.
+					if !event.Op.Has(fsnotify.Create) {
+						compute.DefaultLogger.Info("SLURM: omit non-create event", "details", event)
+
+						// return from select
+						break
+					}
+
+					// ensure that the file is a control file.
+					podkey, file, invalid := compute.HPK.ParseControlFilePath(event.Name)
 					if invalid {
 						compute.DefaultLogger.Info("SLURM: omit unexpected event", "details", event)
 
@@ -132,15 +141,17 @@ func (h *EventHandler) Listen(ctx context.Context, control PodControl) {
 					 *---------------------------------------------------*/
 					ext := filepath.Ext(file)
 					switch ext {
-					case paths.ExtensionSysError:
+					case endpoint.ExtensionSysError:
 						/*-- Sbatch failed. Pod should fail immediately without other checks --*/
 						logger.Info("[Slurm] -> Pod initialization error", "op", event.Op, "file", file)
 
+						// load local pod
 						pod, err := control.LoadFromDisk(podkey)
 						if err != nil {
 							compute.SystemPanic(err, "pod '%s' does not exist", podkey)
 						}
 
+						// get failure reason
 						sysErrFile := compute.HPK.Pod(podkey).SysErrorFilePath()
 
 						reason, err := os.ReadFile(sysErrFile)
@@ -151,24 +162,22 @@ func (h *EventHandler) Listen(ctx context.Context, control PodControl) {
 						// FIXME: print only the last few lined
 						logger.Info("[SYSERROR]", "details", string(reason))
 
+						// set the pod as failed
 						compute.PodError(pod, "SYSERROR", "Pod creation has failed")
 
-						/*-- Update the remote Copy --*/
+						// update the remote copy
 						control.NotifyVirtualKubelet(pod)
 
 						continue
 
-					case paths.ExtensionIP:
-						/*-- Sbatch Started --*/
-						logger.Info("[Slurm] -> Pod received IP", "op", event.Op, "file", file)
+					case endpoint.ExtensionIP: // Pod started
+						logger.Info("[Slurm] -> Pod Started", "op", event.Op, "file", file)
 
-					case paths.ExtensionJobID:
-						/*-- Container Started --*/
+					case endpoint.ExtensionJobID: // Container Started
 						logger.Info("[Slurm] -> Container Started", "op", event.Op, "file", file)
 
-					case paths.ExtensionExitCode:
-						/*-- Container Exited --*/
-						logger.Info("[Slurm] -> Container Exited", "op", event.Op, "file", file)
+					case endpoint.ExtensionExitCode: // Container Terminated
+						logger.Info("[Slurm] -> Container Terminated", "op", event.Op, "file", file)
 
 					default:
 						/*-- Any other file is ignored --*/
@@ -187,7 +196,11 @@ func (h *EventHandler) Listen(ctx context.Context, control PodControl) {
 					pod, err := control.LoadFromDisk(podkey)
 					if err != nil {
 						// Race conditions may between the deletion of a pod and Slurm events.
-						logger.Info("pod was not found. this is probably a conflict. omit event")
+						logger.Info("Omit event",
+							"reason", "pod was not found. this is probably a conflict",
+							"pod", podkey,
+						)
+
 						continue
 					}
 
@@ -201,7 +214,7 @@ func (h *EventHandler) Listen(ctx context.Context, control PodControl) {
 					}
 
 					/*-- Recalculate the Pod status from locally stored containers --*/
-					control.SyncPodStatus(pod)
+					control.UpdateStatus(pod)
 
 					/*-- Update the remote Copy --*/
 					control.NotifyVirtualKubelet(pod)

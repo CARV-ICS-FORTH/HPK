@@ -3,6 +3,13 @@
 ## @param datasetPath The local path to get the dataset from.
 datasetPath: /home/fnikol/Workspace/projects/OpenGadget3/dataset
 
+rootless:
+  enabled: true
+
+limits:
+  mem: "128Mi"
+  cpu: 1
+  gpu: 1
 
 platform:
   chaos-mesh:

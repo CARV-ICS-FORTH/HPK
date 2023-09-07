@@ -15,7 +15,7 @@
 package compute
 
 import (
-	"github.com/carv-ics-forth/hpk/compute/paths"
+	"github.com/carv-ics-forth/hpk/compute/endpoint"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -69,5 +69,5 @@ var (
 	K8SClient    client.Client
 	K8SClientset *kubernetes.Clientset
 
-	HPK paths.HPKPath
+	HPK endpoint.HPKPath
 )

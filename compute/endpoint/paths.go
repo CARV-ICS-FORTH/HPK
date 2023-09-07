@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package paths
+package endpoint
 
 import (
 	"os"
@@ -25,33 +25,48 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-/************************************************************
-
-			Set Shared Paths for Slurm runtime
-
-************************************************************/
-
 const (
 	PodGlobalDirectoryPermissions = os.FileMode(0o777)
 	PodSpecJsonFilePermissions    = os.FileMode(0o600)
 	ContainerJobPermissions       = os.FileMode(0o777)
 )
 
+type ControlFileType = string
+
+// Control File (Written by the Sbatch script)
 const (
-	// Slurm-Related Extensions
-	ExtensionSysError = ".syserror"
+	// ExtensionSysError describes the file where the sbatch will describe its failure.
+	ExtensionSysError ControlFileType = ".syserror"
 
-	// Pod-Related Extensions
-	ExtensionIP     = ".ip"
-	ExtensionCRD    = ".crd"
+	// ExtensionIP describes the file where the sbatch script will write its ip.
+	ExtensionIP ControlFileType = ".ip"
+
+	// ExtensionExitCode describes the file where the sbatch script will write its exit code.
+	ExtensionExitCode ControlFileType = ".exitCode"
+
+	// ExtensionJobID describes the file  where the sbatch script will write its job id.
+	ExtensionJobID ControlFileType = ".jobid"
+)
+
+// Pod-Related Extensions
+const (
+	// ExtensionCRD describes the file where HPK will write the pod definition.
+	ExtensionCRD = ".crd"
+
+	// ExtensionStdout describes the file where the sbatch script will write its stdout.
 	ExtensionStdout = ".stdout"
-	ExtensionStderr = ".stderr"
 
-	// Container-Related Extensions
-	ExtensionExitCode    = ".exitCode"
-	ExtensionJobID       = ".jobid"
+	// ExtensionStderr describes the file where the sbatch script will write its stderr.
+	ExtensionStderr = ".stderr"
+)
+
+// Container-Related Extensions
+const (
+	// ExtensionEnvironment describes the file  where the environment variables for the container are held.
 	ExtensionEnvironment = ".env"
-	ExtensionLogs        = ".logs"
+
+	// ExtensionLogs describes the file  where the sbatch script will write its logs.
+	ExtensionLogs = ".logs"
 )
 
 type HPKPath string
@@ -110,21 +125,21 @@ func (p HPKPath) WalkPodDirectories(f WalkPodFunc) error {
 	})
 }
 
-// ParseAbsPath parses the path according to the expected HPK format, and returns
-// the corresponding fields.
-// Validated through: https://regex101.com/r/5gRXwJ/2
-func (p HPKPath) ParseAbsPath(absPath string) (podKey types.NamespacedName, fileName string, invalid bool) {
+// ParseControlFilePath parses the path according to the expected HPK format, and returns the corresponding fields.
+// Validated through: https://regex101.com/r/olnlMx/1
+func (p HPKPath) ParseControlFilePath(absPath string) (podKey types.NamespacedName, fileName string, invalid bool) {
 	// ignore non absolute paths
 	if !filepath.IsAbs(absPath) {
 		return types.NamespacedName{}, "", true
 	}
 
-	// keep only the last part (e.g, /namespace/pod/.../file)
-	relPath := strings.TrimPrefix(absPath, p.String()+string(filepath.Separator))
+	// keep only the relative path within the pod directory (e.g, /namespace/pod/.../file)
+	relPath := strings.TrimPrefix(absPath, p.String())
 
 	// find matches
-	re := regexp.MustCompile(`^/*(?P<namespace>\S+)/(?P<pod>\S+?)(/.virtualenv)*/(?P<file>.*)$`)
+	re := regexp.MustCompile(`^/(?P<namespace>\S+)/(?P<pod>\S+?)/controlfiles/(?P<file>.*)$`)
 	match := re.FindStringSubmatch(relPath)
+
 	if len(match) == 0 {
 		return types.NamespacedName{}, "", true
 	}
@@ -163,16 +178,6 @@ func (p PodPath) String() string {
 	return string(p)
 }
 
-// SysErrorFilePath .hpk/namespace/podName/.syserror
-func (p PodPath) SysErrorFilePath() string {
-	return filepath.Join(string(p), ExtensionSysError)
-}
-
-// IPAddressPath .hpk/namespace/podName/.ip
-func (p PodPath) IPAddressPath() string {
-	return filepath.Join(string(p), ExtensionIP)
-}
-
 /*
 	Pod-Related paths not captured by Slurm Notifier.
 	They are needed for HPK to bootstrap a pod.
@@ -193,67 +198,61 @@ func (p PodPath) PodEnvironmentIsOK() (bool, string) {
 	return true, ""
 }
 
-// VirtualEnvironmentDir .hpk/namespace/podName/.virtualenv
-func (p PodPath) VirtualEnvironmentDir() PodPath {
-	return PodPath(filepath.Join(string(p), ".virtualenv"))
+// JobDir .hpk/namespace/podName/.virtualenv
+func (p PodPath) JobDir() string {
+	return filepath.Join(string(p), "job")
 }
 
 func (p PodPath) VolumeDir() string {
-	return filepath.Join(string(p.VirtualEnvironmentDir()), "volumes")
+	return filepath.Join(string(p), "volumes")
+}
+
+func (p PodPath) LogDir() string {
+	return filepath.Join(string(p), "logs")
+}
+
+func (p PodPath) ControlFileDir() string {
+	return filepath.Join(string(p), "controlfiles")
 }
 
 // EncodedJSONPath .hpk/namespace/podName/.virtualenv/pod.crd
 func (p PodPath) EncodedJSONPath() string {
-	return filepath.Join(string(p.VirtualEnvironmentDir()), "pod"+ExtensionCRD)
+	return filepath.Join(p.JobDir(), "pod"+ExtensionCRD)
 }
 
 // ConstructorFilePath .hpk/namespace/podName/.virtualenv/constructor.sh
 func (p PodPath) ConstructorFilePath() string {
-	return filepath.Join(string(p.VirtualEnvironmentDir()), "constructor.sh")
+	return filepath.Join(p.JobDir(), "constructor.sh")
 }
 
 // CgroupFilePath .hpk/namespace/podName/.virtualenv/cgroup.toml
 func (p PodPath) CgroupFilePath() string {
-	return filepath.Join(string(p.VirtualEnvironmentDir()), "cgroup.toml")
+	return filepath.Join(p.JobDir(), "cgroup.toml")
 }
 
 // SubmitJobPath .hpk/namespace/podName/.virtualenv/submit.sh
 func (p PodPath) SubmitJobPath() string {
-	return filepath.Join(string(p.VirtualEnvironmentDir()), "submit.sh")
+	return filepath.Join(p.JobDir(), "submit.sh")
 }
 
-// StdoutPath .hpk/namespace/podName/.virtualenv/pod.stdout
+// StdoutPath $HPK/<namespace>/<podName>/logs/.stdout
 func (p PodPath) StdoutPath() string {
-	return filepath.Join(string(p.VirtualEnvironmentDir()), "pod"+ExtensionStdout)
+	return filepath.Join(p.LogDir(), ExtensionStdout)
 }
 
-// StderrPath .hpk/namespace/podName/.virtualenv/pod.stderr
+// StderrPath $HPK/<namespace>/<podName>/logs/.stderr
 func (p PodPath) StderrPath() string {
-	return filepath.Join(string(p.VirtualEnvironmentDir()), "pod"+ExtensionStderr)
+	return filepath.Join(p.LogDir(), ExtensionStderr)
 }
 
-/*
-	Pod-Related functions
-*/
-
-func (p PodPath) CreateVolume(volumeName string, mode os.FileMode) (string, error) {
-	fullPath := filepath.Join(p.VolumeDir(), volumeName)
-
-	if err := os.MkdirAll(fullPath, mode); err != nil {
-		return fullPath, errors.Wrapf(err, "cannot create dir '%s'", fullPath)
-	}
-
-	return fullPath, nil
+// SysErrorFilePath points to $HPK/<namespace>/<podName>/controlfile/.syserror
+func (p PodPath) SysErrorFilePath() string {
+	return filepath.Join(p.ControlFileDir(), string(ExtensionSysError))
 }
 
-func (p PodPath) CreateVolumeLink(src string, dst string) (string, error) {
-	dstFullPath := filepath.Join(p.VolumeDir(), dst)
-
-	if err := os.Symlink(src, dstFullPath); err != nil {
-		return dstFullPath, errors.Wrapf(err, "cannot create symlink '%s'", dstFullPath)
-	}
-
-	return dstFullPath, nil
+// IPAddressPath points $HPK/<namespace>/<podName>/controlfile/.ip
+func (p PodPath) IPAddressPath() string {
+	return filepath.Join(p.ControlFileDir(), string(ExtensionIP))
 }
 
 /*
@@ -262,21 +261,27 @@ func (p PodPath) CreateVolumeLink(src string, dst string) (string, error) {
 */
 
 func (p PodPath) Container(containerName string) ContainerPath {
-	return ContainerPath(filepath.Join(string(p), containerName))
+	return ContainerPath{
+		p:             p,
+		containerName: containerName,
+	}
 }
 
-type ContainerPath string
+type ContainerPath struct {
+	p             PodPath
+	containerName string
+}
 
 func (c ContainerPath) LogsPath() string {
-	return filepath.Join(string(c) + ExtensionLogs)
+	return filepath.Join(c.p.LogDir(), c.containerName+ExtensionLogs)
 }
 
 func (c ContainerPath) IDPath() string {
-	return filepath.Join(string(c) + ExtensionJobID)
+	return filepath.Join(c.p.ControlFileDir(), c.containerName+string(ExtensionJobID))
 }
 
 func (c ContainerPath) ExitCodePath() string {
-	return filepath.Join(string(c) + ExtensionExitCode)
+	return filepath.Join(c.p.ControlFileDir(), c.containerName+string(ExtensionExitCode))
 }
 
 /*
@@ -285,5 +290,5 @@ func (c ContainerPath) ExitCodePath() string {
 */
 
 func (c ContainerPath) EnvFilePath() string {
-	return filepath.Join(string(c) + ExtensionEnvironment)
+	return filepath.Join(c.p.JobDir(), c.containerName+ExtensionEnvironment)
 }

@@ -9,19 +9,19 @@ spec:
       name: workers
       cluster:
         templateRef: frisbee.apps.mpi-worker
-        instances: 4 # Must match
+        instances: 12 # Must match
 
     - action: Service
       name: launcher
-      depends: { running: [ workers ] }
+      depends: {running: [ workers ]}
       service:
         templateRef: frisbee.apps.mpi-launcher
         inputs:
-          - {numOfWorkers: 4} # Must match
+          - {numOfWorkers: 12} # Must match
 
     # Teardown
     - action: Delete
       name: teardown
-      depends: { success: [ launcher ] }
+      depends: {success: [ launcher ]}
       delete:
-        jobs: [ workers ]
+        jobs: [workers]

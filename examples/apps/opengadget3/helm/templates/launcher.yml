@@ -12,19 +12,22 @@ spec:
     decorators:
       telemetry:
         - frisbee.system.telemetry.resources
+        - frisbee.apps.opengadget3.telemetry
     volumes:
       # declare ssh volume
       - name: ssh-volume
         configMap:
           name: ssh-config
+          {{- if .Values.rootless.enabled}}
           defaultMode: 0600
+          {{- end}}
       # declare dataset volume
       - name: dataset-volume
         hostPath:
           path: {{.Values.datasetPath}}
       # declare mpi volume
       - name: mpi-volume
-        emptyDir: { }
+        emptyDir: {}
     initContainers:
       - name: populate-workers
         image: busybox
@@ -86,4 +89,4 @@ spec:
             export MPIJOBS=${numOfWorkers}
             export CONFIG=boxes_32
 
-            /u/eupex/docker-entrypoint.sh
+            /u/eupex/docker-entrypoint.sh |& tee /dev/shm/logs

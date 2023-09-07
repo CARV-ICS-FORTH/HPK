@@ -68,6 +68,14 @@ func strval(v interface{}) string {
 	}
 }
 
+/*
+	PauseScriptTemplate provides the template for building pods.
+
+Remarks:
+
+	--userns is need to maintain the user's permissions.
+	--pid is not needed in order for different containers in the same pod to share the same pid space
+*/
 const PauseScriptTemplate = `#!/bin/bash
 
 ############################
@@ -162,8 +170,8 @@ function handle_init_containers() {
 	# Mark the beginning of an init job (all get the shell's pid).  
 	echo pid://$$ > {{$container.JobIDPath}}
 
-	# --userns is need to maintain the user's permissions.
-	$(apptainer {{ $container.ExecutionMode }} --cleanenv --pid --writable-tmpfs --no-mount home --unsquash \
+
+	$(apptainer {{ $container.ExecutionMode }} --cleanenv --writable-tmpfs --no-mount home --unsquash \
 	{{- if $container.RunAsUser}}
 	--security uid:{{$container.RunAsUser}},gid:{{$container.RunAsUser}} --userns \
 	{{- end}}
@@ -201,7 +209,7 @@ function handle_containers() {
 	sh -c {{$container.EnvFilePath}} > /scratch/{{$container.InstanceName}}.env
 	{{- end}}
 
-	$(apptainer {{ $container.ExecutionMode }} --cleanenv --pid --writable-tmpfs --no-mount home --unsquash \
+	$(apptainer {{ $container.ExecutionMode }} --cleanenv --writable-tmpfs --no-mount home --unsquash \
 	{{- if $container.RunAsUser}}
 	--security uid:{{$container.RunAsUser}},gid:{{$container.RunAsUser}} --userns \
 	{{- end}}

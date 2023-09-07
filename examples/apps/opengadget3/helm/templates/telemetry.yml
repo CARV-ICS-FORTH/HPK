@@ -1,0 +1,58 @@
+---
+apiVersion: frisbee.dev/v1alpha1
+kind: Template
+metadata:
+  name: frisbee.apps.opengadget3.telemetry
+spec:
+  service:
+    decorators:
+      annotations: # Declare the container explicitly as sidecar.
+        "sidecar.frisbee.dev/telemetry": telegraf
+    containers:
+      - name: telegraf
+        image: telegraf:1.20.3
+        ports:
+          - name: tel-gadget
+            containerPort: 9443
+        command:
+          - /bin/sh # Run shell
+          - -c # Read from string
+          - |  # Multi-line str
+            set -eum
+
+            # https://grokdebugger.com/
+            # By default the parser will handle extracted fields are strings and will quote them.
+            # Prometheus however expects unquoted values. For this reason we must specify the values to the handled as integers or floats.
+            # The exception is the "reference" value, which we want it to be handled as a string, because Prometheus will then treat it as a label.
+            cat > /tmp/telegraf.conf <<EOF
+              [[inputs.tail]]
+                files = ["/dev/shm/logs"]
+                from_beginning = true
+
+                name_override = "gadget"
+
+                data_format = "grok"
+                grok_patterns = [
+                'Sync-Point %{NUMBER:syncpoint:float}, Time: %{NUMBER:time:float}, Redshift: %{NUMBER:redshift:string}, Systemstep: %{NUMBER:systemstep:float}, Dloga: %{NUMBER:dloga:float}',
+                'bin=%{INT:bin:string}%{SPACE}%{INT:noncells:int}%{SPACE}%{INT:cells:int}%{SPACE}%{NUMBER:dt:float}%{SPACE}%{INT:cummulative:int}%{DATA}%{NUMBER:avgtime:float}%{SPACE}%{NUMBER:cpufrac:float}%',
+              ]
+
+              [[outputs.prometheus_client]]
+                 listen = ":9443"
+                 metric_version = 2
+                 export_timestamp = true
+                 string_as_label = true
+                 collectors_exclude = ["gocollector","process"]
+            EOF
+
+            sleep 10
+            cat /dev/shm/logs
+
+            telegraf --config /tmp/telegraf.conf
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frisbee.apps.opengadget3.telemetry.config
+data: {{(.Files.Glob "dashboards/bins.json").AsConfig | nindent 2}}

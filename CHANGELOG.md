@@ -24,5 +24,6 @@
 - Fix exiting of sbatch script when there is an issue with the constructor script.
 - Fix issue with quotas inside the sbatch script.
 - Work on how objects are being deleted (Slurm jobs, strange permissions on volumes, ...)
+- In a nested select within a loop in the Slurm listener we used "continue" whereas "break" had to be used.
 
 ## 0.1.0 \[2023-05-13\]

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package stats contains code for accessing compute resources via Slurm.
+// Package slurm contains code for accessing compute resources via Slurm.
 package slurm
 
 import (
