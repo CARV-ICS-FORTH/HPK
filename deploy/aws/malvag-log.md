@@ -1,1 +1,0 @@
-ssh -i ./hpk-cluster-keypair.pem ubuntu@3.64.7.210
