@@ -30,9 +30,9 @@ spec:
     "spark.speculation": "false"
     "spark.network.timeout": "2400"
     # S3 Credential
-    "spark.hadoop.fs.s3a.endpoint": "http://artifacts:9000"
-    "spark.hadoop.fs.s3a.access.key": "L3PL0P7ux0uTkZcjhvNB"
-    "spark.hadoop.fs.s3a.secret.key": "6MWqKcrwcLJ1LlGBMaGeNqRUqqTFOTD1FPQqXbun"
+    "spark.hadoop.fs.s3a.endpoint": "http://artifacts.analytics-spark.svc:9000"
+    "spark.hadoop.fs.s3a.access.key": "oBzJ1gOZOu0NgpLmaeKJ"
+    "spark.hadoop.fs.s3a.secret.key": "PhwV7JQib8Bh3jxSJPgLtdR7OrbBHF9vyExrl6rc"
     # S3 Configs
     "spark.hadoop.fs.s3a.path.style.access": "true"
     "spark.hadoop.fs.s3a.fast.upload": "true"

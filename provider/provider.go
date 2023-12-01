@@ -475,7 +475,8 @@ func (v *VirtualK8S) GetContainerLogs(ctx context.Context, namespace, podName, c
 	 * Log Streaming (With Follow)
 	 *---------------------------------------------------*/
 	if opts.Follow {
-		return io.NopCloser(strings.NewReader("Follow is not yet supported by HPK.\n")), nil
+		// 	return io.NopCloser(strings.NewReader("Follow is not yet supported by HPK.\n")), nil
+		v.Logger.Info("[K8s] WARNING -- Log with \"follow\" is not yet supported by HPK")
 
 		/*
 			seek := tail.SeekInfo{

@@ -1,0 +1,145 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: tfjob-wf-
+  namespace: kubeflow
+spec:
+  entrypoint: tfjob-wf
+  podGC:
+    strategy: OnPodSuccess
+  volumes:
+  - name: model
+    hostPath:
+      path: "/home/malvag/HPK/examples/apps/distributed-ml/data"
+
+  templates:
+  - name: tfjob-wf
+    steps:
+    - - name: data-ingestion-step
+        template: data-ingestion-step
+    - - name: distributed-tf-training-steps
+        template: distributed-tf-training-steps
+  - name: data-ingestion-step
+    serviceAccountName: argo
+    memoize:
+      key: "step-cache"
+      maxAge: "1h"
+      cache:
+        configMap:
+          name: my-config
+          key: step-cache
+    container:
+      image: malvag/multi-worker-strategy:v0.1
+      imagePullPolicy: IfNotPresent
+      command: ["python", "/data-ingestion.py"]
+
+  - name: distributed-tf-training-steps
+    steps:
+    - - name: cnn-model
+        template: cnn-model
+      - name: cnn-model-with-batch-norm
+        template: cnn-model-with-batch-norm
+
+  - name: cnn-model
+    serviceAccountName: training-operator
+    resource:
+      action: create
+      setOwnerReference: true
+      successCondition: status.replicaStatuses.Worker.succeeded = 4 
+      failureCondition: status.replicaStatuses.Worker.failed > 0
+      manifest: |
+        apiVersion: kubeflow.org/v1
+        kind: TFJob
+        metadata:
+          generateName: multi-worker-training-
+        spec:
+          runPolicy:
+            cleanPodPolicy: None
+          tfReplicaSpecs:
+            Worker:
+              replicas: 4
+              restartPolicy: Never
+              template:
+                spec:
+                  containers:
+                    - name: tensorflow
+                      image: malvag/multi-worker-strategy:v0.1
+                      imagePullPolicy: IfNotPresent
+                      command: ["python", "/multi-worker-distributed-training.py", "--saved_model_dir", "/trained_model/saved_model_versions/1/", "--checkpoint_dir", "/trained_model/checkpoint", "--model_type", "cnn"]
+                      volumeMounts:
+                        - mountPath: /trained_model
+                          name: training
+                      resources:
+                        limits:
+                          cpu: 500m
+                  volumes:
+                    - name: training
+                      hostPath:
+                        path: "/home/malvag/HPK/examples/apps/distributed-ml/data"
+
+  - name: cnn-model-with-batch-norm
+    serviceAccountName: training-operator
+    resource:
+      action: create
+      setOwnerReference: true
+      successCondition: status.replicaStatuses.Worker.succeeded = 4
+      failureCondition: status.replicaStatuses.Worker.failed > 0
+      manifest: |
+        apiVersion: kubeflow.org/v1
+        kind: TFJob
+        metadata:
+          generateName: multi-worker-training-
+        spec:
+          runPolicy:
+            cleanPodPolicy: None
+          tfReplicaSpecs:
+            Worker:
+              replicas: 4
+              restartPolicy: Never
+              template:
+                spec:
+                  containers:
+                    - name: tensorflow
+                      image: malvag/multi-worker-strategy:v0.1
+                      imagePullPolicy: IfNotPresent
+                      command: ["python", "/multi-worker-distributed-training.py", "--saved_model_dir", "/trained_model/saved_model_versions/3/", "--checkpoint_dir", "/trained_model/checkpoint", "--model_type", "cnn_dropout"]
+                      volumeMounts:
+                        - mountPath: /trained_model
+                          name: training
+                      resources:
+                        limits:
+                          cpu: 500m
+                  volumes:
+                    - name: training
+                      hostPath:
+                        path: "/home/malvag/HPK/examples/apps/distributed-ml/data"
+  # - name: model-selection-step
+  #   serviceAccountName: argo
+  #   container:
+  #     image: malvag/multi-worker-strategy:v0.1
+  #     imagePullPolicy: IfNotPresent
+  #     command: ["python", "/model-selection.py"]
+  #     volumeMounts:
+  #     - name: model
+  #       mountPath: /trained_model
+# ---
+#  - name: create-model-serving-service
+#    serviceAccountName: training-operator
+#    successCondition: status.modelStatus.states.transitionStatus = UpToDate
+#    resource:
+#      action: create
+#      setOwnerReference: true
+#      manifest: |
+#        apiVersion: serving.kserve.io/v1beta1
+#        kind: InferenceService
+#        metadata:
+#          name: tf-mnist
+#          annotations:
+#            autoscaling.knative.dev/target: "1"
+#        spec:
+#          predictor:
+#            model:
+#              modelFormat:
+#                name: tensorflow
+#              image: "emacski/tensorflow-serving:2.6.0"
+#              storageUri: "pvc://strategy-volume/saved_model_versions"

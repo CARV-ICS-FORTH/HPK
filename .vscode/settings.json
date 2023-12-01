@@ -1,0 +1,4 @@
+{
+    "python.analysis.autoImportCompletions": true,
+    "git.ignoreLimitWarning": true
+}
