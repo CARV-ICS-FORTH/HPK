@@ -81,15 +81,6 @@ else
 fi
 ```
 
-> In case there is a problem using these CNI plugins as a regular user you can additionally setup apptainer with the following:
-```bash
-cat >>/etc/apptainer/apptainer.conf <<EOF
-allow net users = <??>
-allow net groups = <??>
-allow net networks = bridge, flannel
-EOF
-```
-
 ### Install [Flannel](https://github.com/flannel-io/flannel) 
 > On all hosts
 
@@ -161,6 +152,14 @@ cat > /etc/apptainer/network/40_fakeroot.conflist <<EOF
 EOF
 ```
 
+> In case there is a problem using these CNI plugins as a regular user you can additionally setup apptainer with the following:
+```bash
+cat >>/etc/apptainer/apptainer.conf <<EOF
+allow net users = <??>
+allow net groups = <??>
+allow net networks = bridge, flannel
+EOF
+```
 ### Install Utilities
 - Kubectl utility with the same version as the Kubernetes
 ```bash
