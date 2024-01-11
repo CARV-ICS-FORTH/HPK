@@ -230,15 +230,6 @@ else
     sysctl -p /etc/sysctl.d/90-max_user_namespaces.conf
 fi
 </code></pre>
-<blockquote>
-<p>In case there is a problem using these CNI plugins as a regular user you can additionally setup apptainer with the following:</p>
-</blockquote>
-<pre><code class="language-bash">cat &gt;&gt;/etc/apptainer/apptainer.conf &lt;&lt;EOF
-allow net users = &lt;??&gt;
-allow net groups = &lt;??&gt;
-allow net networks = bridge, flannel
-EOF
-</code></pre>
 <h3 id="install-flannel">Install <a href="https://github.com/flannel-io/flannel">Flannel</a></h3>
 <blockquote>
 <p>On all hosts</p>
@@ -302,6 +293,15 @@ rm -f flannel-amd64
         }
     ]
 }
+EOF
+</code></pre>
+<blockquote>
+<p>In case there is a problem using these CNI plugins as a regular user you can additionally setup apptainer with the following:</p>
+</blockquote>
+<pre><code class="language-bash">cat &gt;&gt;/etc/apptainer/apptainer.conf &lt;&lt;EOF
+allow net users = &lt;??&gt;
+allow net groups = &lt;??&gt;
+allow net networks = bridge, flannel
 EOF
 </code></pre>
 <h3 id="install-utilities">Install Utilities</h3>
