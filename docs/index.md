@@ -35,5 +35,5 @@ HPK is a continuation of the [KNoC](https://github.com/CARV-ICS-FORTH/knoc) proj
 
 <div class="text-center">
 <a href="admin-guide.html" class="btn btn-primary" role="button">Admin Guide</a>
-<a href="user-guide/" class="btn btn-primary" role="button">User Guide</a>
+<a href="examples.html" class="btn btn-primary" role="button">Examples</a>
 </div>

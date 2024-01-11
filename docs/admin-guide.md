@@ -34,7 +34,7 @@ else
 fi
 ```
 ### Install [etcd](https://etcd.io/) 
-> On the host thats the same as the slurmctld
+> On one host
 
 We use etcd, a key-value store that will be used by flannel later.
 
@@ -215,8 +215,6 @@ kubectl get nodes
 ## Test
 To test that everything is running correctly:
 ```bash
-git clone https://github.com/CARV-ICS-FORTH/HPK
-cd HPK/
 make test
 ```
 ![](images/make-test.png)

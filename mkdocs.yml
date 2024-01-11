@@ -3,9 +3,7 @@ site_url: https://carv-ics-forth.github.io/HPK/docs
 nav:
   - 'Overview': 'index.md'
   - 'Admin Guide': 'admin-guide.md'
-  - 'User Guide':
-    - 'Writing your docs': 'writing-your-docs.md'
-    - 'Styling your docs': 'styling-your-docs.md'
+  - 'Examples': 'examples.md'
   - 'Technical notes': 'technical-notes.md'
 use_directory_urls: false
 theme:
