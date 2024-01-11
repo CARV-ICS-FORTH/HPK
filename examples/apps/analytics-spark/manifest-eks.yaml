@@ -56,12 +56,3 @@ spec:
     memoryOverhead: 2g
   restartPolicy:
     type: Never
-
-
-  --set artifactRepository.s3.bucket=artifacts \
-  --set artifactRepository.s3.insecure=true \
-  --set artifactRepository.s3.accessKeySecret.name=argo-artifacts \
-  --set artifactRepository.s3.accessKeySecret.key=rootUser \
-  --set artifactRepository.s3.secretKeySecret.name=argo-artifacts \
-  --set artifactRepository.s3.secretKeySecret.key=rootPassword \
-  --set artifactRepository.s3.endpoint=argo-artifacts:9000

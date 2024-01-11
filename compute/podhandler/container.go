@@ -204,7 +204,7 @@ func SyncContainerStatuses(pod *corev1.Pod) {
 			var restartCount int32
 
 			if exitCode == 0 {
-				reason = "Success"
+				reason = "Completed"
 				message = "Container successfully terminated"
 			} else {
 				reason = "Error(" + containerStatus.Name + ")"

@@ -45,3 +45,5 @@ helm install \
 
 # Install Spark Application
 #kubectl apply -f manifest.yaml -n "${TEST_NAMESPACE}"
+sed -i "s/ACCESS_KEY/$ACCESS_KEY/g; s/SECRET_KEY/$SECRET_KEY/g" manifest-tpcds-benchmark.yaml
+sed -i "s/ACCESS_KEY/$ACCESS_KEY/g; s/SECRET_KEY/$SECRET_KEY/g" manifest-tpcds-data-generation.yaml

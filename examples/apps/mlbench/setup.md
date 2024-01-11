@@ -1,22 +1,7 @@
-#!/bin/bash
+```bash
 
-####### Preamble ###############
-# Ensure Testing Namespace
-if [[ -z "${TEST_NAMESPACE}" ]]; then
-  # Define namespace based on the current directory's name
-  export TEST_NAMESPACE=${PWD##*/}
-
-  # Set namespace
-  kubectl create namespace "${TEST_NAMESPACE}"
-fi
-set -eu
-################################
-
-# dead link
-
-# # Update Helm Repos
-# helm repo add mlbench https://carv-ics-forth.github.io/frisbee/charts
-# helm repo update
+git clone https://github.com/mlbench/mlbench-helm.git
+cd mlbench-helm
 
 export NUM_NODES=1
 export NUM_CPUS=1
@@ -33,3 +18,5 @@ helm template mlbench-hpk-demo . \
      --set limits.gpu=${NUM_GPUS} \
      --set limits.cpu=${NUM_CPUS-1} \
      --set master.service.type=ClusterIP | kubectl apply -f -
+
+```

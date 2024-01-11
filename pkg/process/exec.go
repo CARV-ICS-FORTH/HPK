@@ -50,7 +50,6 @@ func ExecuteInDir(dir string, command string, arguments ...string) (out []byte, 
 	buffer := new(bytes.Buffer)
 	cmd.Stdout = buffer
 	cmd.Stderr = buffer
-
 	if err = cmd.Start(); err != nil {
 		return buffer.Bytes(), fmt.Errorf("could not start process: %w", err)
 	}

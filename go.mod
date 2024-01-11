@@ -12,6 +12,7 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/matishsiao/goInfo v0.0.0-20210923090445-da2e3fa8d45f
 	github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e
+	github.com/nxadm/tail v1.4.8
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.9.0
 	github.com/slok/kubewebhook/v2 v2.5.0
@@ -91,6 +92,7 @@ require (
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/protobuf v1.28.1 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
+	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/apiserver v0.25.0 // indirect

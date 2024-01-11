@@ -324,6 +324,16 @@ func (h *podHandler) PersistentVolumeClaimSource(ctx context.Context, vol corev1
 	 * Link the Referenced PV to the Pod's Volumes
 	 *---------------------------------------------------*/
 	switch {
+	// // DEBUG ONLY
+	// case pv.Spec.HostPath != nil:
+	// 	dstFullPath := filepath.Join(h.podDirectory.VolumeDir(), vol.Name)
+
+	// 	if err := os.Symlink(pv.Spec.Local.Path, dstFullPath); err != nil {
+	// 		compute.SystemPanic(err, "cannot link symlink at path '%s'", dstFullPath)
+	// 	}
+
+	// 	h.logger.Info("  * HostPath Volume is mounted", "name", vol.Name)
+	// 	break
 	case pv.Spec.Local != nil:
 		dstFullPath := filepath.Join(h.podDirectory.VolumeDir(), vol.Name)
 

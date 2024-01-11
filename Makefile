@@ -95,7 +95,6 @@ build-race: ## Build HPK binary with race condition detector
 
 run-kubemaster: ## Run the Kubernetes Master
 	mkdir -p ${K8SFS_PATH}/log
-
 	apptainer run --net --dns ${EXTERNAL_DNS} --fakeroot \
 	--cleanenv --pid --containall \
 	--no-init --no-umask --no-eval \

@@ -141,7 +141,7 @@ func UpdateStatusFromRuntime(pod *corev1.Pod) {
 			expression: state.NumSuccessfulJobs() == totalJobs,
 			change: func(status *corev1.PodStatus) {
 				status.Phase = corev1.PodSucceeded
-				status.Reason = "Success"
+				status.Reason = "Completed"
 				status.Message = fmt.Sprintf("Success containers: %s", state.ListSuccessfulJobs())
 
 				setTerminationConditions(pod)
