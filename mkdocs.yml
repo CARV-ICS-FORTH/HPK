@@ -1,0 +1,18 @@
+site_name: HPK Documentation
+site_url: https://carv-ics-forth.github.io/HPK/docs
+nav:
+  - 'Overview': 'index.md'
+  - 'Admin Guide': 'admin-guide.md'
+  - 'User Guide':
+    - 'Writing your docs': 'writing-your-docs.md'
+    - 'Styling your docs': 'styling-your-docs.md'
+  - 'Technical notes': 'technical-notes.md'
+use_directory_urls: false
+theme:
+  name: cinder
+extra_css:
+  - css/extra.css
+plugins:
+  - include-markdown
+repo_url: https://github.com/CARV-ICS-FORTH/HPK
+copyright: © 2020-2023, FORTH-ICS
