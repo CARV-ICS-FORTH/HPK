@@ -320,7 +320,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 		resources.Sum(resourceRequest, initContainer.Resources.Requests)
 	}
 
-	for _, container := range pod.Spec.InitContainers {
+	for _, container := range pod.Spec.Containers {
 		resources.Sum(resourceRequest, container.Resources.Requests)
 	}
 
