@@ -4,7 +4,6 @@ nav:
   - 'Overview': 'index.md'
   - 'Admin Guide': 'admin-guide.md'
   - 'Examples': 'examples.md'
-  - 'Technical notes': 'technical-notes.md'
 use_directory_urls: false
 theme:
   name: cinder
