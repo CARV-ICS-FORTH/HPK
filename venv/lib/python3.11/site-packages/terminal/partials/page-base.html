@@ -1,0 +1,13 @@
+{% if page and page.meta %}
+    {% set show_tiles_inline = true if page.meta.show_tiles_inline is sameas true or page.meta.show_tiles_inline == "true" else false %}
+    {% set show_tiles_first = true if page.meta.show_tiles_first is sameas true or page.meta.show_tiles_first == "true" else false %}
+    {% set show_tiles_before = true if not show_tiles_inline and show_tiles_first else false %}
+    {% set show_tiles_after = true if not show_tiles_inline and not show_tiles_first else false %}
+    {% if page.meta.hide %}
+        {% set hide_git_revision_date = "true" if "git_revision_date" in page.meta.hide %}
+    {% endif %}
+{% endif %}
+{%- block before_markdown_content %}{% include "partials/page-content/before-content.html" %}{%- endblock before_markdown_content %}
+{%- block markdown_content %}{% include "partials/page-content/content.html" %}{%- endblock markdown_content %}
+{%- block after_markdown_content %}{% include "partials/page-content/after-content.html" %}{%- endblock after_markdown_content %}
+{%- block revision %}{% include "partials/page-content/revision.html" %}{%- endblock revision %}

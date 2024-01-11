@@ -1,0 +1,5 @@
+[mkdocs.plugins]
+terminal/md-to-html = terminal.plugins.md_to_html.plugin:MarkdownToHtmlFilterPlugin
+
+[mkdocs.themes]
+terminal = terminal
