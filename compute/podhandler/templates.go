@@ -80,7 +80,7 @@ const PauseScriptTemplate = `#!/bin/bash
 
 ############################
 # Auto-Generated Script    #
-# Please do not it. 	   #
+# Please do not edit. 	   #
 ############################
 
 set -eum pipeline
