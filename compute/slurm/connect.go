@@ -14,6 +14,10 @@
 
 package slurm
 
+import (
+	"github.com/carv-ics-forth/hpk/compute/slurm/apiConnector"
+)
+
 /************************************************************
 
 			Initiate Slurm Connector
@@ -36,5 +40,6 @@ var Slurm struct {
 // ConnectionOK return true if HPK maintains connection with the Slurm manager.
 // Otherwise, it returns false.
 func ConnectionOK() bool {
-	return true
+
+	return apiConnector.Connect()
 }

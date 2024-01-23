@@ -84,11 +84,15 @@ help: ## Display this help
 
 ##@ Build
 
+# build: ## Build HPK binary
+# 	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build $(VERSION_FLAGS) -ldflags '-extldflags "-static"' -o bin/hpk-kubelet ./cmd/hpk
+
 build: ## Build HPK binary
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(VERSION_FLAGS) -ldflags '-extldflags "-static"' -o bin/hpk-kubelet ./cmd/hpk
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build $(VERSION_FLAGS) -o bin/hpk-kubelet ./cmd/hpk
+
 
 build-race: ## Build HPK binary with race condition detector
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(VERSION_FLAGS) -race -o bin/hpk-kubelet ./cmd/hpk
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build $(VERSION_FLAGS) -race -o bin/hpk-kubelet ./cmd/hpk
 
 
 ##@ Deployment
