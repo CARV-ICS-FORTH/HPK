@@ -263,6 +263,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	 * Mount Volumes
 	 *---------------------------------------------------*/
 	for _, vol := range h.Pod.Spec.Volumes {
+		// h.Pod.Spec.Containers[0].VolumeMounts
 		if err := h.mountVolumeSource(ctx, vol); err != nil {
 			compute.PodError(pod, "VolumeError", err.Error())
 
