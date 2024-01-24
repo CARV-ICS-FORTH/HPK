@@ -324,16 +324,14 @@ func (h *podHandler) PersistentVolumeClaimSource(ctx context.Context, vol corev1
 	 * Link the Referenced PV to the Pod's Volumes
 	 *---------------------------------------------------*/
 	switch {
-	// // DEBUG ONLY
-	// case pv.Spec.HostPath != nil:
-	// 	dstFullPath := filepath.Join(h.podDirectory.VolumeDir(), vol.Name)
+	case pv.Spec.HostPath != nil:
+		dstFullPath := filepath.Join(h.podDirectory.VolumeDir(), vol.Name)
 
-	// 	if err := os.Symlink(pv.Spec.Local.Path, dstFullPath); err != nil {
-	// 		compute.SystemPanic(err, "cannot link symlink at path '%s'", dstFullPath)
-	// 	}
+		if err := os.Symlink(pv.Spec.HostPath.Path, dstFullPath); err != nil {
+			compute.SystemPanic(err, "cannot link symlink at path '%s'", dstFullPath)
+		}
 
-	// 	h.logger.Info("  * HostPath Volume is mounted", "name", vol.Name)
-	// 	break
+		h.logger.Info("  * HostPath Volume is mounted", "fullpath", dstFullPath)
 	case pv.Spec.Local != nil:
 		dstFullPath := filepath.Join(h.podDirectory.VolumeDir(), vol.Name)
 
@@ -341,7 +339,7 @@ func (h *podHandler) PersistentVolumeClaimSource(ctx context.Context, vol corev1
 			compute.SystemPanic(err, "cannot link symlink at path '%s'", dstFullPath)
 		}
 
-		h.logger.Info("  * Local Volume is mounted", "name", vol.Name)
+		h.logger.Info("  * Local Volume is mounted", "fullpath", dstFullPath)
 	default:
 		logrus.Warn(vol)
 

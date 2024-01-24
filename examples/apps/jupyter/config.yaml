@@ -32,10 +32,10 @@ proxy:
       enabled: false
 singleuser:
   storage:
-    type: "none"
-    #type: "static"
-    #capacity: "10Gi"
-    #static:
-    #  pvcName: "my-storage-pvc"
+    type: "static"
+    capacity: "10Gi"
+    static:
+      pvcName: "my-storage-pvc"
+      subPath: ""
   networkPolicy:
     enabled: false
