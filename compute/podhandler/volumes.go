@@ -54,7 +54,7 @@ var NotFoundBackoff = wait.Backoff{
 // mountVolumeSource prepares the volumes into the local pod directory.
 // Critical errors related to the HPK fail directly.
 // Misconfigurations (like wrong hostpaths), are returned as errors
-func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) error {
+func (h *PodHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) error {
 	switch {
 	case vol.VolumeSource.EmptyDir != nil:
 		/*---------------------------------------------------
@@ -228,7 +228,7 @@ func (h *podHandler) mountVolumeSource(ctx context.Context, vol corev1.Volume) e
 	}
 }
 
-func (h *podHandler) DownwardAPIVolumeSource(ctx context.Context, vol corev1.Volume) {
+func (h *PodHandler) DownwardAPIVolumeSource(ctx context.Context, vol corev1.Volume) {
 	downApiDir := filepath.Join(h.podDirectory.VolumeDir(), vol.Name)
 
 	if err := os.MkdirAll(downApiDir, endpoint.PodGlobalDirectoryPermissions); err != nil {
@@ -250,7 +250,7 @@ func (h *podHandler) DownwardAPIVolumeSource(ctx context.Context, vol corev1.Vol
 	}
 }
 
-func (h *podHandler) PersistentVolumeClaimSource(ctx context.Context, vol corev1.Volume) {
+func (h *PodHandler) PersistentVolumeClaimSource(ctx context.Context, vol corev1.Volume) {
 	/*---------------------------------------------------
 	 * Get the Referenced PVC from Volume
 	 *---------------------------------------------------*/

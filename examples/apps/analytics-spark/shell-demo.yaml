@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: shell-demo
+spec:
+  volumes:
+  - name: shared-data
+    emptyDir: {}
+  containers:
+  - name: nginx 
+    image: nginx  # Assuming you still want the Nginx webserver
+    volumeMounts:
+    - name: shared-data
+      mountPath: /usr/share/nginx/html
+  hostNetwork: true
+  dnsPolicy: Default
+  initContainers:
+  - name: dns-checker
+    image: tutum/dnsutils:latest  # Or a specific version 
+    command: ["/bin/sh", "-c"] 
+    args: 
+      - | 
+        nslookup kubernetes.default 
+        nslookup google.com 
+        nslookup archive.ubuntu.com 
+    volumeMounts:
+    - name: shared-data
+      mountPath: /usr/share/nginx/html 
+  - name: check-resolv 
+    image: alpine:latest # Or a specific version like ubuntu:22.04
+    command: ["/bin/sh", "-c"]
+    args: 
+      - ping 139.91.157.1

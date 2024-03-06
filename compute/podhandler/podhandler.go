@@ -17,6 +17,7 @@ package podhandler
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -200,7 +201,7 @@ remove_pod:
 	return true
 }
 
-type podHandler struct {
+type PodHandler struct {
 	*corev1.Pod
 
 	podKey client.ObjectKey
@@ -218,7 +219,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	podKey := client.ObjectKeyFromObject(pod)
 	logger := compute.DefaultLogger.WithValues("pod", podKey)
 
-	h := podHandler{
+	h := PodHandler{
 		Pod:             pod,
 		podKey:          podKey,
 		podDirectory:    compute.HPK.Pod(podKey),
@@ -356,6 +357,28 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	}
 
 	scriptFileContent := bytes.Buffer{}
+
+	if pod.Annotations == nil {
+		pod.Annotations = make(map[string]string)
+	}
+
+	// Set annotations from HostEnvironment
+	pod.Annotations["kubeMasterHost"] = compute.Environment.KubeMasterHost
+	pod.Annotations["containerRegistry"] = compute.Environment.ContainerRegistry
+	pod.Annotations["apptainerBin"] = compute.Environment.ApptainerBin
+	pod.Annotations["enableCgroupV2"] = fmt.Sprintf("%t", compute.Environment.EnableCgroupV2)
+	pod.Annotations["workingDirectory"] = compute.Environment.WorkingDirectory
+	pod.Annotations["kubeDNS"] = compute.Environment.KubeDNS
+
+	// Set annotations from VirtualEnvironment
+	pod.Annotations["cgroupFilePath"] = h.podDirectory.CgroupFilePath()
+	pod.Annotations["constructorFilePath"] = h.podDirectory.ConstructorFilePath()
+	pod.Annotations["ipAddressPath"] = h.podDirectory.IPAddressPath()
+	pod.Annotations["stdoutPath"] = h.podDirectory.StdoutPath()
+	pod.Annotations["stderrPath"] = h.podDirectory.StderrPath()
+	pod.Annotations["sysErrorFilePath"] = h.podDirectory.SysErrorFilePath()
+
+	pod.Annotations["PauseImage"] = image.PauseImage
 
 	if err := scriptTemplate.Execute(&scriptFileContent, JobFields{
 		Pod:                h.podKey,

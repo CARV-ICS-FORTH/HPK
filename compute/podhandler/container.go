@@ -35,7 +35,7 @@ import (
 
 // buildContainer replicates the behavior of
 // https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/kuberuntime/kuberuntime_container.go
-func (h *podHandler) buildContainer(container *corev1.Container, containerStatus *corev1.ContainerStatus) (Container, error) {
+func (h *PodHandler) buildContainer(container *corev1.Container, containerStatus *corev1.ContainerStatus) (Container, error) {
 	/*---------------------------------------------------
 	 * Determine the effective security context
 	 *---------------------------------------------------*/

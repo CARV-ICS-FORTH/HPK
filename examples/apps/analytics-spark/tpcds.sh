@@ -13,7 +13,7 @@ else
 fi
 
 # run TPCDS benchmark
-cd HPK/examples/apps/analytics-spark
+#cd HPK/examples/apps/analytics-spark
 
 # Pod name and namespace
 DATA_GENERATION_DRIVER_POD_NAME="tpcds-benchmark-data-generation-1g-driver"
