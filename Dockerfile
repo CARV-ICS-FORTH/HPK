@@ -13,12 +13,11 @@ RUN go mod download
 
 # Copy the project's source code (except for whatever is included in the .dockerignore)
 COPY . .
-
 # Build release
-#RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build  -a -o /hpk ./cmd/hpk-kubelet
+#RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build  -a -o /hpk ./cmd/hpk
 
 # Build dev
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -race -a -o /hpk ./cmd/hpk-kubelet
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -race -a -o /hpk ./cmd/hpk
 
 
 # Super minimal image just to package the hpk binary. It does not include anything.

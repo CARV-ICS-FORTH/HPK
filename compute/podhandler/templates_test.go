@@ -21,7 +21,7 @@ import (
 	"testing"
 
 	"github.com/carv-ics-forth/hpk/compute"
-	"github.com/carv-ics-forth/hpk/compute/podhandler"
+	PodHandler "github.com/carv-ics-forth/hpk/compute/podhandler"
 	"github.com/pkg/errors"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -112,11 +112,11 @@ func TestConstructorSyntax(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		fields podhandler.JobFields
+		fields PodHandler.JobFields
 	}{
 		{
 			name: "noenv",
-			fields: podhandler.JobFields{
+			fields: PodHandler.JobFields{
 				HostEnv: compute.HostEnvironment{
 					ApptainerBin:      "apptainer",
 					KubeDNS:           "6.6.6.6",
@@ -132,7 +132,7 @@ func TestConstructorSyntax(t *testing.T) {
 					StderrPath:          podDir.StderrPath(),
 					SysErrorFilePath:    "",
 				},
-				InitContainers: []podhandler.Container{
+				InitContainers: []PodHandler.Container{
 					{
 						InstanceName:  "init0",
 						RunAsUser:     0,
@@ -163,7 +163,7 @@ func TestConstructorSyntax(t *testing.T) {
 					},
 				},
 
-				Containers: []podhandler.Container{
+				Containers: []PodHandler.Container{
 					{
 						InstanceName:  "lala",
 						RunAsUser:     0,
@@ -207,7 +207,7 @@ func TestConstructorSyntax(t *testing.T) {
 		},
 	}
 
-	submitTpl, err := podhandler.ParseTemplate(podhandler.PauseScriptTemplate)
+	submitTpl, err := PodHandler.ParseTemplate(PodHandler.PauseScriptTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestConstructorSyntax(t *testing.T) {
 			log.Fatal(err)
 		}
 
-		if err := podhandler.ValidateScript(f.Name()); err != nil {
+		if err := PodHandler.ValidateScript(f.Name()); err != nil {
 			log.Fatal(err)
 		}
 

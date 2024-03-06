@@ -313,15 +313,28 @@ trap 'echo [HOST] Deleting workdir ${workdir}; rm -rf ${workdir}' EXIT
 
 # --network-args "portmap=8080:80/tcp"
 # --container is needed to start a separate /dev/sh
+#exec {{$.HostEnv.ApptainerBin}} exec --containall --net --fakeroot --scratch /scratch --workdir ${workdir} \
+#{{- if .HostEnv.EnableCgroupV2}}
+#--apply-cgroups {{.VirtualEnv.CgroupFilePath}} 		\
+#{{- end}}
+#--env PARENT=${PPID}								\
+#--bind $HOME,/tmp										\
+#--hostname {{.Pod.Name}}							\
+#{{$.PauseImageFilePath}} sh -ci {{.VirtualEnv.ConstructorFilePath}} ||
+#echo "[HOST] **SYSTEMERROR** apptainer exited with code $?" | tee {{.VirtualEnv.SysErrorFilePath}}
+
+export APPTAINERENV_KUBEDNS_IP={{.HostEnv.KubeDNS}}
+
 exec {{$.HostEnv.ApptainerBin}} exec --containall --net --fakeroot --scratch /scratch --workdir ${workdir} \
 {{- if .HostEnv.EnableCgroupV2}}
 --apply-cgroups {{.VirtualEnv.CgroupFilePath}} 		\
 {{- end}}
 --env PARENT=${PPID}								\
---bind $HOME,/tmp										\
+--bind $HOME/.k8sfs/kubernetes:/k8s-data			\
+--bind $HOME,/tmp									\
 --hostname {{.Pod.Name}}							\
-{{$.PauseImageFilePath}} sh -ci {{.VirtualEnv.ConstructorFilePath}} ||
-echo "[HOST] **SYSTEMERROR** apptainer exited with code $?" | tee {{.VirtualEnv.SysErrorFilePath}}
+{{$.PauseImageFilePath}} /usr/local/bin/hpk-pause -namespace {{.Pod.Namespace}} -pod {{.Pod.Name}} ||
+echo "[HOST] **SYSTEMERROR** hpk-pause exited with code $?" | tee {{.VirtualEnv.SysErrorFilePath}}
 
 #### END SECTION: Host Environment ####
 `

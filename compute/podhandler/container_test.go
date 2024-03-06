@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-func Test_podHandler_buildContainer(t *testing.T) {
+func Test_PodHandler_buildContainer(t *testing.T) {
 	/*
 		var container corev1.Container
 
@@ -39,7 +39,7 @@ func Test_podHandler_buildContainer(t *testing.T) {
 		var pod corev1.Pod
 		var containerStatus corev1.ContainerStatus
 
-		h := &podHandler{
+		h := &PodHandler{
 			Pod:             &pod,
 			podEnvVariables: []corev1.EnvVar{},
 			podDirectory:    "",
