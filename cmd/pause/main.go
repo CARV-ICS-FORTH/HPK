@@ -129,17 +129,22 @@ acquire_pod_loop:
 				switch signo {
 				case syscall.SIGINT, syscall.SIGTERM:
 					log.Info().Msgf("Received %v. Cleaning up...\n", signo)
-					cancel() // Initiate cleanup
 
-					// Wait for containers to exit before fully exiting the goroutine
+					// Ensure completion of bookkeeping before handling sigchld
 					wg.Wait()
+
+					cancel() // Initiate cleanup
 
 				case syscall.SIGCHLD:
 					// SIGCHLD handling - reap zombie processes
 					log.Info().Msg("Received SIGCHLD. Containers have terminated. ")
+					wg.Wait() // Ensure completion of bookkeeping before handling sigchld
 					for {
 						pid, err := syscall.Wait4(-1, nil, syscall.WNOHANG, nil)
-						if pid <= 0 || err != nil {
+						if pid <= 0 {
+							if err != nil {
+								log.Error().Err(err).Msg("Error stopping hpk-pause")
+							}
 							break
 						}
 						log.Info().Msgf("pid: %v", pid)
@@ -147,13 +152,10 @@ acquire_pod_loop:
 					cancel() // Initiate cleanup after SIGCHLD handling
 
 					// Wait for containers to exit before fully exiting the goroutine
-					wg.Wait()
 				}
 			case <-ctx.Done():
-				log.Info().Msg("Context was cancelled. Waiting for containers to exit...")
-				wg.Wait() // Ensure completion of all containers
-				log.Info().Msg("Containers have terminated. Exiting...")
-				return // Terminate the goroutine once containers finish
+				log.Info().Msg("Containers and context have terminated. Exiting...")
+				return
 			}
 
 		}
@@ -237,9 +239,12 @@ func prepareDNS(pod *v1.Pod) error {
 	}
 
 	// Create and write to /scratch/etc/resolv.conf
-	resolvConfContent := fmt.Sprintf(`search %s.svc.cluster.local svc.cluster.local cluster.local
-	nameserver %s
-	options ndots:5`, pod.Namespace, kubeDNSIP)
+	resolvConfContent := fmt.Sprintf(
+`
+search %s.svc.cluster.local svc.cluster.local cluster.local
+nameserver %s
+options ndots:5
+`, pod.Namespace, kubeDNSIP)
 
 	if err := os.WriteFile("/scratch/etc/resolv.conf", []byte(resolvConfContent), os.ModePerm); err != nil {
 		return fmt.Errorf("error writing to resolv.conf: %v", err)
@@ -546,221 +551,3 @@ func handleContainers(pod *v1.Pod, wg *sync.WaitGroup, hpkEnv bool) error {
 	}
 	return nil
 }
-
-/**
-
-if err := scriptTemplate.Execute(&scriptFileContent, JobFields{
-		Pod:                h.podKey,
-		PauseImageFilePath: pauseImage.Filepath,
-		HostEnv:            compute.Environment,
-		VirtualEnv: compute.VirtualEnvironment{
-			PodDirectory:        h.podDirectory.String(),
-			CgroupFilePath:      h.podDirectory.CgroupFilePath(),
-			ConstructorFilePath: h.podDirectory.ConstructorFilePath(),
-			IPAddressPath:       h.podDirectory.IPAddressPath(),
-			StdoutPath:          h.podDirectory.StdoutPath(),
-			StderrPath:          h.podDirectory.StderrPath(),
-			SysErrorFilePath:    h.podDirectory.SysErrorFilePath(),
-		},
-		InitContainers:  initContainers,
-		Containers:      containers,
-		ResourceRequest: resources.ResourceListToStruct(resourceRequest),
-		CustomFlags:     customFlags,
-	}); err != nil {
-		//-- since both the template and fields are internal to the code, the evaluation should always succeed	--
-		compute.SystemPanic(err, "failed to evaluate sbatch template")
-	}
-**/
-
-/**
-#!/bin/bash
-
-############################
-# Auto-Generated Script    #
-# Please do not edit. 	   #
-############################
-
-# If any command fails, the script will immediately exit,
-# and unset variables or errors in pipelines are treated as errors
-
-set -eum pipeline
-
-function debug_info() {
-	echo -e "\n"
-	echo "=============================="
-	echo " Compute Environment Info"
-	echo "=============================="
-	echo "* DNS: {{.HostEnv.KubeDNS}}"
-	echo "* PodDir: {{.VirtualEnv.PodDirectory}}"
-	echo "=============================="
-	echo -e "\n"
-	echo "=============================="
-	echo " Virtual Environment Info"
-	echo "=============================="
-	echo "* Host: $(hostname)"
-	echo "* IP: $(hostname -I)"
-	echo "* User: $(id)"
-	echo "=============================="
-	echo -e "\n"
-}
-
-handle_dns() {
-	mkdir -p /scratch/etc
-
-# Rewire /scratch/etc/resolv.conf to point to KubeDNS
-cat > /scratch/etc/resolv.conf << DNS_EOF
-search {{.Pod.Namespace}}.svc.cluster.local svc.cluster.local cluster.local
-nameserver {{.HostEnv.KubeDNS}}
-options ndots:5
-DNS_EOF
-
-	# Add hostname to known hosts. Required for loopback
-	echo -e "127.0.0.1 localhost" >> /scratch/etc/hosts
-	echo -e "$(hostname -I) $(hostname)" >> /scratch/etc/hosts
-}
-
-# If not removed, Flags will be consumed by the nested Singularity and overwrite paths.
-# https://docs.sylabs.io/guides/3.11/user-guide/environment_and_metadata.html
-function reset_env() {
-	unset LD_LIBRARY_PATH
-
-	unset SINGULARITY_COMMAND
-	unset SINGULARITY_CONTAINER
-	unset SINGULARITY_ENVIRONMENT
-	unset SINGULARITY_NAME
-
-	unset APPTAINER_APPNAME
-	unset APPTAINER_COMMAND
-	unset APPTAINER_CONTAINER
-	unset APPTAINER_ENVIRONMENT
-	unset APPTAINER_NAME
-
-	unset APPTAINER_BIND
-	unset SINGULARITY_BIND
-}
-
-function cleanup() {
-	lastCommand=$1
-	exitCode=$2
-
-	echo "[Virtual] Ensure all background jobs are terminated".
-	wait
-
-	if [[ $exitCode -eq 0 ]]; then
-		echo "[Virtual] Gracefully exit the Virtual Environment. All resources will be released."
-	else
-		echo "[Virtual] **SYSTEMERROR** ${lastCommand} command filed with exit code ${exitCode}" | tee {{.VirtualEnv.SysErrorFilePath}}
-	fi
-
-	exit ${exitCode}
-}
-
-function handle_init_containers() {
-{{range $index, $container := .InitContainers}}
-	####################
-	##  New Container  #
-	####################
-
-	echo "[Virtual] Spawning InitContainer: {{$container.InstanceName}}"
-
-	{{- if $container.EnvFilePath}}
-	sh -c {{$container.EnvFilePath}} > /scratch/{{$container.InstanceName}}.env
-	{{- end}}
-
-	# Mark the beginning of an init job (all get the shell's pid).
-	echo pid://$$ > {{$container.JobIDPath}}
-
-
-	$(apptainer {{ $container.ExecutionMode }} --cleanenv --writable-tmpfs --no-mount home --unsquash \
-	{{- if $container.RunAsUser}}
-	--security uid:{{$container.RunAsUser}},gid:{{$container.RunAsUser}} --userns \
-	{{- end}}
-	{{- if $container.RunAsGroup}}
-	--security gid:{{$container.RunAsGroup}} --userns \
-	{{- end}}
-	--bind /scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts,{{join "," $container.Binds}} \
-	{{- if $container.EnvFilePath}}
-	--env-file /scratch/{{$container.InstanceName}}.env \
-	{{- end}}
-	{{$container.ImageFilePath}}
-	{{- if $container.Command}}
-		{{- range $index, $cmd := $container.Command}} {{$cmd | param}} {{- end}}
-	{{- end -}}
-	{{- if $container.Args}}
-		{{range $index, $arg := $container.Args}} {{$arg | param}} {{- end}}
-	{{- end }} \
-	&>> {{$container.LogsPath}})
-
-	# Mark the ending of an init job.
-	echo $? > {{$container.ExitCodePath}}
-{{end}}
-
-	echo "[Virtual] All InitContainers have been completed."
-	return
-}
-
-function handle_containers() {
-{{range $index, $container := .Containers}}
-	####################
-	##  New Container  #
-	####################
-
-	{{- if $container.EnvFilePath}}
-	sh -c {{$container.EnvFilePath}} > /scratch/{{$container.InstanceName}}.env
-	{{- end}}
-
-	$(apptainer {{ $container.ExecutionMode }} --cleanenv --writable-tmpfs --no-mount home --unsquash \
-	{{- if $container.RunAsUser}}
-	--security uid:{{$container.RunAsUser}},gid:{{$container.RunAsUser}} --userns \
-	{{- end}}
-	{{- if $container.RunAsGroup}}
-	--security gid:{{$container.RunAsGroup}} --userns \
-	{{- end}}
-	--bind /scratch/etc/resolv.conf:/etc/resolv.conf,/scratch/etc/hosts:/etc/hosts,{{join "," $container.Binds}} \
-	{{- if $container.EnvFilePath}}
-	--env-file /scratch/{{$container.InstanceName}}.env \
-	{{- end}}
-	{{$container.ImageFilePath}}
-	{{- if $container.Command}}
-		{{- range $index, $cmd := $container.Command}} {{$cmd | param}} {{- end}}
-	{{- end -}}
-	{{- if $container.Args}}
-		{{- range $index, $arg := $container.Args}} {{$arg | param}} {{- end}}
-	{{- end }} \
-	&>> {{$container.LogsPath}}; \
-	echo $? > {{$container.ExitCodePath}}) &
-
-	pid=$!
-	echo pid://${pid} > {{$container.JobIDPath}}
-	echo "[Virtual] Container started: {{$container.InstanceName}} ${pid}"
-{{end}}
-
-	######################
-	##  Wait Containers  #
-	######################
-
-	echo "[Virtual] ... Waiting for containers to complete ..."
-	wait  || echo "[Virtual] ... wait failed with error: $?"
-	echo "[Virtual] ... Containers terminated ..."
-}
-
-
-
-debug_info
-
-echo "[Virtual] Resetting Environment ..."
-reset_env
-
-echo "[Virtual] Announcing IP ..."
-echo $(hostname -I) > {{.VirtualEnv.IPAddressPath}}
-
-echo "[Virtual] Setting DNS ..."
-handle_dns
-
-echo "[Virtual] Setting Cleanup Handler ..."
-trap 'cleanup "${BASH_COMMAND}" "$?"'  EXIT
-
-{{if gt (len .InitContainers) 0 }} handle_init_containers {{end}}
-
-{{if gt (len .Containers) 0 }} handle_containers {{end}}
-**/
