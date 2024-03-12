@@ -1,3 +1,17 @@
+// Copyright © 2023 FORTH-ICS
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package main
 
 import (
@@ -15,9 +29,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/compute/endpoint"
 	"github.com/carv-ics-forth/hpk/compute/image"
 	"github.com/carv-ics-forth/hpk/compute/podhandler"
+	kubecontainer "github.com/carv-ics-forth/hpk/pkg/container"
 	"github.com/rs/zerolog/log"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -128,17 +144,21 @@ acquire_pod_loop:
 			case signo := <-signalChan:
 				switch signo {
 				case syscall.SIGINT, syscall.SIGTERM:
+					// Termination handling of the pause container by external signals
 					log.Info().Msgf("Received %v. Cleaning up...\n", signo)
 
 					// Ensure completion of bookkeeping before handling sigchld
 					wg.Wait()
 
-					cancel() // Initiate cleanup
+					// Initiate cleanup
+					cancel()
 
 				case syscall.SIGCHLD:
 					// SIGCHLD handling - reap zombie processes
 					log.Info().Msg("Received SIGCHLD. Containers have terminated. ")
-					wg.Wait() // Ensure completion of bookkeeping before handling sigchld
+
+					// Ensure completion of bookkeeping before handling sigchld
+					wg.Wait()
 					for {
 						pid, err := syscall.Wait4(-1, nil, syscall.WNOHANG, nil)
 						if pid <= 0 {
@@ -149,9 +169,9 @@ acquire_pod_loop:
 						}
 						log.Info().Msgf("pid: %v", pid)
 					}
-					cancel() // Initiate cleanup after SIGCHLD handling
 
-					// Wait for containers to exit before fully exiting the goroutine
+					// Initiate cleanup after SIGCHLD handling
+					cancel()
 				}
 			case <-ctx.Done():
 				log.Info().Msg("Containers and context have terminated. Exiting...")
@@ -240,7 +260,7 @@ func prepareDNS(pod *v1.Pod) error {
 
 	// Create and write to /scratch/etc/resolv.conf
 	resolvConfContent := fmt.Sprintf(
-`
+		`
 search %s.svc.cluster.local svc.cluster.local cluster.local
 nameserver %s
 options ndots:5
@@ -323,24 +343,26 @@ func handleInitContainers(pod *v1.Pod, hpkEnv bool) error {
 		for i, mount := range container.VolumeMounts {
 			hostPath := filepath.Join(podPath.VolumeDir(), mount.Name)
 
-			// subPath := mount.SubPath
-			// if mount.SubPathExpr != "" {
-			// 	subPath, err = helpers.ExpandContainerVolumeMounts(mount, h.podEnvVariables)
-			// 	if err != nil {
-			// 		compute.SystemPanic(err, "cannot expand env variables for container '%s' of pod '%s'", container, h.podKey)
-			// 	}
-			// }
+			subPath := mount.SubPath
+			if mount.SubPathExpr != "" {
 
-			// if subPath != "" {
-			// 	if filepath.IsAbs(subPath) {
-			// 		return fmt.Errorf("error SubPath '%s' must not be an absolute path", subPath)
-			// 	}
+				path, err := kubecontainer.ExpandContainerVolumeMounts(mount, podhandler.FromServices(context.Background(), pod.Namespace))
+				if err != nil {
+					compute.SystemPanic(err, "cannot expand env variables for container '%s' of pod '%s'", container.Name, podKey)
+				}
+				subPath = path
+			}
 
-			// 	subPathFile := filepath.Join(hostPath, subPath)
+			if subPath != "" {
+				if filepath.IsAbs(subPath) {
+					return fmt.Errorf("error SubPath '%s' must not be an absolute path", subPath)
+				}
 
-			// 	// mount the subpath
-			// 	hostPath = subPathFile
-			// }
+				subPathFile := filepath.Join(hostPath, subPath)
+
+				// mount the subpath
+				hostPath = subPathFile
+			}
 
 			accessMode := "rw"
 			if mount.ReadOnly {
@@ -448,24 +470,26 @@ func handleContainers(pod *v1.Pod, wg *sync.WaitGroup, hpkEnv bool) error {
 		for i, mount := range container.VolumeMounts {
 			hostPath := filepath.Join(podPath.VolumeDir(), mount.Name)
 
-			// subPath := mount.SubPath
-			// if mount.SubPathExpr != "" {
-			// 	subPath, err = helpers.ExpandContainerVolumeMounts(mount, h.podEnvVariables)
-			// 	if err != nil {
-			// 		compute.SystemPanic(err, "cannot expand env variables for container '%s' of pod '%s'", container, h.podKey)
-			// 	}
-			// }
+			subPath := mount.SubPath
+			if mount.SubPathExpr != "" {
 
-			// if subPath != "" {
-			// 	if filepath.IsAbs(subPath) {
-			// 		return fmt.Errorf("error SubPath '%s' must not be an absolute path", subPath)
-			// 	}
+				path, err := kubecontainer.ExpandContainerVolumeMounts(mount, podhandler.FromServices(context.Background(), pod.Namespace))
+				if err != nil {
+					compute.SystemPanic(err, "cannot expand env variables for container '%s' of pod '%s'", container.Name, podKey)
+				}
+				subPath = path
+			}
 
-			// 	subPathFile := filepath.Join(hostPath, subPath)
+			if subPath != "" {
+				if filepath.IsAbs(subPath) {
+					return fmt.Errorf("error SubPath '%s' must not be an absolute path", subPath)
+				}
 
-			// 	// mount the subpath
-			// 	hostPath = subPathFile
-			// }
+				subPathFile := filepath.Join(hostPath, subPath)
+
+				// mount the subpath
+				hostPath = subPathFile
+			}
 
 			accessMode := "rw"
 			if mount.ReadOnly {
