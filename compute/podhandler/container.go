@@ -51,7 +51,7 @@ func (h *PodHandler) buildContainer(container *corev1.Container, containerStatus
 	}
 
 	fields := GenerateEnvFields{
-		Variables: append(h.podEnvVariables, container.Env...),
+		Variables: append(container.Env, h.podEnvVariables...),
 	}
 
 	envFileContent := strings.Builder{}

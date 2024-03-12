@@ -227,6 +227,14 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 		podEnvVariables: FromServices(ctx, pod.GetNamespace()),
 	}
 
+	for _, env := range h.podEnvVariables {
+		logger.Info("env", env.Name, env.Value)
+	}
+	for _, container := range pod.Spec.Containers {
+		for _, env := range container.Env {
+			logger.Info("container", env.Name, env.Value)
+		}
+	}
 	// create directory for the job environment.
 	if err := os.MkdirAll(h.podDirectory.JobDir(), endpoint.PodGlobalDirectoryPermissions); err != nil {
 		compute.SystemPanic(err, "Cant create pod directory '%s'", h.podDirectory.JobDir())
