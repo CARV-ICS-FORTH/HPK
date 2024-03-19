@@ -44,7 +44,7 @@ import (
 
 func getPodDetails(clientset *kubernetes.Clientset, namespace string, podID string) (*v1.Pod, error) {
 	// Create a context with a 5-minute timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	pod, err := clientset.CoreV1().Pods(namespace).Get(ctx, podID, metav1.GetOptions{})
@@ -399,8 +399,8 @@ func handleInitContainers(pod *v1.Pod, hpkEnv bool) error {
 		}
 
 		apptainerArgs = append(apptainerArgs, hpk.ImageDir()+image.ParseImageName(container.Image))
-		apptainerArgs = append(apptainerArgs, container.Command...)
-		apptainerArgs = append(apptainerArgs, container.Args...)
+		apptainerArgs = append(apptainerArgs, kubecontainer.ExpandContainerCommandOnlyStatic(container.Command, container.Env)...)
+		apptainerArgs = append(apptainerArgs, kubecontainer.ExpandContainerCommandOnlyStatic(container.Args, container.Env)...)
 
 		// Get the PID
 		pid := os.Getpid()
@@ -526,8 +526,8 @@ func handleContainers(pod *v1.Pod, wg *sync.WaitGroup, hpkEnv bool) error {
 		}
 
 		apptainerArgs = append(apptainerArgs, hpk.ImageDir()+image.ParseImageName(container.Image))
-		apptainerArgs = append(apptainerArgs, container.Command...)
-		apptainerArgs = append(apptainerArgs, container.Args...)
+		apptainerArgs = append(apptainerArgs, kubecontainer.ExpandContainerCommandOnlyStatic(container.Command, container.Env)...)
+		apptainerArgs = append(apptainerArgs, kubecontainer.ExpandContainerCommandOnlyStatic(container.Args, container.Env)...)
 
 		wg.Add(1)
 		go func(container v1.Container) { // Ensure container cleanup

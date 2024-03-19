@@ -11,6 +11,8 @@ if [[ -z "${TEST_NAMESPACE}" ]]; then
 fi
 ################################
 
+# helm upgrade --cleanup-on-fail --install my-jupyter jupyterhub/jupyterhub --namespace ${TEST_NAMESPACE} --create-namespace --values config.yaml
+
 ENDPOINT=proxy-public
 POD=$(kubectl get pods -l app=jupyterhub -n jhub -o name | grep hub | head -n 1 | awk -F/ '{print $2}')
 

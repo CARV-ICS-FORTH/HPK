@@ -131,11 +131,10 @@ func (h *PodHandler) buildContainer(container *corev1.Container, containerStatus
 		binds[i] = hostPath + ":" + mount.MountPath + ":" + accessMode
 	}
 
+	containerID := fmt.Sprintf("%s_%s_%s", h.Pod.GetNamespace(), h.Pod.GetName(), container.Name)
 	/*---------------------------------------------------
 	 * Prepare Container Image
 	 *---------------------------------------------------*/
-	containerID := fmt.Sprintf("%s_%s_%s", h.Pod.GetNamespace(), h.Pod.GetName(), container.Name)
-
 	img, err := image.Pull(compute.HPK.ImageDir(), image.Docker, container.Image)
 	if err != nil {
 		compute.SystemPanic(err, "ImagePull error. Image:%s ", container.Image)
@@ -177,7 +176,7 @@ func (h *PodHandler) buildContainer(container *corev1.Container, containerStatus
 	containerStatus.Image = container.Image
 	containerStatus.ImageID = img.Filepath
 
-	return c, nil
+	return c, err
 }
 
 /*************************************************************

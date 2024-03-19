@@ -325,13 +325,20 @@ func (h *PodHandler) PersistentVolumeClaimSource(ctx context.Context, vol corev1
 	 *---------------------------------------------------*/
 	switch {
 	case pv.Spec.HostPath != nil:
-		dstFullPath := filepath.Join(h.podDirectory.VolumeDir(), vol.Name)
+		// dstFullPath := filepath.Join(h.podDirectory.VolumeDir(), vol.Name)
 
-		if err := os.Symlink(pv.Spec.HostPath.Path, dstFullPath); err != nil {
-			compute.SystemPanic(err, "cannot link symlink at path '%s'", dstFullPath)
-		}
+		// err := os.MkdirAll(pv.Spec.HostPath.Path, os.FileMode(0755))
+		// if err != nil {
+		// 	if !os.IsExist(err) {
+		// 		compute.SystemPanic(err, "cannot create hostpath directory at path '%s'", pv.Spec.HostPath.Path)
+		// 	}
+		// }
+		// if err := os.Symlink(pv.Spec.HostPath.Path, dstFullPath); err != nil {
+		// 	compute.SystemPanic(err, "cannot link symlink at path '%s'", dstFullPath)
+		// }
 
-		h.logger.Info("  * HostPath Volume is mounted", "fullpath", dstFullPath)
+		// h.logger.Info("  * HostPath Volume is mounted", "fullpath", dstFullPath)
+		panic("Hostpath pv")
 	case pv.Spec.Local != nil:
 		dstFullPath := filepath.Join(h.podDirectory.VolumeDir(), vol.Name)
 
