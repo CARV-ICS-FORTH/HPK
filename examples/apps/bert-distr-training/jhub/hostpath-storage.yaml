@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: nfs-share-pv
+spec:
+  capacity:
+    storage: 40Gi
+  accessModes:
+    - ReadWriteMany
+  hostPath:
+    path: /home/malvag/kubeflow_testbed/jhub_data
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: nfs-share-pvc
+  namespace: kubeflow
+spec:
+  storageClassName: ""
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 40Gi

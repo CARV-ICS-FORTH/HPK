@@ -90,6 +90,8 @@ func AddAdmissionWebhooks(c Opts, virtualk8s *provider.VirtualK8S) {
 		RunInContainer:   virtualk8s.RunInContainer,
 		GetContainerLogs: virtualk8s.GetContainerLogs,
 		GetPods:          virtualk8s.GetPods,
+		PortForward:      virtualk8s.PortForward,
+		// AttachToContainer: ,
 		// GetPodsFromKubernetes: func(context.Context) ([]*corev1.Pod, error) {
 		//	return k8sclientset.CoreV1().Pods(c.KubeNamespace).List(ctx, labels.Everything())
 		// },

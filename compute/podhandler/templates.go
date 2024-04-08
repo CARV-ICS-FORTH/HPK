@@ -331,6 +331,7 @@ exec {{$.HostEnv.ApptainerBin}} exec --containall --net --fakeroot --scratch /sc
 {{- end}}
 --env PARENT=${PPID}								\
 --bind $HOME/.k8sfs/kubernetes:/k8s-data			\
+--bind /etc/apptainer/apptainer.conf				\
 --bind $HOME,/tmp									\
 --hostname {{.Pod.Name}}							\
 {{$.PauseImageFilePath}} /usr/local/bin/hpk-pause -namespace {{.Pod.Namespace}} -pod {{.Pod.Name}} ||

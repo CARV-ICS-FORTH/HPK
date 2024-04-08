@@ -448,6 +448,16 @@ func (v *VirtualK8S) NotifyPods(ctx context.Context, f func(*corev1.Pod)) {
 	}()
 }
 
+func (v *VirtualK8S) PortForward(ctx context.Context, namespace, pod string, port int32, stream io.ReadWriteCloser) error {
+	podKey := client.ObjectKey{Namespace: namespace, Name: pod}
+	logger := v.Logger.WithValues("obj", podKey)
+
+	logger.Info("[K8s] receive PortForward %q", pod)
+
+	// in newer virtual-kubelet version we have support for port-forwarding
+	return nil
+}
+
 /************************************************************
 
 		Implements vkapi.VirtualK8S

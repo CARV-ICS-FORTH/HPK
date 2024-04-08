@@ -424,6 +424,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	jobID, err := slurm.SubmitJob(scriptFilePath)
 	if err != nil {
 		compute.SystemPanic(err, "failed to submit job")
+		//[TODO:] update pod status with insufficient resources
 	}
 
 	logger.Info(" * Slurm job has been submitted", "jobID", jobID)
