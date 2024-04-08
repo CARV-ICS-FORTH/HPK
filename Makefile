@@ -95,7 +95,8 @@ hpk-pause:
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build $(VERSION_FLAGS) -race -ldflags '-extldflags "-static"' -o bin/hpk-pause ./cmd/pause
 
 docker-pause:
-	DOCKER_BUILDKIT=1 docker build . -t malvag/pause:apptainer -f deploy/images/pause-apptainer-agent/pause.apptainer.Dockerfile
+	DOCKER_BUILDKIT=1 docker build . -t malvag/pause:1.1.9 -f deploy/images/pause-apptainer-agent/pause.apptainer.Dockerfile
+	sudo docker push malvag/pause:1.1.9
 
 ##@ Deployment
 

@@ -32,10 +32,13 @@ proxy:
       enabled: false
 singleuser:
   storage:
-    type: "static"
-    capacity: "10Gi"
-    static:
-      pvcName: "my-storage-pvc"
-      subPath: ""
+    dynamic:
+      storageClass: openebs-hostpath
+    capacity: 30Gi 
+    # type: "static"
+    # capacity: "10Gi"
+    # static:
+    #   pvcName: "my-storage-pvc"
+    #   subPath: ""
   networkPolicy:
     enabled: false

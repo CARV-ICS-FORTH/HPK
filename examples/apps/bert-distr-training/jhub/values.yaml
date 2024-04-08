@@ -1,0 +1,34 @@
+hub:
+  config:
+    JupyterHub:
+      hub_connect_url: "http://hub:8081"
+    ConfigurableHTTPProxy:
+      api_url: "http://proxy-api:8001"
+  db:
+    type: "sqlite-memory" 
+  networkPolicy:
+    enabled: false
+prePuller:
+  hook:
+    enabled: false
+proxy:
+  service:
+    type: ClusterIP
+  https:
+    enabled: true
+  chp:
+    networkPolicy:
+      enabled: false
+singleuser:
+  serviceAccountName: training-operator
+  storage:
+    dynamic:
+      storageClass: openebs-hostpath
+    capacity: 30Gi 
+    # type: "static"
+    # capacity: "10Gi"
+    # static:
+    #   pvcName: "my-storage-pvc"
+    #   subPath: ""
+  networkPolicy:
+    enabled: false
