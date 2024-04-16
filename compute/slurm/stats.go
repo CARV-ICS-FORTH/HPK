@@ -82,7 +82,7 @@ type NodeInfo struct {
 	EphemeralStorage uint64 `json:"temporary_disk"`
 
 	// FreeMemory ... reported in MegaBytes
-	FreeMemory uint64   `json:"free_memory"`
+	FreeMemory int64    `json:"free_memory"`
 	Partitions []string `json:"partitions"`
 }
 
