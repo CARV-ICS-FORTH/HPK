@@ -1,9 +1,14 @@
 #!/bin/bash
 
+#install openebs
+export TEST_NAMESPACE=openebs
+kubectl create ns ${TEST_NAMESPACE}
+(cd ../../../test/plugins/storage-provisioner && . ./install.sh)
+
 #install minio
 pushd minio
 kubectl create ns minio
-kubectl apply -f hostpath-storage.yaml
+# kubectl apply -f hostpath-storage.yaml
 ./install.sh
 popd
 
@@ -12,7 +17,7 @@ kubectl apply --wait=true -k "github.com/kubeflow/training-operator/manifests/ov
 
 pushd jhub
 kubectl create ns kubeflow
-kubectl apply -f hostpath-storage.yaml
+# kubectl apply -f hostpath-storage.yaml
 helm upgrade --cleanup-on-fail --install my-jupyter jupyterhub/jupyterhub --namespace kubeflow --create-namespace --values values.yaml
 
 MC_ACCESS_KEY=$(kubectl get secret myminio -n minio -o jsonpath="{.data.rootUser}" | base64 --decode)

@@ -145,7 +145,8 @@ persistence:
   ## A manually managed Persistent Volume and Claim
   ## Requires persistence.enabled: true
   ## If defined, PVC must be created manually before volume will be bound
-  existingClaim: "nfs-share-pvc-minio"
+  
+  # existingClaim: "nfs-share-pvc-minio"
 
   ## minio data Persistent Volume Storage Class
   ## If defined, storageClassName: <storageClass>
@@ -156,7 +157,7 @@ persistence:
   ##
   ## Storage class of PV to bind. By default it looks for standard storage class.
   ## If the PV uses a different storage class, specify that here.
-  storageClass: ""
+  storageClass: "openebs-hostpath"
   volumeName: ""
   accessMode: ReadWriteOnce
   size: 500Gi
