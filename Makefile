@@ -89,10 +89,10 @@ build-race: ## Build HPK binary with race condition detector
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(VERSION_FLAGS) -race -o bin/hpk-kubelet ./cmd/hpk
 
 hpk-kubelet:
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build $(VERSION_FLAGS) -race -ldflags '-extldflags "-static"' -o bin/hpk-kubelet ./cmd/hpk
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build $(VERSION_FLAGS) -ldflags '-extldflags "-static"' -o bin/hpk-kubelet ./cmd/hpk
 
 hpk-pause:
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build $(VERSION_FLAGS) -race -ldflags '-extldflags "-static"' -o bin/hpk-pause ./cmd/pause
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build $(VERSION_FLAGS) -ldflags '-extldflags "-static"' -o bin/hpk-pause ./cmd/pause
 
 docker-pause:
 	DOCKER_BUILDKIT=1 docker build . -t malvag/pause:1.1.9 -f deploy/images/pause-apptainer-agent/pause.apptainer.Dockerfile
