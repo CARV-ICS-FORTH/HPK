@@ -104,3 +104,5 @@ For the infrastructure:
 ## Technical Difficulties
 
 - Apptainer, by default, has a tiny overlay for read-write operations, so for jupyter server to download all the packages from Python, it needs a couple of gigabytes to store the libraries and the model.
+
+- Jupyterhub pings on its proxy server periodically so i needed to supply the full AAAAA hostname
