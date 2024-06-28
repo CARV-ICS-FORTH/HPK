@@ -311,7 +311,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 
 		c, err := h.buildContainer(container, containerStatus)
 		if err != nil {
-			compute.PodError(pod, "InitContainerError", "failed to materialize pod.Spec.Containers[%d]", i)
+			compute.PodError(pod, "MainContainerError", "failed to materialize pod.Spec.Containers[%d]", i)
 
 			return
 		}
@@ -330,7 +330,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 		resources.Sum(resourceRequest, initContainer.Resources.Requests)
 	}
 
-	for _, container := range pod.Spec.InitContainers {
+	for _, container := range pod.Spec.Containers {
 		resources.Sum(resourceRequest, container.Resources.Requests)
 	}
 
