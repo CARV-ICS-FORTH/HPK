@@ -1,5 +1,7 @@
 #!/bin/bash
-
+helm repo add minio https://charts.min.io/
+helm repo add jupyterhub https://hub.jupyter.org/helm-chart/
+helm repo update
 #install openebs
 export TEST_NAMESPACE=openebs
 kubectl create ns ${TEST_NAMESPACE}

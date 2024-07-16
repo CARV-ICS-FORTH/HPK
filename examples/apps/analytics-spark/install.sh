@@ -12,7 +12,7 @@ fi
 ################################
 
 # Update Helm repos
-helm repo add spark-operator https://googlecloudplatform.github.io/spark-on-k8s-operator
+helm repo add spark-operator https://kubeflow.github.io/spark-operator
 helm repo add minio https://charts.min.io/
 helm repo update
 
@@ -41,7 +41,7 @@ helm install \
   --set sparkJobNamespace="${TEST_NAMESPACE}" \
   --set serviceAccounts.spark.name="spark" \
   --set enableWebhook=true \
-  --set image.tag=v1beta2-1.3.3-3.1.1
+  --set image.tag=v1beta2-1.4.5-3.5.0
 
 # Install Spark Application
 #kubectl apply -f manifest.yaml -n "${TEST_NAMESPACE}"

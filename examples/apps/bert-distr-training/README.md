@@ -17,8 +17,8 @@ For the infrastructure:
 3.  **JupyterHub:** A multi-user platform for interactive Jupyter Notebooks, a common tool for data science and machine learning development.
 
 4.   **Kubeflow:** A platform for managing machine learning workflows on Kubernetes.
-    *  **Kubeflow Training Operator:** A Kubernetes component for managing the training of machine learning models.
-    *   **PyTorchJob:** A Kubeflow (-Kubernetes) CRD for running PyTorch distributed training jobs.
+        * **Kubeflow Training Operator:** A Kubernetes component for managing the training of machine learning models.
+        * **PyTorchJob:** A Kubeflow (-Kubernetes) CRD for running PyTorch distributed training jobs.
 
 
 **Step-by-Step Setting up the infrastracture**

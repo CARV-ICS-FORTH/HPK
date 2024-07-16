@@ -1,6 +1,3 @@
-helm repo add minio https://charts.min.io/
-helm repo update
-
 TEST_NAMESPACE=minio
 
 # Install Minio
