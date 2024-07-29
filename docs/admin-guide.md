@@ -1,17 +1,21 @@
 # Admin Guide
+
 In this tutorial, we'll walk you through the setup process to get HPK up and operational.
+
 > Tested on Ubuntu 20.04, CentOS 7.
+
 ## Requirements
 
-| Variable                     | Version      |
-|------------------------------|--------------|
-| APPTAINER_VERSION            | 1.1.4        |
-| FLANNEL_VERSION              | 0.20.2       |
-| FLANNEL_CNI_PLUGIN_VERSION   | 1.1.2        |
-| KUBERNETES_VERSION           | 1.24.8       |
-| HELM_VERSION                 | 3.10.3       |
+| Variable                   | Version |
+| -------------------------- | ------- |
+| APPTAINER_VERSION          | 1.1.4   |
+| FLANNEL_VERSION            | 0.20.2  |
+| FLANNEL_CNI_PLUGIN_VERSION | 1.1.2   |
+| KUBERNETES_VERSION         | 1.24.8  |
+| HELM_VERSION               | 3.10.3  |
 
 Set environment variables:
+
 ```bash
 APPTAINER_VERSION=1.1.4
 FLANNEL_VERSION=0.20.2
@@ -25,6 +29,7 @@ ETCD_ADDRESS=`cat ${SLURM_CONFIG} | grep SlurmctldHost | awk -F '[()]' '{print $
 ```
 
 Install wget utility:
+
 ```bash
 if [[ "$(. /etc/os-release; echo $ID)" == "ubuntu" ]]; then
     apt-get update
@@ -33,12 +38,15 @@ else
     yum install -y wget
 fi
 ```
-### Install [etcd](https://etcd.io/) 
+
+### Install [etcd](https://etcd.io/)
+
 > On one host
 
 We use etcd, a key-value store that will be used by flannel later.
 
 Setup etcd service and fire it up:
+
 ```bash
 if [[ "$HOST_ADDRESS" == "$ETCD_ADDRESS" ]]; then
     if [[ "$(. /etc/os-release; echo $ID)" == "ubuntu" ]]; then
@@ -61,7 +69,9 @@ fi
 ```
 
 ### Install [Apptainer](https://apptainer.org/)
+
 > On all hosts
+
 ```bash
 if [[ "$(. /etc/os-release; echo $ID)" == "ubuntu" ]]; then
     wget -q https://github.com/apptainer/apptainer/releases/download/v${APPTAINER_VERSION}/apptainer_${APPTAINER_VERSION}_amd64.deb
@@ -81,21 +91,14 @@ else
 fi
 ```
 
-> In case there is a problem using these CNI plugins as a regular user you can additionally setup apptainer with the following:
-```bash
-cat >>/etc/apptainer/apptainer.conf <<EOF
-allow net users = <??>
-allow net groups = <??>
-allow net networks = bridge, flannel
-EOF
-```
+### Install [Flannel](https://github.com/flannel-io/flannel)
 
-### Install [Flannel](https://github.com/flannel-io/flannel) 
 > On all hosts
 
 Flannel runs a small, single binary agent called flanneld on each host, and is responsible for allocating a subnet lease to each host out of a larger, preconfigured address space. Flannel uses either the Kubernetes API or etcd directly to store the network configuration, the allocated subnets, and any auxiliary data (such as the host's public IP). Packets are forwarded using one of several backend mechanisms including VXLAN and various cloud integrations.
 
 To install:
+
 ```bash
 if [[ "$(. /etc/os-release; echo $ID)" == "ubuntu" ]]; then
     apt-get install -y nscd # https://github.com/flannel-io/flannel/issues/1512
@@ -108,6 +111,7 @@ rm -f flanneld-amd64
 ```
 
 Now setup the flannel service and fire it up:
+
 ```bash
 cat >/etc/systemd/system/flanneld.service <<EOF
 [Unit]
@@ -126,16 +130,20 @@ systemctl start flanneld
 ```
 
 ### Configure Apptainer to use flannel as a CNI plugin
+
 > On all hosts
 
 First we download and install Flannel binary
+
 ```bash
 wget -q https://github.com/flannel-io/cni-plugin/releases/download/v${FLANNEL_CNI_PLUGIN_VERSION}/flannel-amd64
 chmod +x flannel-amd64
 cp flannel-amd64 /usr/libexec/apptainer/cni/flannel
 rm -f flannel-amd64
 ```
+
 Then we configure Apptainer to use Flannel as a CNI plug-in for fakeroot runs
+
 ```bash
 cat > /etc/apptainer/network/40_fakeroot.conflist <<EOF
 {
@@ -161,15 +169,29 @@ cat > /etc/apptainer/network/40_fakeroot.conflist <<EOF
 EOF
 ```
 
+> In case there is a problem using these CNI plugins as a regular user you can additionally setup apptainer with the following:
+
+```bash
+cat >>/etc/apptainer/apptainer.conf <<EOF
+allow net users = <??>
+allow net groups = <??>
+allow net networks = bridge, flannel
+EOF
+```
+
 ### Install Utilities
+
 - Kubectl utility with the same version as the Kubernetes
+
 ```bash
 wget -q https://dl.k8s.io/v${KUBERNETES_VERSION}/bin/linux/amd64/kubectl
 chmod +x kubectl
 cp kubectl /usr/local/bin/kubectl
 rm -f kubectl
 ```
+
 - Helm utility
+
 ```bash
 wget -q https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz
 tar -zxvf helm-v${HELM_VERSION}-linux-amd64.tar.gz --strip-components=1 linux-amd64/helm
@@ -180,6 +202,7 @@ rm -f helm helm-v${HELM_VERSION}-linux-amd64.tar.gz
 ## HPK Installation & Setup
 
 Back to the head node, as the local user:
+
 ```sh
 git clone https://github.com/CARV-ICS-FORTH/HPK.git
 cd HPK
@@ -192,6 +215,7 @@ mv hpk-kubelet bin/
 ```
 
 Run each of the following in a separate window:
+
 ```sh
 make run-kubemaster
 make run-kubelet
@@ -202,19 +226,22 @@ Running the above commands, respectively:
 
 ![After deploying HPK](images/run-kubelet.png)
 
-
 And you are all set:
+
 ```sh
 export KUBE_PATH=~/.k8sfs/kubernetes/
 export KUBECONFIG=${KUBE_PATH}/admin.conf
 kubectl get nodes
 ```
+
 ![After getting-nodes](images/get-nodes.png)
 
-
 ## Test
+
 To test that everything is running correctly:
+
 ```bash
 make test
 ```
-![](images/make-test.png)
+
+![Testing suite makefile recipe example image](images/make-test.png)

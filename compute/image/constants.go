@@ -22,4 +22,5 @@ func (t Transport) Wrap(imageName string) string {
 	return string(t) + imageName
 }
 
-const PauseImage = "icsforth/pause:apptainer"
+// const PauseImage = "icsforth/pause:apptainer"
+const PauseImage = "malvag/pause:1.1.9"

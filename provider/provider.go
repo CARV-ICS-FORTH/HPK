@@ -26,7 +26,7 @@ import (
 
 	"github.com/carv-ics-forth/hpk/compute/endpoint"
 	"github.com/carv-ics-forth/hpk/compute/events"
-	"github.com/carv-ics-forth/hpk/compute/podhandler"
+	PodHandler "github.com/carv-ics-forth/hpk/compute/podhandler"
 	"github.com/carv-ics-forth/hpk/compute/runtime"
 	"github.com/carv-ics-forth/hpk/compute/slurm"
 	"github.com/carv-ics-forth/hpk/pkg/container"
@@ -203,7 +203,7 @@ func (v *VirtualK8S) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	go func() {
 		// acknowledge the creation request and do the creation in the background.
 		// if the creation fails, the pod should be marked as failed and returned to the provider.
-		podhandler.CreatePod(ctx, pod, v.fileWatcher)
+		PodHandler.CreatePod(ctx, pod, v.fileWatcher)
 
 		v.updatedPod(pod)
 	}()
@@ -231,7 +231,7 @@ func (v *VirtualK8S) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	/*---------------------------------------------------
 	 * Ensure that received pod is newer than the local
 	 *---------------------------------------------------*/
-	localPod, err := podhandler.LoadPodFromKey(podKey)
+	localPod, err := PodHandler.LoadPodFromKey(podKey)
 	if err != nil {
 		return errdefs.NotFoundf("object not found")
 	}
@@ -266,7 +266,7 @@ func (v *VirtualK8S) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
 	}
 
 	/*-- Update the local status of Pod --*/
-	if err := podhandler.SavePodToFile(ctx, pod); err != nil {
+	if err := PodHandler.SavePodToFile(ctx, pod); err != nil {
 		compute.SystemPanic(err, "failed to set job id for pod '%s'", podKey)
 	}
 
@@ -282,7 +282,7 @@ func (v *VirtualK8S) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 
 	logger.Info("[K8s] -> DeletePod")
 
-	if !podhandler.DeletePod(podKey, v.fileWatcher) {
+	if !PodHandler.DeletePod(podKey, v.fileWatcher) {
 		logger.Info("[K8s] <- DeletePod (POD NOT FOUND)")
 
 		return errdefs.NotFoundf("object not found")
@@ -302,7 +302,7 @@ func (v *VirtualK8S) GetPod(ctx context.Context, namespace, name string) (*corev
 
 	logger.Info("[K8s] -> GetPod")
 
-	pod, err := podhandler.LoadPodFromKey(podKey)
+	pod, err := PodHandler.LoadPodFromKey(podKey)
 	if err != nil {
 		logger.Info("[K8s] <- GetPod (POD NOT FOUND)")
 
@@ -327,7 +327,7 @@ func (v *VirtualK8S) GetPodStatus(ctx context.Context, namespace, name string) (
 
 	logger.Info("[K8s] -> GetPodStatus")
 
-	pod, err := podhandler.LoadPodFromKey(podKey)
+	pod, err := PodHandler.LoadPodFromKey(podKey)
 	if err != nil {
 		logger.Info("[K8s] <- GetPodStatus (POD NOT FOUND)")
 
@@ -408,8 +408,8 @@ func (v *VirtualK8S) NotifyPods(ctx context.Context, f func(*corev1.Pod)) {
 	})
 
 	go eh.Listen(ctx, events.PodControl{
-		UpdateStatus: podhandler.UpdateStatusFromRuntime,
-		LoadFromDisk: podhandler.LoadPodFromKey,
+		UpdateStatus: PodHandler.UpdateStatusFromRuntime,
+		LoadFromDisk: PodHandler.LoadPodFromKey,
 		NotifyVirtualKubelet: func(pod *corev1.Pod) {
 			if pod == nil {
 				panic("this should not happen")
@@ -446,6 +446,16 @@ func (v *VirtualK8S) NotifyPods(ctx context.Context, f func(*corev1.Pod)) {
 			}
 		}
 	}()
+}
+
+func (v *VirtualK8S) PortForward(ctx context.Context, namespace, pod string, port int32, stream io.ReadWriteCloser) error {
+	podKey := client.ObjectKey{Namespace: namespace, Name: pod}
+	logger := v.Logger.WithValues("obj", podKey)
+
+	logger.Info("[K8s] receive PortForward %q", pod)
+
+	// in newer virtual-kubelet version we have support for port-forwarding
+	return nil
 }
 
 /************************************************************

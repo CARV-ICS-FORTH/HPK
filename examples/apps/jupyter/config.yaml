@@ -1,0 +1,44 @@
+# This file can update the JupyterHub Helm chart's default configuration values.
+#
+# For reference see the configuration reference and default values, but make
+# sure to refer to the Helm chart version of interest to you!
+#
+# Introduction to YAML:     https://www.youtube.com/watch?v=cdLNKUoMc6c
+# Chart config reference:   https://zero-to-jupyterhub.readthedocs.io/en/stable/resources/reference.html
+# Chart default values:     https://github.com/jupyterhub/zero-to-jupyterhub-k8s/blob/HEAD/jupyterhub/values.yaml
+# Available chart versions: https://hub.jupyter.org/helm-chart/
+#
+#
+hub:
+  config:
+    JupyterHub:
+      hub_connect_url: "http://hub:8081"
+    ConfigurableHTTPProxy:
+      api_url: "http://proxy-api.jhub.svc.cluster.local:8001"
+  db:
+    type: "sqlite-memory" 
+  networkPolicy:
+    enabled: false
+prePuller:
+  hook:
+    enabled: false
+proxy:
+  service:
+    type: ClusterIP
+  https:
+    enabled: true
+  chp:
+    networkPolicy:
+      enabled: false
+singleuser:
+  storage:
+    dynamic:
+      storageClass: openebs-hostpath
+    capacity: 30Gi 
+    # type: "static"
+    # capacity: "10Gi"
+    # static:
+    #   pvcName: "my-storage-pvc"
+    #   subPath: ""
+  networkPolicy:
+    enabled: false

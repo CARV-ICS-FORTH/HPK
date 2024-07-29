@@ -1,6 +1,5 @@
 .git/
 **/.DS_Store
 bin/
-deploy/images/
 test/
 Dockerfile

@@ -17,6 +17,7 @@ package podhandler
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -200,7 +201,7 @@ remove_pod:
 	return true
 }
 
-type podHandler struct {
+type PodHandler struct {
 	*corev1.Pod
 
 	podKey client.ObjectKey
@@ -218,7 +219,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	podKey := client.ObjectKeyFromObject(pod)
 	logger := compute.DefaultLogger.WithValues("pod", podKey)
 
-	h := podHandler{
+	h := PodHandler{
 		Pod:             pod,
 		podKey:          podKey,
 		podDirectory:    compute.HPK.Pod(podKey),
@@ -226,6 +227,14 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 		podEnvVariables: FromServices(ctx, pod.GetNamespace()),
 	}
 
+	for _, env := range h.podEnvVariables {
+		logger.Info("env", env.Name, env.Value)
+	}
+	for _, container := range pod.Spec.Containers {
+		for _, env := range container.Env {
+			logger.Info("container", env.Name, env.Value)
+		}
+	}
 	// create directory for the job environment.
 	if err := os.MkdirAll(h.podDirectory.JobDir(), endpoint.PodGlobalDirectoryPermissions); err != nil {
 		compute.SystemPanic(err, "Cant create pod directory '%s'", h.podDirectory.JobDir())
@@ -263,6 +272,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	 * Mount Volumes
 	 *---------------------------------------------------*/
 	for _, vol := range h.Pod.Spec.Volumes {
+		// h.Pod.Spec.Containers[0].VolumeMounts
 		if err := h.mountVolumeSource(ctx, vol); err != nil {
 			compute.PodError(pod, "VolumeError", err.Error())
 
@@ -301,7 +311,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 
 		c, err := h.buildContainer(container, containerStatus)
 		if err != nil {
-			compute.PodError(pod, "InitContainerError", "failed to materialize pod.Spec.Containers[%d]", i)
+			compute.PodError(pod, "MainContainerError", "failed to materialize pod.Spec.Containers[%d]", i)
 
 			return
 		}
@@ -356,6 +366,28 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 
 	scriptFileContent := bytes.Buffer{}
 
+	if pod.Annotations == nil {
+		pod.Annotations = make(map[string]string)
+	}
+
+	// Set annotations from HostEnvironment
+	pod.Annotations["kubeMasterHost"] = compute.Environment.KubeMasterHost
+	pod.Annotations["containerRegistry"] = compute.Environment.ContainerRegistry
+	pod.Annotations["apptainerBin"] = compute.Environment.ApptainerBin
+	pod.Annotations["enableCgroupV2"] = fmt.Sprintf("%t", compute.Environment.EnableCgroupV2)
+	pod.Annotations["workingDirectory"] = compute.Environment.WorkingDirectory
+	pod.Annotations["kubeDNS"] = compute.Environment.KubeDNS
+
+	// Set annotations from VirtualEnvironment
+	pod.Annotations["cgroupFilePath"] = h.podDirectory.CgroupFilePath()
+	pod.Annotations["constructorFilePath"] = h.podDirectory.ConstructorFilePath()
+	pod.Annotations["ipAddressPath"] = h.podDirectory.IPAddressPath()
+	pod.Annotations["stdoutPath"] = h.podDirectory.StdoutPath()
+	pod.Annotations["stderrPath"] = h.podDirectory.StderrPath()
+	pod.Annotations["sysErrorFilePath"] = h.podDirectory.SysErrorFilePath()
+
+	pod.Annotations["PauseImage"] = image.PauseImage
+
 	if err := scriptTemplate.Execute(&scriptFileContent, JobFields{
 		Pod:                h.podKey,
 		PauseImageFilePath: pauseImage.Filepath,
@@ -392,6 +424,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	jobID, err := slurm.SubmitJob(scriptFilePath)
 	if err != nil {
 		compute.SystemPanic(err, "failed to submit job")
+		//[TODO:] update pod status with insufficient resources
 	}
 
 	logger.Info(" * Slurm job has been submitted", "jobID", jobID)

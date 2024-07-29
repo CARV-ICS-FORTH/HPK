@@ -35,7 +35,7 @@ import (
 
 // buildContainer replicates the behavior of
 // https://github.com/kubernetes/kubernetes/blob/master/pkg/kubelet/kuberuntime/kuberuntime_container.go
-func (h *podHandler) buildContainer(container *corev1.Container, containerStatus *corev1.ContainerStatus) (Container, error) {
+func (h *PodHandler) buildContainer(container *corev1.Container, containerStatus *corev1.ContainerStatus) (Container, error) {
 	/*---------------------------------------------------
 	 * Determine the effective security context
 	 *---------------------------------------------------*/
@@ -51,7 +51,7 @@ func (h *podHandler) buildContainer(container *corev1.Container, containerStatus
 	}
 
 	fields := GenerateEnvFields{
-		Variables: append(h.podEnvVariables, container.Env...),
+		Variables: append(container.Env, h.podEnvVariables...),
 	}
 
 	envFileContent := strings.Builder{}
@@ -131,11 +131,10 @@ func (h *podHandler) buildContainer(container *corev1.Container, containerStatus
 		binds[i] = hostPath + ":" + mount.MountPath + ":" + accessMode
 	}
 
+	containerID := fmt.Sprintf("%s_%s_%s", h.Pod.GetNamespace(), h.Pod.GetName(), container.Name)
 	/*---------------------------------------------------
 	 * Prepare Container Image
 	 *---------------------------------------------------*/
-	containerID := fmt.Sprintf("%s_%s_%s", h.Pod.GetNamespace(), h.Pod.GetName(), container.Name)
-
 	img, err := image.Pull(compute.HPK.ImageDir(), image.Docker, container.Image)
 	if err != nil {
 		compute.SystemPanic(err, "ImagePull error. Image:%s ", container.Image)
@@ -177,7 +176,7 @@ func (h *podHandler) buildContainer(container *corev1.Container, containerStatus
 	containerStatus.Image = container.Image
 	containerStatus.ImageID = img.Filepath
 
-	return c, nil
+	return c, err
 }
 
 /*************************************************************

@@ -17,9 +17,13 @@ helm repo add jetstack https://charts.jetstack.io
 # Update the Helm repository cache
 helm repo update
 
+# reproduce robustnesss error with v1.14.4
+
 # Install cert-manager
-helm install  cert-manager jetstack/cert-manager   \
+helm install cert-manager jetstack/cert-manager   \
     -n "${TEST_NAMESPACE}" \
-       --version v1.12.0 \
-       --set installCRDs=true \
-       --set webhook.securePort=10260
+    --version v1.12.0 \
+    --set installCRDs=true \
+    --set webhook.securePort=10260
+    # --set config.metricsTLSConfig.dynamic.secretNamespace="${TEST_NAMESPACE}" \
+    # --set config.metricsTLSConfig.dynamic.secretName="cert-manager-metrics-ca"

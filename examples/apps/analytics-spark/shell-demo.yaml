@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: shell-demo
+spec:
+  volumes:
+  - name: shared-data
+    emptyDir: {}
+  containers:
+  - name: sleeper 
+    image: tutum/dnsutils:latest  # Or a specific version 
+    command: ["/bin/sh", "-c"] 
+    args: 
+      - | 
+        sleep 600
