@@ -64,10 +64,26 @@ make run-kubemaster
 
 The above command will set CoreDNS to forward requests for external names to your DNS server.
 
+## Publications/presentations
+
+The latest paper on HPK [is available at arXiv](https://arxiv.org/abs/2409.16919). A [previous edition of this work](https://doi.org/10.1007/978-3-031-40843-4_14) was presented at WOCC'23 ("The International Workshop on Converged Computing on Edge, Cloud, and HPC", held in conjunction with ISC-HPC 2023).
+
+The corresponding BibTeX entry is the following:
+```bibtex
+@misc{hpk,
+      title={Running Cloud-native Workloads on HPC with High-Performance Kubernetes}, 
+      author={Antony Chazapis and Evangelos Maliaroudakis and Fotis Nikolaidis and Manolis Marazakis and Angelos Bilas},
+      year={2024},
+      eprint={2409.16919},
+      archivePrefix={arXiv},
+      primaryClass={cs.DC},
+      url={https://arxiv.org/abs/2409.16919}, 
+}
+```
+
+HPK was presented at FOSDEM 2025; slides and video from the event are [available](https://fosdem.org/2025/schedule/event/fosdem-2025-5722-running-kubernetes-workloads-on-hpc-with-hpk/).
 
 ## Acknowledgements
 
 We thankfully acknowledge the support of the European Commission and the Greek General Secretariat for Research and
-Innovation under the EuroHPC Programme through projects EUPEX (GA-101033975) and DEEP-SEA (GA-955606). National
-contributions from the involved state members (including the Greek General Secretariat for Research and Innovation)
-match the EuroHPC funding.
+Innovation to this project. HPK has received funding from the European Union’s Horizon Europe research and innovation programme through project RISER ("RISC-V for Cloud Services", GA-101092993), from the EuroHPC Joint Undertaking through projects EUPEX (GA-101033975) and DEEP-SEA (GA-955606), as well as from the Chips Joint Undertaking through project REBECCA ("Reconfigurable Heterogeneous Highly Parallel Processing Platform for safe and secure AI", GA-101097224). EuroHPC JU and Chips JU projects are jointly funded by the European Commission and the involved state members (including the Greek General Secretariat for Research and Innovation).
