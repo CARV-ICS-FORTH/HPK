@@ -111,6 +111,21 @@ run-kubemaster: ## Run the Kubernetes Master
 	--bind ${K8SFS_PATH}/log:/var/log \
 	docker://chazapis/kubernetes-from-scratch:20230425
 
+CURRENT_DIR := $(shell pwd)
+
+run-kubemaster-k3s:
+	mkdir -p ${K8SFS_PATH}/log
+	apptainer run --net --dns ${EXTERNAL_DNS} --fakeroot \
+	--network bridge \
+	--cleanenv --pid --containall \
+	--no-init --no-umask --no-eval \
+	--no-mount tmp,home --unsquash --writable \
+	--env K8SFS_MOCK_KUBELET=0 \
+	--bind ${K8SFS_PATH}:/usr/local/etc \
+	--bind ${K8SFS_PATH}/log:/var/log \
+	--bind ${CURRENT_DIR}/k3s/output:/output \
+	docker://giannispetsis/k3s-hpk:latest
+
 run-kubelet: CA_BUNDLE = $(shell cat ${KUBE_PATH}/pki/ca.crt | base64 | tr -d '\n')
 run-kubelet: HOST_ADDRESS = $(shell ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p')
 run-kubelet: ## Run the HPK Virtual Kubelet
