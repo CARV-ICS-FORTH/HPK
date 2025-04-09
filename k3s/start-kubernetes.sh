@@ -20,6 +20,19 @@ K8SFS_LOG_DIR=/var/log/k8sfs
 
 export IP_ADDRESS=`ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p'`
 
+
+k3s server \
+  --disable-agent \
+  --write-kubeconfig-mode 777 \
+  --disable scheduler \
+  --bind-address ${IP_ADDRESS} \
+  --node-ip=${IP_ADDRESS} \
+  --write-kubeconfig /output/kubeconfig.yaml &
+
+sleep 45
+
+export KUBECONFIG=/output/kubeconfig.yaml
+
 # Generate necessary keys
 mkdir -p ${K8SFS_CONF_DIR}/kubernetes/pki
 (cd ${K8SFS_CONF_DIR}/kubernetes/pki && \
@@ -51,7 +64,6 @@ apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
   name: services-webhook
-  namespace: default
 webhooks:
   - name: services-webhook.default.svc
     clientConfig:
@@ -72,20 +84,20 @@ EOF
       -tlsCertFile ${K8SFS_CONF_DIR}/kubernetes/pki/apiserver.crt \
       -tlsKeyFile ${K8SFS_CONF_DIR}/kubernetes/pki/apiserver.key \
       &> ${K8SFS_LOG_DIR}/services-webhook.log &
+
 fi
 
 # Start the random scheduler
 if [ "$K8SFS_RANDOM_SCHEDULER" == "1" ]; then
+    echo "APPLYING RANDOM SCHEDULER"
     random-scheduler \
       &> ${K8SFS_LOG_DIR}/random-scheduler.log &
 fi
 
-k3s server \
-  --disable-agent \
-  --disable scheduler \
-  --bind-address ${IP_ADDRESS} \
-  --node-ip=${IP_ADDRESS} \
-  --write-kubeconfig /output/kubeconfig.yaml \
+CA_BUNDLE=$(cat ${K8SFS_CONF_DIR}/kubernetes/pki/ca.crt | base64 | tr -d '\n')
+
+echo ${CA_BUNDLE} > /output/ca-bundle
+
 
 
 # Done

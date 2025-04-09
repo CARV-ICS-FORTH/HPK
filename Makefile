@@ -143,11 +143,11 @@ run-kubelet: ## Run the HPK Virtual Kubelet
 	-extfile bin/kubelet.cnf -extensions v3_req
 
 	@echo "===> Register Webhook <==="
-	export KUBECONFIG=${KUBE_PATH}/admin.conf; \
+	export KUBECONFIG=k3s/output/kubeconfig.yaml; \
 	echo "$$WEBHOOK_CONFIGURATION" | kubectl apply -f -
 
 	@echo "===> Run HPK <==="
-	KUBECONFIG=${KUBE_PATH}/admin.conf \
+	KUBECONFIG=k3s/output/kubeconfig.yaml \
 	APISERVER_KEY_LOCATION=bin/kubelet.key \
 	APISERVER_CERT_LOCATION=bin/kubelet.crt \
 	VKUBELET_ADDRESS=${HOST_ADDRESS} \

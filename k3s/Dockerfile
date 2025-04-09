@@ -16,15 +16,15 @@ ENV K3S_TOKEN=secret
 ENV K3S_KUBECONFIG_OUTPUT=/output/kubeconfig.yaml
 
 RUN apt-get update && \
-apt-get install -y iproute2 curl openssl && \
+    apt-get install -y iproute2 curl openssl && \
     apt-get clean \
     && rm -rf \
-    /var/lib/apt/lists/* \
-    /tmp/* \
-    /var/tmp/* \
-    /usr/share/man \
-    /usr/share/doc \
-    /usr/share/doc-base
+        /var/lib/apt/lists/* \
+        /tmp/* \
+        /var/tmp/* \
+        /usr/share/man \
+        /usr/share/doc \
+        /usr/share/doc-base
     
 RUN curl -sfL https://github.com/k3s-io/k3s/releases/download/v1.29.1+k3s1/k3s -o /usr/local/bin/k3s && \
     chmod +x /usr/local/bin/k3s
@@ -38,6 +38,10 @@ COPY --from=builder /go/src/random-scheduler/random-scheduler /usr/local/bin/
 
 COPY generate-kubernetes-keys.sh /usr/local/bin/
 COPY start-kubernetes.sh /usr/local/bin/
+
+ENV K8SFS_HEADLESS_SERVICES=1
+ENV K8SFS_RANDOM_SCHEDULER=1
+ENV K8SFS_MOCK_KUBELET=1
 
 CMD /usr/local/bin/start-kubernetes.sh
 
