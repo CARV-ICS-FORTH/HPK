@@ -16,7 +16,8 @@ VERSION_FLAGS := -ldflags='-X "main.buildVersion=$(BUILD_VERSION)" -X "main.buil
 # Deployment options
 K8SFS_PATH ?= ${HOME}/.k8sfs
 KUBE_PATH ?= ${K8SFS_PATH}/kubernetes
-EXTERNAL_DNS ?= 8.8.8.8
+# EXTERNAL_DNS ?= 8.8.8.8
+EXTERNAL_DNS ?= 139.91.157.1
 
 define WEBHOOK_CONFIGURATION
 apiVersion: admissionregistration.k8s.io/v1
@@ -113,10 +114,11 @@ run-kubemaster: ## Run the Kubernetes Master
 
 CURRENT_DIR := $(shell pwd)
 
+# --network bridge
+
 run-kubemaster-k3s:
 	mkdir -p ${K8SFS_PATH}/log
 	apptainer run --net --dns ${EXTERNAL_DNS} --fakeroot \
-	--network bridge \
 	--cleanenv --pid --containall \
 	--no-init --no-umask --no-eval \
 	--no-mount tmp,home --unsquash --writable \
@@ -144,7 +146,7 @@ run-kubelet: ## Run the HPK Virtual Kubelet
 
 	@echo "===> Register Webhook <==="
 	export KUBECONFIG=k3s/output/kubeconfig.yaml; \
-	echo "$$WEBHOOK_CONFIGURATION" | kubectl apply -f -
+	echo "$$WEBHOOK_CONFIGURATION" | k3s kubectl apply -f -
 
 	@echo "===> Run HPK <==="
 	KUBECONFIG=k3s/output/kubeconfig.yaml \

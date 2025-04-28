@@ -20,11 +20,16 @@ K8SFS_LOG_DIR=/var/log/k8sfs
 
 export IP_ADDRESS=`ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p'`
 
-
 k3s server \
   --disable-agent \
-  --write-kubeconfig-mode 777 \
   --disable scheduler \
+  --disable coredns \
+  --disable servicelb \
+  --disable traefik \
+  --disable local-storage \
+  --disable metrics-server \
+  --disable-cloud-controller \
+  --write-kubeconfig-mode 777 \
   --bind-address ${IP_ADDRESS} \
   --node-ip=${IP_ADDRESS} \
   --write-kubeconfig /output/kubeconfig.yaml &
@@ -33,13 +38,63 @@ sleep 45
 
 export KUBECONFIG=/output/kubeconfig.yaml
 
-# Generate necessary keys
-mkdir -p ${K8SFS_CONF_DIR}/kubernetes/pki
-(cd ${K8SFS_CONF_DIR}/kubernetes/pki && \
-  generate-kubernetes-keys.sh && \
-  mv *.conf ${K8SFS_CONF_DIR}/kubernetes/)
+# Run Core DNS Here, after k3s server is up and running
+mkdir -p ${K8SFS_CONF_DIR}/coredns
+cat > ${K8SFS_CONF_DIR}/coredns/Corefile <<EOF
+.:53 {
+    errors
+    kubernetes cluster.local in-addr.arpa ip6.arpa {
+        endpoint 127.0.0.1:443
+        kubeconfig ${KUBECONFIG}
+        pods insecure
+        fallthrough in-addr.arpa ip6.arpa
+        ttl 5
+    }
+    forward . /etc/resolv.conf
+    cache 30
+    loop
+    reload
+    loadbalance
+}
+EOF
 
-# Generate the data encryption config and key
+coredns -conf ${K8SFS_CONF_DIR}/coredns/Corefile \
+  &> ${K8SFS_LOG_DIR}/coredns.log &
+cat <<EOF | k3s kubectl apply -f -
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-dns
+  namespace: kube-system
+spec:
+  clusterIP: None
+  ports:
+  - name: dns
+    port: 53
+    protocol: UDP
+  - name: dns-tcp
+    port: 53
+    protocol: TCP
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: kube-dns
+  namespace: kube-system
+subsets:
+- addresses:
+  - ip: ${IP_ADDRESS}
+    nodeName: k8s-control
+  ports:
+  - name: dns
+    port: 53
+    protocol: UDP
+  - name: dns-tcp
+    port: 53
+    protocol: TCP
+EOF
+
+  # Generate the data encryption config and key
 ENCRYPTION_KEY=$(head -c 32 /dev/urandom | base64)
 mkdir -p ${K8SFS_CONF_DIR}/kubernetes
 cat > ${K8SFS_CONF_DIR}/kubernetes/encryption-config.yaml <<EOF
@@ -89,16 +144,11 @@ fi
 
 # Start the random scheduler
 if [ "$K8SFS_RANDOM_SCHEDULER" == "1" ]; then
-    echo "APPLYING RANDOM SCHEDULER"
     random-scheduler \
       &> ${K8SFS_LOG_DIR}/random-scheduler.log &
 fi
 
 CA_BUNDLE=$(cat ${K8SFS_CONF_DIR}/kubernetes/pki/ca.crt | base64 | tr -d '\n')
-
-echo ${CA_BUNDLE} > /output/ca-bundle
-
-
 
 # Done
 sleep infinity

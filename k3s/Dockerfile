@@ -29,6 +29,17 @@ RUN apt-get update && \
 RUN curl -sfL https://github.com/k3s-io/k3s/releases/download/v1.29.1+k3s1/k3s -o /usr/local/bin/k3s && \
     chmod +x /usr/local/bin/k3s
     
+RUN mkdir -p /var/lib/rancher/k3s /etc/rancher/k3s
+
+ARG TARGETARCH
+
+# CoreDNS
+ARG COREDNS_VERSION=1.10.0
+RUN curl -LO https://github.com/coredns/coredns/releases/download/v${COREDNS_VERSION}/coredns_${COREDNS_VERSION}_linux_${TARGETARCH}.tgz && \
+    tar -zxvf coredns_${COREDNS_VERSION}_linux_${TARGETARCH}.tgz && \
+    cp coredns /usr/local/bin/ && \
+    rm -rf coredns coredns_${COREDNS_VERSION}_linux_${TARGETARCH}.tgz
+
 RUN ["mkdir", "/output"]
 RUN ["chmod", "777", "/output"]
 VOLUME ["/output"]
@@ -36,7 +47,6 @@ VOLUME ["/output"]
 COPY --from=builder /go/src/services-webhook/services-webhook /usr/local/bin/
 COPY --from=builder /go/src/random-scheduler/random-scheduler /usr/local/bin/
 
-COPY generate-kubernetes-keys.sh /usr/local/bin/
 COPY start-kubernetes.sh /usr/local/bin/
 
 ENV K8SFS_HEADLESS_SERVICES=1
