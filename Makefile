@@ -15,6 +15,7 @@ VERSION_FLAGS := -ldflags='-X "main.buildVersion=$(BUILD_VERSION)" -X "main.buil
 
 # Deployment options
 K8SFS_PATH ?= ${HOME}/.k8sfs
+# K8SFS_PATH ?= ${HOME}/.hpk/.hpk-master
 KUBE_PATH ?= ${K8SFS_PATH}/kubernetes
 # EXTERNAL_DNS ?= 8.8.8.8
 EXTERNAL_DNS ?= 139.91.157.1
@@ -114,18 +115,14 @@ run-kubemaster: ## Run the Kubernetes Master
 
 CURRENT_DIR := $(shell pwd)
 
-# --network bridge
-
 run-kubemaster-k3s:
 	mkdir -p ${K8SFS_PATH}/log
 	apptainer run --net --dns ${EXTERNAL_DNS} --fakeroot \
 	--cleanenv --pid --containall \
 	--no-init --no-umask --no-eval \
 	--no-mount tmp,home --unsquash --writable \
-	--env K8SFS_MOCK_KUBELET=0 \
 	--bind ${K8SFS_PATH}:/usr/local/etc \
 	--bind ${K8SFS_PATH}/log:/var/log \
-	--bind ${CURRENT_DIR}/k3s/output:/output \
 	docker://giannispetsis/k3s-hpk:latest
 
 run-kubelet: CA_BUNDLE = $(shell cat ${KUBE_PATH}/pki/ca.crt | base64 | tr -d '\n')
@@ -145,11 +142,11 @@ run-kubelet: ## Run the HPK Virtual Kubelet
 	-extfile bin/kubelet.cnf -extensions v3_req
 
 	@echo "===> Register Webhook <==="
-	export KUBECONFIG=k3s/output/kubeconfig.yaml; \
+	export KUBECONFIG=${K8SFS_PATH}/kubernetes/admin.conf; \
 	echo "$$WEBHOOK_CONFIGURATION" | k3s kubectl apply -f -
 
 	@echo "===> Run HPK <==="
-	KUBECONFIG=k3s/output/kubeconfig.yaml \
+	KUBECONFIG=${K8SFS_PATH}/kubernetes/admin.conf \
 	APISERVER_KEY_LOCATION=bin/kubelet.key \
 	APISERVER_CERT_LOCATION=bin/kubelet.crt \
 	VKUBELET_ADDRESS=${HOST_ADDRESS} \
