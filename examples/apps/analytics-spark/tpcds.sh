@@ -1,6 +1,6 @@
 # New lines to add to .bashrc
 NEW_LINES='
-export KUBE_PATH=~/.k8sfs/kubernetes/
+export KUBE_PATH=~/.hpk-master/kubernetes/
 export KUBECONFIG=${KUBE_PATH}/admin.conf'
 
 # Check if lines already exist in .bashrc

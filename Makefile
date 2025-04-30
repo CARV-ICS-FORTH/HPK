@@ -14,7 +14,7 @@ BUILD_DATE ?= $(shell date -u '+%Y-%m-%d-%H:%M UTC')
 VERSION_FLAGS := -ldflags='-X "main.buildVersion=$(BUILD_VERSION)" -X "main.buildTime=$(BUILD_DATE)"'
 
 # Deployment options
-K8SFS_PATH ?= ${HOME}/.k8sfs
+K8SFS_PATH ?= ${HOME}/.hpk-master
 # K8SFS_PATH ?= ${HOME}/.hpk/.hpk-master
 KUBE_PATH ?= ${K8SFS_PATH}/kubernetes
 # EXTERNAL_DNS ?= 8.8.8.8
@@ -100,6 +100,10 @@ docker-pause:
 	DOCKER_BUILDKIT=1 docker build . -t malvag/pause:1.1.9 -f deploy/images/pause-apptainer-agent/pause.apptainer.Dockerfile
 	sudo docker push malvag/pause:1.1.9
 
+docker-kubemaster-k3s:
+	(cd k3s && docker build . -t giannispetsis/k3s-hpk:latest)
+	sudo docker push giannispetsis/k3s-hpk:latest
+
 ##@ Deployment
 
 run-kubemaster: ## Run the Kubernetes Master
@@ -112,8 +116,6 @@ run-kubemaster: ## Run the Kubernetes Master
 	--bind ${K8SFS_PATH}:/usr/local/etc \
 	--bind ${K8SFS_PATH}/log:/var/log \
 	docker://chazapis/kubernetes-from-scratch:20230425
-
-CURRENT_DIR := $(shell pwd)
 
 run-kubemaster-k3s:
 	mkdir -p ${K8SFS_PATH}/log
