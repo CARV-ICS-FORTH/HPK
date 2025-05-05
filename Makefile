@@ -14,11 +14,9 @@ BUILD_DATE ?= $(shell date -u '+%Y-%m-%d-%H:%M UTC')
 VERSION_FLAGS := -ldflags='-X "main.buildVersion=$(BUILD_VERSION)" -X "main.buildTime=$(BUILD_DATE)"'
 
 # Deployment options
-K8SFS_PATH ?= ${HOME}/.hpk-master
-# K8SFS_PATH ?= ${HOME}/.hpk/.hpk-master
-KUBE_PATH ?= ${K8SFS_PATH}/kubernetes
-# EXTERNAL_DNS ?= 8.8.8.8
-EXTERNAL_DNS ?= 139.91.157.1
+HPK_MASTER_PATH ?= ${HOME}/.hpk-master
+KUBE_PATH ?= ${HPK_MASTER_PATH}/kubernetes
+EXTERNAL_DNS ?= 8.8.8.8
 
 define WEBHOOK_CONFIGURATION
 apiVersion: admissionregistration.k8s.io/v1
@@ -107,24 +105,24 @@ docker-kubemaster-k3s:
 ##@ Deployment
 
 run-kubemaster: ## Run the Kubernetes Master
-	mkdir -p ${K8SFS_PATH}/log
+	mkdir -p ${HPK_MASTER_PATH}/log
 	apptainer run --net --dns ${EXTERNAL_DNS} --fakeroot \
 	--cleanenv --pid --containall \
 	--no-init --no-umask --no-eval \
 	--no-mount tmp,home --unsquash --writable \
 	--env K8SFS_MOCK_KUBELET=0 \
-	--bind ${K8SFS_PATH}:/usr/local/etc \
-	--bind ${K8SFS_PATH}/log:/var/log \
+	--bind ${HPK_MASTER_PATH}:/usr/local/etc \
+	--bind ${HPK_MASTER_PATH}/log:/var/log \
 	docker://chazapis/kubernetes-from-scratch:20230425
 
 run-kubemaster-k3s:
-	mkdir -p ${K8SFS_PATH}/log
+	mkdir -p ${HPK_MASTER_PATH}/log
 	apptainer run --net --dns ${EXTERNAL_DNS} --fakeroot \
 	--cleanenv --pid --containall \
 	--no-init --no-umask --no-eval \
 	--no-mount tmp,home --unsquash --writable \
-	--bind ${K8SFS_PATH}:/usr/local/etc \
-	--bind ${K8SFS_PATH}/log:/var/log \
+	--bind ${HPK_MASTER_PATH}:/usr/local/etc \
+	--bind ${HPK_MASTER_PATH}/log:/var/log \
 	docker://giannispetsis/k3s-hpk:latest
 
 run-kubelet: CA_BUNDLE = $(shell cat ${KUBE_PATH}/pki/ca.crt | base64 | tr -d '\n')
@@ -144,11 +142,11 @@ run-kubelet: ## Run the HPK Virtual Kubelet
 	-extfile bin/kubelet.cnf -extensions v3_req
 
 	@echo "===> Register Webhook <==="
-	export KUBECONFIG=${K8SFS_PATH}/kubernetes/admin.conf; \
+	export KUBECONFIG=${HPK_MASTER_PATH}/kubernetes/admin.conf; \
 	echo "$$WEBHOOK_CONFIGURATION" | k3s kubectl apply -f -
 
 	@echo "===> Run HPK <==="
-	KUBECONFIG=${K8SFS_PATH}/kubernetes/admin.conf \
+	KUBECONFIG=${HPK_MASTER_PATH}/kubernetes/admin.conf \
 	APISERVER_KEY_LOCATION=bin/kubelet.key \
 	APISERVER_CERT_LOCATION=bin/kubelet.crt \
 	VKUBELET_ADDRESS=${HOST_ADDRESS} \

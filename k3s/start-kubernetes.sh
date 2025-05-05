@@ -1,14 +1,14 @@
 #!/bin/bash
 
-K8SFS_CONF_DIR=/usr/local/etc
-K8SFS_LOG_DIR=/var/log/k8sfs
+HPK_MASTER_CONF_DIR=/usr/local/etc
+HPK_MASTER_LOG_DIR=/var/log/hpk-master
 
-mkdir -p ${K8SFS_LOG_DIR}
-mkdir -p ${K8SFS_CONF_DIR}/kubernetes
+mkdir -p ${HPK_MASTER_LOG_DIR}
+mkdir -p ${HPK_MASTER_CONF_DIR}/kubernetes
 
 export IP_ADDRESS=`ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p'`
 
-rm -f ${K8SFS_CONF_DIR}/kubernetes/admin.conf
+rm -f ${HPK_MASTER_CONF_DIR}/kubernetes/admin.conf
 
 k3s server \
   --disable-agent \
@@ -22,15 +22,15 @@ k3s server \
   --write-kubeconfig-mode 777 \
   --bind-address ${IP_ADDRESS} \
   --node-ip=${IP_ADDRESS} \
-  --write-kubeconfig ${K8SFS_CONF_DIR}/kubernetes/admin.conf \
-  &> ${K8SFS_LOG_DIR}/k3s.log &
+  --write-kubeconfig ${HPK_MASTER_CONF_DIR}/kubernetes/admin.conf \
+  &> ${HPK_MASTER_LOG_DIR}/k3s.log &
 
 echo -e "\n----------\nWaiting for K3s server to be created...\n----------"
-while [ ! -f ${K8SFS_CONF_DIR}/kubernetes/admin.conf ]; do
+while [ ! -f ${HPK_MASTER_CONF_DIR}/kubernetes/admin.conf ]; do
   sleep 1
 done
 
-export KUBECONFIG=${K8SFS_CONF_DIR}/kubernetes/admin.conf
+export KUBECONFIG=${HPK_MASTER_CONF_DIR}/kubernetes/admin.conf
 
 echo -e "Waiting for Kubernetes API server to be ready...\n----------"
 until k3s kubectl get nodes &>/dev/null; do
@@ -40,8 +40,8 @@ done
 echo -e "K3s server started\n----------"
 
 # Run Core DNS Here, after k3s server is up and running
-mkdir -p ${K8SFS_CONF_DIR}/coredns
-cat > ${K8SFS_CONF_DIR}/coredns/Corefile <<EOF
+mkdir -p ${HPK_MASTER_CONF_DIR}/coredns
+cat > ${HPK_MASTER_CONF_DIR}/coredns/Corefile <<EOF
 .:53 {
     errors
     kubernetes cluster.local in-addr.arpa ip6.arpa {
@@ -59,8 +59,8 @@ cat > ${K8SFS_CONF_DIR}/coredns/Corefile <<EOF
 }
 EOF
 
-coredns -conf ${K8SFS_CONF_DIR}/coredns/Corefile \
-  &> ${K8SFS_LOG_DIR}/coredns.log &
+coredns -conf ${HPK_MASTER_CONF_DIR}/coredns/Corefile \
+  &> ${HPK_MASTER_LOG_DIR}/coredns.log &
 cat <<EOF | k3s kubectl apply -f -
 apiVersion: v1
 kind: Service
@@ -96,11 +96,11 @@ subsets:
 EOF
 
 # Prepare the keys for the services webhook
-mkdir -p ${K8SFS_CONF_DIR}/kubernetes/pki
-(cd ${K8SFS_CONF_DIR}/kubernetes/pki && generate-keys.sh)
+mkdir -p ${HPK_MASTER_CONF_DIR}/kubernetes/pki
+(cd ${HPK_MASTER_CONF_DIR}/kubernetes/pki && generate-keys.sh)
   
 # Start the services webhook
-CA_BUNDLE=$(cat ${K8SFS_CONF_DIR}/kubernetes/pki/ca.crt | base64 | tr -d '\n')
+CA_BUNDLE=$(cat ${HPK_MASTER_CONF_DIR}/kubernetes/pki/ca.crt | base64 | tr -d '\n')
 cat <<EOF | k3s kubectl apply -f -
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
@@ -123,13 +123,13 @@ webhooks:
 EOF
 
 services-webhook \
-  -tlsCertFile ${K8SFS_CONF_DIR}/kubernetes/pki/services-webhook.crt \
-  -tlsKeyFile ${K8SFS_CONF_DIR}/kubernetes/pki/services-webhook.key \
-   &> ${K8SFS_LOG_DIR}/services-webhook.log &
+  -tlsCertFile ${HPK_MASTER_CONF_DIR}/kubernetes/pki/services-webhook.crt \
+  -tlsKeyFile ${HPK_MASTER_CONF_DIR}/kubernetes/pki/services-webhook.key \
+   &> ${HPK_MASTER_LOG_DIR}/services-webhook.log &
 
 # Start the random scheduler
 random-scheduler \
-  &> ${K8SFS_LOG_DIR}/random-scheduler.log &
+  &> ${HPK_MASTER_LOG_DIR}/random-scheduler.log &
 
 # Done
 sleep infinity

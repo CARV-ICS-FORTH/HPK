@@ -51,7 +51,7 @@ make run-kubelet
 Now you can configure and use `kubectl`:
 
 ```bash
-export KUBE_PATH=~/.k8sfs/kubernetes/
+export KUBE_PATH=~/.hpk-master/kubernetes/
 export KUBECONFIG=${KUBE_PATH}/admin.conf
 kubectl get nodes
 ```
