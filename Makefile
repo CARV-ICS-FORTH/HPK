@@ -18,6 +18,10 @@ HPK_MASTER_PATH ?= ${HOME}/.hpk-master
 KUBE_PATH ?= ${HPK_MASTER_PATH}/kubernetes
 EXTERNAL_DNS ?= 8.8.8.8
 
+REGISTRY_NAME ?= giannispetsis
+K3S_VERSION ?= 1.0
+K3S_IMAGE_TAG=$(REGISTRY_NAME)/hpk-master:$(K3S_VERSION)
+
 define WEBHOOK_CONFIGURATION
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
@@ -81,7 +85,6 @@ export CERTIFICATE_CONFIGURATION
 help: ## Display this help
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
-
 ##@ Build
 
 build: hpk-kubelet hpk-pause	## Build HPK binary
@@ -98,24 +101,14 @@ docker-pause:
 	DOCKER_BUILDKIT=1 docker build . -t malvag/pause:1.1.9 -f deploy/images/pause-apptainer-agent/pause.apptainer.Dockerfile
 	sudo docker push malvag/pause:1.1.9
 
-docker-kubemaster-k3s:
-	(cd k3s && docker build . -t giannispetsis/k3s-hpk:latest)
-	sudo docker push giannispetsis/k3s-hpk:latest
+image-kubemaster: ## Build and push the Kubernetes Master image
+	(cd k3s && docker buildx build --platform linux/amd64 --push -f Dockerfile -t $(K3S_IMAGE_TAG) .)
+
+build-all: image-kubemaster build ## Build kubemaster and binaries
 
 ##@ Deployment
 
-run-kubemaster: ## Run the Kubernetes Master
-	mkdir -p ${HPK_MASTER_PATH}/log
-	apptainer run --net --dns ${EXTERNAL_DNS} --fakeroot \
-	--cleanenv --pid --containall \
-	--no-init --no-umask --no-eval \
-	--no-mount tmp,home --unsquash --writable \
-	--env K8SFS_MOCK_KUBELET=0 \
-	--bind ${HPK_MASTER_PATH}:/usr/local/etc \
-	--bind ${HPK_MASTER_PATH}/log:/var/log \
-	docker://chazapis/kubernetes-from-scratch:20230425
-
-run-kubemaster-k3s:
+run-hpk-master:
 	mkdir -p ${HPK_MASTER_PATH}/log
 	apptainer run --net --dns ${EXTERNAL_DNS} --fakeroot \
 	--cleanenv --pid --containall \
@@ -123,7 +116,7 @@ run-kubemaster-k3s:
 	--no-mount tmp,home --unsquash --writable \
 	--bind ${HPK_MASTER_PATH}:/usr/local/etc \
 	--bind ${HPK_MASTER_PATH}/log:/var/log \
-	docker://giannispetsis/k3s-hpk:latest
+	docker://$(K3S_IMAGE_TAG)
 
 run-kubelet: CA_BUNDLE = $(shell cat ${KUBE_PATH}/pki/ca.crt | base64 | tr -d '\n')
 run-kubelet: HOST_ADDRESS = $(shell ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p')
@@ -142,11 +135,11 @@ run-kubelet: ## Run the HPK Virtual Kubelet
 	-extfile bin/kubelet.cnf -extensions v3_req
 
 	@echo "===> Register Webhook <==="
-	export KUBECONFIG=${HPK_MASTER_PATH}/kubernetes/admin.conf; \
-	echo "$$WEBHOOK_CONFIGURATION" | k3s kubectl apply -f -
+	export KUBECONFIG=${KUBE_PATH}/admin.conf; \
+	echo "$$WEBHOOK_CONFIGURATION" | kubectl apply -f -
 
 	@echo "===> Run HPK <==="
-	KUBECONFIG=${HPK_MASTER_PATH}/kubernetes/admin.conf \
+	KUBECONFIG=${KUBE_PATH}/admin.conf \
 	APISERVER_KEY_LOCATION=bin/kubelet.key \
 	APISERVER_CERT_LOCATION=bin/kubelet.crt \
 	VKUBELET_ADDRESS=${HOST_ADDRESS} \

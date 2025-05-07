@@ -39,11 +39,6 @@ RUN set -eux; \
 
 RUN mkdir -p /var/lib/rancher/k3s /etc/rancher/k3s
 
-
-# RUN if [[ ${TARGETARCH} == "amd64" ]]; then $K3S_ARCH=""; else $K3S_ARCH="-${TARGETARCH}"; endif && \
-#     curl -sfL https://github.com/k3s-io/k3s/releases/download/${K3S_VERSION}/k3s${K3S_ARCH} -o /usr/local/bin/k3s && \
-#     chmod +x /usr/local/bin/k3s
-    
 # CoreDNS
 ARG COREDNS_VERSION=1.10.0
 RUN curl -LO https://github.com/coredns/coredns/releases/download/v${COREDNS_VERSION}/coredns_${COREDNS_VERSION}_linux_${TARGETARCH}.tgz && \
@@ -53,7 +48,6 @@ RUN curl -LO https://github.com/coredns/coredns/releases/download/v${COREDNS_VER
 
 COPY --from=builder /go/src/services-webhook/services-webhook /usr/local/bin/
 COPY --from=builder /go/src/random-scheduler/random-scheduler /usr/local/bin/
-
 
 COPY generate-keys.sh /usr/local/bin/
 RUN chmod 777 /usr/local/bin/generate-keys.sh

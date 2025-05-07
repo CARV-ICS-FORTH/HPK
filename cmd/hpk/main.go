@@ -92,7 +92,6 @@ func main() {
 		return nil
 	}
 
-
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", `set the log level, e.g. "debug", "info", "warn", "error"`)
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {

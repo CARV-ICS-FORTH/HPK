@@ -39,7 +39,7 @@ Then you need to start the Kubernetes Master and `hpk-kubelet` seperately.
 To run the Kubernetes Master:
 
 ```bash
-make run-kubemaster
+make run-hpk-master
 ```
 
 Once the master is up and running, you can start the `hpk-kubelet`:
