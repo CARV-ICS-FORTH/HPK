@@ -105,7 +105,7 @@ func main() {
 
 		return nil
 	}
-	
+
 	if err := rootCmd.Execute(); err != nil && errors.Cause(err) != context.Canceled {
 		log.G(ctx).Fatal(err)
 	}

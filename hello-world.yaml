@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: Pod
-metadata:
-  name: alpine-hello15
-spec:
-  containers:
-  - name: alpine
-    image: alpine
-    command: ["sh", "-c", "echo Hello, World!"]

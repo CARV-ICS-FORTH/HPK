@@ -13,14 +13,22 @@ endif
 BUILD_DATE ?= $(shell date -u '+%Y-%m-%d-%H:%M UTC')
 VERSION_FLAGS := -ldflags='-X "main.buildVersion=$(BUILD_VERSION)" -X "main.buildTime=$(BUILD_DATE)"'
 
+VERSION ?= 1.1.9
+
 # Deployment options
 HPK_MASTER_PATH ?= ${HOME}/.hpk-master
 KUBE_PATH ?= ${HPK_MASTER_PATH}/kubernetes
 EXTERNAL_DNS ?= 8.8.8.8
 
-REGISTRY_NAME ?= giannispetsis
-K3S_VERSION ?= 1.0
-K3S_IMAGE_TAG=$(REGISTRY_NAME)/hpk-master:$(K3S_VERSION)
+
+K3S_REGISTRY_NAME ?= giannispetsis
+K3S_IMAGE_TAG=$(REGISTRY_NAME)/hpk-master:$(VERSION)
+
+PAUSE_REGISTRY_NAME ?= malvag
+PAUSE_IMAGE_TAG=$(PAUSE_REGISTRY_NAME)/pause:$(VERSION)
+
+print:
+	echo $(VERSION_FLAGS)
 
 define WEBHOOK_CONFIGURATION
 apiVersion: admissionregistration.k8s.io/v1
@@ -98,11 +106,12 @@ hpk-pause:
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(VERSION_FLAGS) -ldflags '-extldflags "-static"' -o bin/hpk-pause ./cmd/pause
 
 docker-pause:
-	DOCKER_BUILDKIT=1 docker build . -t malvag/pause:1.1.9 -f deploy/images/pause-apptainer-agent/pause.apptainer.Dockerfile
-	sudo docker push malvag/pause:1.1.9
+	DOCKER_BUILDKIT=1 docker build . -t $(PAUSE_IMAGE_TAG) -f deploy/images/pause-apptainer-agent/pause.apptainer.Dockerfile
+	sudo docker push $(PAUSE_IMAGE_TAG)
 
 image-kubemaster: ## Build and push the Kubernetes Master image
-	(cd k3s && docker buildx build --platform linux/amd64 --push -f Dockerfile -t $(K3S_IMAGE_TAG) .)
+	(cd k3s && DOCKER_BUILDKIT=1 docker build . -t $(K3S_IMAGE_TAG) -f Dockerfile)
+	sudo docker push $(K3S_IMAGE_TAG)
 
 build-all: image-kubemaster build ## Build kubemaster and binaries
 
