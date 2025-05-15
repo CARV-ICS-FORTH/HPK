@@ -39,7 +39,7 @@ Then you need to start the Kubernetes Master and `hpk-kubelet` seperately.
 To run the Kubernetes Master:
 
 ```bash
-make run-kubemaster
+make run-hpk-master
 ```
 
 Once the master is up and running, you can start the `hpk-kubelet`:
@@ -51,7 +51,7 @@ make run-kubelet
 Now you can configure and use `kubectl`:
 
 ```bash
-export KUBE_PATH=~/.k8sfs/kubernetes/
+export KUBE_PATH=~/.hpk-master/kubernetes/
 export KUBECONFIG=${KUBE_PATH}/admin.conf
 kubectl get nodes
 ```

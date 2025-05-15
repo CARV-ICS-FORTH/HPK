@@ -13,10 +13,18 @@ endif
 BUILD_DATE ?= $(shell date -u '+%Y-%m-%d-%H:%M UTC')
 VERSION_FLAGS := -ldflags='-X "main.buildVersion=$(BUILD_VERSION)" -X "main.buildTime=$(BUILD_DATE)"'
 
+VERSION = $(shell cat VERSION)
+
 # Deployment options
-K8SFS_PATH ?= ${HOME}/.k8sfs
-KUBE_PATH ?= ${K8SFS_PATH}/kubernetes
+HPK_MASTER_PATH ?= ${HOME}/.hpk-master
+KUBE_PATH ?= ${HPK_MASTER_PATH}/kubernetes
 EXTERNAL_DNS ?= 8.8.8.8
+
+REGISTRY_NAME ?= carvicsforth
+
+K3S_IMAGE_TAG=$(REGISTRY_NAME)/hpk-master:$(VERSION)
+
+PAUSE_IMAGE_TAG=$(REGISTRY_NAME)/pause:$(VERSION)
 
 define WEBHOOK_CONFIGURATION
 apiVersion: admissionregistration.k8s.io/v1
@@ -81,7 +89,6 @@ export CERTIFICATE_CONFIGURATION
 help: ## Display this help
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
-
 ##@ Build
 
 build: hpk-kubelet hpk-pause	## Build HPK binary
@@ -94,22 +101,27 @@ hpk-kubelet:
 hpk-pause:
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(VERSION_FLAGS) -ldflags '-extldflags "-static"' -o bin/hpk-pause ./cmd/pause
 
-docker-pause:
-	DOCKER_BUILDKIT=1 docker build . -t malvag/pause:1.1.9 -f deploy/images/pause-apptainer-agent/pause.apptainer.Dockerfile
-	sudo docker push malvag/pause:1.1.9
+image-pause:
+	DOCKER_BUILDKIT=1 docker build . -t $(PAUSE_IMAGE_TAG) -f deploy/images/pause-apptainer-agent/pause.apptainer.Dockerfile
+	sudo docker push $(PAUSE_IMAGE_TAG)
+
+image-kubemaster: ## Build and push the Kubernetes Master image
+	(cd k3s && DOCKER_BUILDKIT=1 docker build . -t $(K3S_IMAGE_TAG) -f Dockerfile)
+	sudo docker push $(K3S_IMAGE_TAG)
+
+build-all: image-kubemaster image-pause build ## Build kubemaster and binaries
 
 ##@ Deployment
 
-run-kubemaster: ## Run the Kubernetes Master
-	mkdir -p ${K8SFS_PATH}/log
+run-hpk-master:
+	mkdir -p ${HPK_MASTER_PATH}/log
 	apptainer run --net --dns ${EXTERNAL_DNS} --fakeroot \
 	--cleanenv --pid --containall \
 	--no-init --no-umask --no-eval \
 	--no-mount tmp,home --unsquash --writable \
-	--env K8SFS_MOCK_KUBELET=0 \
-	--bind ${K8SFS_PATH}:/usr/local/etc \
-	--bind ${K8SFS_PATH}/log:/var/log \
-	docker://chazapis/kubernetes-from-scratch:20230425
+	--bind ${HPK_MASTER_PATH}:/usr/local/etc \
+	--bind ${HPK_MASTER_PATH}/log:/var/log \
+	docker://$(K3S_IMAGE_TAG)
 
 run-kubelet: CA_BUNDLE = $(shell cat ${KUBE_PATH}/pki/ca.crt | base64 | tr -d '\n')
 run-kubelet: HOST_ADDRESS = $(shell ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p')

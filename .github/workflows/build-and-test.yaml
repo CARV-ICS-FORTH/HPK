@@ -51,7 +51,7 @@ jobs:
           run: |
             make run-kubemaster
           wait-on: |
-            file:${{ env.HOME }}/.k8sfs/log/k8sfs/services-webhook.log
+            file:${{ env.HOME }}/.hpk-master/log/hpk-master/services-webhook.log
           wait-for: 5m
       - name: Start HPK
         uses: JarvusInnovations/background-action@v1
