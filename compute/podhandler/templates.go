@@ -88,7 +88,7 @@ func strval(v interface{}) string {
 }
 
 func makeTmpPath(binds []string) (oldPath string, newPath string, err error) {
-    oldPath, err = findUniqueVolumesBind(binds)
+    oldPath, err = findVolumesBind(binds)
     if err != nil {
         return "", "", err
     }
@@ -116,9 +116,8 @@ func makeTmpPath(binds []string) (oldPath string, newPath string, err error) {
     return oldPath, newPath, nil
 }
 
-func findUniqueVolumesBind(binds []string) (string, error) {
-    var foundPath string
-    count := 0
+func findVolumesBind(binds []string) (string, error) {
+    foundPath := ""
 
     for _, b := range binds {
         hostPath := b
@@ -128,15 +127,12 @@ func findUniqueVolumesBind(binds []string) (string, error) {
 
         idx := strings.Index(hostPath, "volumes")
         if idx != -1 {
-            count++
-            if count > 1 {
-                return "", errors.New("more than one bind contains 'volumes'")
-            }
             foundPath = hostPath[:idx+len("volumes")]
+            break
         }
     }
 
-    if count == 0 {
+    if foundPath == "" {
         return "", errors.New("no bind contains 'volumes'")
     }
 
@@ -150,9 +146,21 @@ func generateTmpCommands(binds []string) TmpCommandsResult {
     }
 
     mkdirCmd := fmt.Sprintf("mkdir -p %s || { echo 'mkdir failed'; exit 1; }", strconv.Quote(newPath))
+
+    moveContentsCmd := fmt.Sprintf(
+        `if [ -d "%s" ] && [ ! -L "%s" ]; then ( shopt -s dotglob nullglob; mv "%s/"* "%s/" ); fi`,
+        oldPath, oldPath, oldPath, newPath,
+    )
+
+    rmIfDirCmd := fmt.Sprintf(
+        "[ -e %s ] && [ ! -L %s ] && rm -rf %s || true",
+        strconv.Quote(oldPath), strconv.Quote(oldPath), strconv.Quote(oldPath),
+    )
+
+
     lnCmd := fmt.Sprintf("ln -sfn %s %s || { echo 'ln failed'; exit 1; }", strconv.Quote(newPath), strconv.Quote(oldPath))
 
-    return TmpCommandsResult{Cmds: []string{mkdirCmd, lnCmd}}
+    return TmpCommandsResult{Cmds: []string{mkdirCmd, moveContentsCmd, rmIfDirCmd, lnCmd}}
 }
 
 
@@ -352,25 +360,7 @@ trap 'cleanup "${BASH_COMMAND}" "$?"'  EXIT
 
 {{if gt (len .InitContainers) 0 }} handle_init_containers {{end}}
 
-{{- if gt (len .Containers) 0 }}
-
-  {{- if .UseTmp }}
-    {{- range $index, $container := .Containers }}
-      {{- $result := generateTmpCommands $container.Binds }}
-      {{- if $result.Err }}
-        echo "Error generating tmp commands for container {{$index}}: {{ $result.Err }}" >&2
-        exit 1
-      {{- else }}
-        {{- range $cmd := $result.Cmds }}
-          {{ $cmd }}
-	{{- end }}
-      {{ end }}
-    {{- end }}
-  {{- end }}
-
-  handle_containers
-
-{{- end }}
+{{- if gt (len .Containers) 0 }} handle_containers {{end}}
 `
 
 const HostScriptTemplate = `#!/bin/bash
@@ -418,6 +408,22 @@ export workdir=/tmp/{{.Pod.Namespace}}_{{.Pod.Name}}
 echo "[Host] Creating workdir: ${workdir} "
 mkdir -p ${workdir}
 trap 'echo [HOST] Deleting workdir ${workdir}; rm -rf ${workdir}' EXIT
+
+{{- if .UseTmp }}
+  {{- range $index, $container := .Containers }}
+    {{- $result := generateTmpCommands $container.Binds }}
+    {{- if $result.Err }}
+      echo "Error generating tmp commands for container {{$index}}: {{ $result.Err }}" >&2
+      exit 1
+    {{- else }}
+      {{- range $cmd := $result.Cmds }}
+      {{ $cmd }}
+      {{- end }}
+    {{ end }}
+  {{- end }}
+{{- end }}
+
+
 
 # --network-args "portmap=8080:80/tcp"
 # --container is needed to start a separate /dev/sh
