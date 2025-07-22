@@ -25,7 +25,7 @@ spec:
   mainClass: org.apache.spark.examples.SparkPi
   mainApplicationFile: local:///opt/spark/examples/jars/spark-examples.jar
   arguments:
-  - "10000"
+  - "10000000"
   sparkVersion: 3.5.3
   driver:
     labels:
@@ -39,8 +39,8 @@ spec:
   executor:
     labels:
       version: 3.5.3
-    instances: 1
-    cores: 1
+    instances: 24
+    cores: 4
     memory: 4g
     securityContext:
       runAsUser: 185

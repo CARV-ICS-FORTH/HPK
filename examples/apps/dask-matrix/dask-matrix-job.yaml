@@ -1,0 +1,23 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dask-matrix-client
+spec:
+  template:
+    spec:
+      containers:
+      - name: client
+        image: lefterisv/dask-matrix-client
+        env:
+        - name: MATRIX_SIZE
+          value: "40000"
+        - name: CHUNK_SIZE
+          value: "4000"
+        volumeMounts:
+        - name: report
+          mountPath: /report
+      restartPolicy: Never
+      volumes:
+      - name: report
+        emptyDir: {}
+  backoffLimit: 1
