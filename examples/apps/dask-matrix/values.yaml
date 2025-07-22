@@ -6,11 +6,11 @@ scheduler:
       memory: 4G
 
 worker:
-  replicas: 3
+  replicas: 5
   resources:
     requests:
-      cpu: 8
-      memory: 8G
+      cpu: 12
+      memory: 16G
 
 jupyter:
   enabled: false
