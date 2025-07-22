@@ -16,7 +16,8 @@ helm repo add dask https://helm.dask.org
 helm repo update
 
 helm install dask dask/dask \
-  --namespace "${TEST_NAMESPACE}"
+  --namespace "${TEST_NAMESPACE}" \
   --set image.tag=2024.1.0 \
   --set jupyter.image.tag=2024.1.0 \
-  --set worker.image.tag=2024.1.0
+  --set worker.image.tag=2024.1.0 \
+  --values values.yaml
