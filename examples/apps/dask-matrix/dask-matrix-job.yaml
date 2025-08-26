@@ -8,6 +8,7 @@ spec:
       containers:
       - name: client
         image: lefterisv/dask-matrix-client
+        imagePullPolicy: Always
         command: ["python", "/app/benchmark.py"]
         env:
         - name: MATRIX_SIZE

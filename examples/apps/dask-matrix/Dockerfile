@@ -1,6 +1,7 @@
 FROM python:3.10.12-slim
 
 RUN pip install \
+    beautifulsoup4 \
     dask==2024.1.0 \
     distributed==2024.1.0 \
     numpy==1.26.3 \

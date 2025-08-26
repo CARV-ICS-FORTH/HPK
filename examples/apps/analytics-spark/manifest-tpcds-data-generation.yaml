@@ -17,7 +17,7 @@ spec:
     # Data Format
     - "parquet"
     # Scale factor (in GB)
-    - "1"
+    - "100"
     # Generate data num partitions
     - "100"
     # Create the partitioned fact tables
@@ -40,8 +40,8 @@ spec:
     "spark.network.timeout": "2400"
     # S3 Credential
     "spark.hadoop.fs.s3a.endpoint": "http://artifacts.analytics-spark.svc:9000"
-    "spark.hadoop.fs.s3a.access.key": "APMR5XMVFcOdcEJC58o0"
-    "spark.hadoop.fs.s3a.secret.key": "NKnsFUmpux6K4UbZoCSdmvpCryb4CVp3LaE0o14U"
+    "spark.hadoop.fs.s3a.access.key": "ACCESS_KEY"
+    "spark.hadoop.fs.s3a.secret.key": "SECRET_KEY"
     # S3 Configs
     "spark.hadoop.fs.s3a.path.style.access": "true"
     "spark.hadoop.fs.s3a.fast.upload": "true"

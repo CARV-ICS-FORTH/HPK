@@ -25,12 +25,12 @@ spec:
   mainClass: org.apache.spark.examples.SparkPi
   mainApplicationFile: local:///opt/spark/examples/jars/spark-examples.jar
   arguments:
-  - "10000000"
+  - "100000"
   sparkVersion: 3.5.3
   driver:
     labels:
       version: 3.5.3
-    cores: 2
+    cores: 1
     memory: 4g
     serviceAccount: spark-operator-spark
     securityContext:

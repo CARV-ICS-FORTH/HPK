@@ -25,7 +25,8 @@ spec:
   # Optimize queries
     - "false"
   # Filter queries, will run all if empty - "q70-v2.4,q82-v2.4,q64-v2.4"
-    - "q1-v2.4,q10-v2.4,q11-v2.4,q12-v2.4,q13-v2.4,q14a-v2.4,q14b-v2.4,q15-v2.4,q16-v2.4,q17-v2.4,q18-v2.4,q19-v2.4,q2-v2.4,q20-v2.4,q21-v2.4,q22-v2.4"
+    #- "q1-v2.4,q10-v2.4,q11-v2.4,q12-v2.4,q13-v2.4,q14a-v2.4,q14b-v2.4,q15-v2.4,q16-v2.4,q17-v2.4,q18-v2.4,q19-v2.4,q2-v2.4,q20-v2.4,q21-v2.4,q22-v2.4"
+    - "q6-v2.4,q7-v2.4,q9-v2.4,q11-v2.4,q15-v2.4,q21-v2.4,q22-v2.4"
   # Logging set to WARN
     - "true"
   sparkConf:
@@ -42,8 +43,8 @@ spec:
     "spark.network.timeout": "2400"
     # S3 Credential
     "spark.hadoop.fs.s3a.endpoint": "http://artifacts.analytics-spark.svc:9000"
-    "spark.hadoop.fs.s3a.access.key": "APMR5XMVFcOdcEJC58o0"
-    "spark.hadoop.fs.s3a.secret.key": "NKnsFUmpux6K4UbZoCSdmvpCryb4CVp3LaE0o14U"
+    "spark.hadoop.fs.s3a.access.key": "ACCESS_KEY"
+    "spark.hadoop.fs.s3a.secret.key": "SECRET_KEY"
     # S3 Configs
     "spark.hadoop.fs.s3a.committer.name": "directory"
     "spark.hadoop.fs.s3a.committer.staging.conflict-mode": "append"
@@ -59,14 +60,14 @@ spec:
     # S3A Committer
     "spark.hadoop.mapreduce.outputcommitter.factory.scheme.s3a": "org.apache.hadoop.fs.s3a.commit.S3ACommitterFactory"    
   driver:
-    cores: 2
-    coreLimit: 2000m
+    cores: 4
+    coreLimit: 4000m
     memory: 8g
     serviceAccount: spark-operator-spark
   executor:
-    instances: 1
-    cores: 14
-    memory: 30g
+    instances: 5
+    cores: 12
+    memory: 16g
     serviceAccount: spark-operator-spark
   restartPolicy:
     type: Never
