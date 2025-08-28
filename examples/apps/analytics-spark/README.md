@@ -54,4 +54,3 @@ Several aspects of the TPC-DS benchmark workflow are customizable:
    ``` 
    - Leave empty to run all queries.
    - You can also change the number of repetitions by modifying the corresponding argument.
-------------------------------------------------------------------------------------------------
