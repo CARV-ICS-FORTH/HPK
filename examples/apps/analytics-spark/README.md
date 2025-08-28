@@ -22,6 +22,8 @@ It consists of two stages:
 ------------------------------------------------------------------------------------------------
 #### Usage
 1. **Run the full TPC-DS workflow**
+
+
    Execute the automation script which handles environment setup, data generation, and benchmark execution:
    ```
    ./tpcds.sh
@@ -29,6 +31,8 @@ It consists of two stages:
    The script will display status messages for each stage (Spark Operator & MinIO setup, data generation, benchmark).
 
 3. **Check benchmark logs**
+
+
    Once the benchmark has finished, inspect the SQL query running times and results using:
    ```
    kubectl logs tpcds-benchmark-sql-1g-driver
@@ -36,6 +40,8 @@ It consists of two stages:
    Replace the pod name if using a different namespace or scale factor.
 
 5. **Cleanup**
+
+
    When finished, remove Spark Operator, MinIO, and the Spark application using:
    ```
    ./uninstall.sh
@@ -44,10 +50,16 @@ It consists of two stages:
 #### Optional configuration
 Several aspects of the TPC-DS benchmark workflow are customizable:
 1. **Spark driver and executor resources**
+
+
    In the driver section, adjust CPU and memory. In the executor section, adjust the number of executors as well as their CPU and memory.
-3. **TPC-DS scale factor**
+4. **TPC-DS scale factor**
+
+
    Controls the size of the generated dataset (in GB). It is set as the 4th argument in `manifest-tpcds-data-generation.yaml`.
-5. **Queries to run**
+6. **Queries to run**
+
+   
    In `manifest-tpcds-benchmark.yaml`, you can specify which TPC-DS queries to run by editing the query list in arguments:
    ```
    - "q1-v2.4,q10-v2.4,q11-v2.4" # example of subset of queries
