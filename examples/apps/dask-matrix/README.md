@@ -7,19 +7,19 @@ a Dask performance report in HTML format.
 
 ## Overview
 The workflow consists of:
-1. *Cluster Deployment*
+1. **Cluster Deployment**
     - `install.sh` uses Helm to deploy a Dask cluster into Kubernetes with resource settings from `values.yaml`
     - `uninstall.sh` tears it down when no longer needed 
-2. *Python script* (`benchmark.py`)
+2. **Python script** (`benchmark.py`)
     - Connects to a running Dask cluster
     - Creates two random matrices (SIZE × SIZE) chunked into smaller blocks
     - Multiplies the matrices using Dask's distributed computation 
     - Records execution time
     - Generates an HTML performance report
     - Extracts only the relevant metrics from the report (duration, compute time, CPU utilization)
-3. *Docker image*
+3. **Docker image**
     - Packages the script and dependencies into a runnable container
-4. *Kubernetes Job* (`dask-matrix-job.yaml`)
+4. **Kubernetes Job** (`dask-matrix-job.yaml`)
     - Launches the benchmark client inside the cluster
 ---------------------------------------------------------------------------------------------------
 ## Deploy the Dask Cluster
