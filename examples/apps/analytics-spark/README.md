@@ -65,4 +65,4 @@ Several aspects of the TPC-DS benchmark workflow are customizable:
    - "q1-v2.4,q10-v2.4,q11-v2.4" # example of subset of queries
    ```
    - Leave empty to run all queries.
-   - - You can also change the number of repetitions by modifying the corresponding argument.
+   -  You can also change the number of repetitions by modifying the corresponding argument.
