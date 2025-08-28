@@ -25,8 +25,8 @@ spec:
   # Optimize queries
     - "false"
   # Filter queries, will run all if empty - "q70-v2.4,q82-v2.4,q64-v2.4"
-    #- "q1-v2.4,q10-v2.4,q11-v2.4,q12-v2.4,q13-v2.4,q14a-v2.4,q14b-v2.4,q15-v2.4,q16-v2.4,q17-v2.4,q18-v2.4,q19-v2.4,q2-v2.4,q20-v2.4,q21-v2.4,q22-v2.4"
-    - "q6-v2.4,q7-v2.4,q9-v2.4,q11-v2.4,q15-v2.4,q21-v2.4,q22-v2.4"
+    - "q1-v2.4,q10-v2.4,q11-v2.4,q12-v2.4,q13-v2.4,q14a-v2.4,q14b-v2.4,q15-v2.4,q16-v2.4,q17-v2.4,q18-v2.4,q19-v2.4,q2-v2.4,q20-v2.4,q21-v2.4,q22-v2.4"
+    #- "q6-v2.4,q7-v2.4,q9-v2.4,q11-v2.4,q15-v2.4,q21-v2.4,q22-v2.4"
   # Logging set to WARN
     - "true"
   sparkConf:

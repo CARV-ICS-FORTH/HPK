@@ -17,7 +17,7 @@ spec:
     # Data Format
     - "parquet"
     # Scale factor (in GB)
-    - "100"
+    - "1"
     # Generate data num partitions
     - "100"
     # Create the partitioned fact tables

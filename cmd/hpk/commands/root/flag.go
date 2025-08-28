@@ -75,7 +75,7 @@ const (
 
 func installFlags(flags *pflag.FlagSet, c *Opts) {
 	flags.StringVar(&c.KubeletAddress, "kubelet-addr", os.Getenv(EnvKubeletAddress), "which address to tell API server to use")
-	flags.Int32Var(&c.KubeletPort, "kubelet-port", 10250, "port to listen for incoming requests from API server")
+	flags.Int32Var(&c.KubeletPort, "kubelet-port", 10251, "port to listen for incoming requests from API server")
 
 	// flags.Int32Var(&c.MetricsPort, "metrics-port", 10255, "address to listen for metrics/stats requests")
 

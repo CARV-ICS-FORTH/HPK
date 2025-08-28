@@ -13,8 +13,8 @@ sed -i "s/\(\"spark.hadoop.fs.s3a.access.key\":\s*\"\)[^\"]*\"/\1$NEW_ACCESS_KEY
 sed -i "s/\(\"spark.hadoop.fs.s3a.access.key\":\s*\"\)[^\"]*\"/\1$NEW_ACCESS_KEY\"/g; s/\(\"spark.hadoop.fs.s3a.secret.key\":\s*\"\)[^\"]*\"/\1$NEW_SECRET_KEY\"/g" manifest-tpcds-data-generation.yaml
 
 # Remove Spark Application
-# kubectl delete -f manifest-tpcds-data-generation.yaml -n "${TEST_NAMESPACE}"
-# kubectl delete -f manifest-tpcds-benchmark.yaml -n "${TEST_NAMESPACE}"
+kubectl delete -f manifest-tpcds-data-generation.yaml
+kubectl delete -f manifest-tpcds-benchmark.yaml
 
 # Remove Spark Operator
 helm uninstall spark-operator --namespace "${TEST_NAMESPACE}"
