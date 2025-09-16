@@ -32,7 +32,7 @@ webhooks:
         resources:   ["pods"]
         scope:       "Namespaced"
     clientConfig:
-      url: "https://${HOST_ADDRESS}:10251/mutates/pod"
+      url: "https://${HOST_ADDRESS}:10250/mutates/pod"
       caBundle: ${CA_BUNDLE}
     failurePolicy: Fail
     admissionReviewVersions: ["v1"]
@@ -46,7 +46,7 @@ webhooks:
         resources:   ["persistentvolumeclaims"]
         scope:       "Namespaced"
     clientConfig:
-      url: "https://${HOST_ADDRESS}:10251/mutates/pvc"
+      url: "https://${HOST_ADDRESS}:10250/mutates/pvc"
       caBundle: ${CA_BUNDLE}
     failurePolicy: Fail
     admissionReviewVersions: ["v1"]
