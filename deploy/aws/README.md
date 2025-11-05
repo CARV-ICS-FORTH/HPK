@@ -55,7 +55,7 @@ mv hpk-kubelet bin/
 
 Run each of the following in a separate window:
 ```sh
-make run-kubemaster
+make run-hpk-master
 make run-kubelet
 ```
 
