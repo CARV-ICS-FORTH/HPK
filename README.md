@@ -26,7 +26,7 @@ HPK is a continuation of the [KNoC](https://github.com/CARV-ICS-FORTH/knoc) proj
 
 ## Trying it out
 
-First you need to configure Apptainer for HPK. The [install-environment.sh](test/install-environment.sh) script showcases how we implement the requirements in a single node for testing.
+First you need to install and configure some requirements for HPK. The [install-environment.sh](deploy/aws/install-environment.sh) script showcases how we prepared the environment for HPK in AWS ParallelCluster.
 
 Once setup, compile the `hpk-kubelet` using `make`.
 
