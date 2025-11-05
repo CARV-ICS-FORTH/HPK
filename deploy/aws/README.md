@@ -44,13 +44,7 @@ Back to the head node, as the local user:
 ```sh
 git clone https://github.com/CARV-ICS-FORTH/HPK.git
 cd HPK
-
-# Download the hpk-kubelet binary (adjust the version in the URL)
-# wget https://github.com/CARV-ICS-FORTH/HPK/releases/download/v0.1.0/hpk-kubelet_v0.1.0_linux_amd64.tar.gz
-wget https://github.com/CARV-ICS-FORTH/HPK/releases/download/v0.1.2/hpk-kubelet_v0.1.2_linux_amd64.tar.gz
-tar -zxvf hpk-kubelet_v0.1.2_linux_amd64.tar.gz
-mkdir -p bin
-mv hpk-kubelet bin/
+make build
 ```
 
 Run each of the following in a separate window:
