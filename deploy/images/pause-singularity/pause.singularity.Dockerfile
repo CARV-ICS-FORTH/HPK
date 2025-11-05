@@ -12,7 +12,7 @@ RUN wget https://github.com/sylabs/singularity/releases/download/v${VERSION}/sin
 RUN apt-get install -fy ./singularity-ce_${VERSION}-jammy_amd64.deb && rm ./singularity-ce_${VERSION}-jammy_amd64.deb
 
 # Install some generic stuff
-RUN apt-get install -y iptables iproute2 fakeroot fakeroot-ng gosu patchelf vim squashfuse fuse uidmap squashfs-tools
+RUN apt-get install -y iptables iproute2 fakeroot gosu patchelf vim squashfuse fuse uidmap squashfs-tools
 
 #COPY docker-entrypoint.sh /usr/local/bin/
 #RUN ln -s usr/local/bin/docker-entrypoint.sh /entrypoint.sh # backwards compat
