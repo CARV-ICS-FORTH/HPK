@@ -20,7 +20,7 @@ RUN wget https://github.com/apptainer/apptainer/releases/download/v${VERSION}/ap
 RUN apt-get install -y ./apptainer_${VERSION}_amd64.deb && rm ./apptainer_${VERSION}_amd64.deb
 
 # (Install other dependencies) 
-RUN apt-get install -y iptables iproute2 fakeroot fakeroot-ng gosu patchelf nano vim
+RUN apt-get install -y iptables iproute2 fakeroot gosu patchelf nano vim
 
 # Copy the compiled pause binary from the builder stage
 COPY --from=builder /app/bin/hpk-pause /usr/local/bin
