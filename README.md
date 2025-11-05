@@ -26,7 +26,7 @@ HPK is a continuation of the [KNoC](https://github.com/CARV-ICS-FORTH/knoc) proj
 
 ## Trying it out
 
-First you need to install and configure some requirements for HPK. The [install-environment.sh](deploy/aws/install-environment.sh) script showcases how we prepared the environment for HPK in AWS ParallelCluster.
+First you need to install and configure some requirements for HPK. The [install-hpk-requirements.sh](deploy/aws/install-hpk-requirements.sh) script showcases how we prepared the environment for HPK in AWS ParallelCluster.
 
 Once setup, compile the `hpk-kubelet` using `make`.
 
