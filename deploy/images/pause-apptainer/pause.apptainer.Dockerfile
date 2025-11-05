@@ -10,7 +10,7 @@ RUN apt-get install -y ./apptainer_${VERSION}_amd64.deb && rm ./apptainer_${VERS
 
 RUN apt-get install -y iptables iproute2
 
-RUN apt-get install -y fakeroot fakeroot-ng gosu 
+RUN apt-get install -y fakeroot gosu 
 
 RUN apt-get install -y patchelf nano vim
 
