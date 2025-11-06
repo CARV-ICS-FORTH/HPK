@@ -1,8 +1,8 @@
-# High-Performance Kubernetes
+# HPK
 
-High-Performance [Kubernetes](https://kubernetes.io/) (HPK), allows HPC users to run their own private "mini Clouds" on
+HPK allows HPC users to run their own private "mini Clouds" on
 a typical HPC cluster. HPK uses [a single container](https://k3s.io) (based on k3s) to run the
-Kubernetes control plane and a [Virtual Kubelet](https://github.com/virtual-kubelet/virtual-kubelet) Provider
+[Kubernetes](https://kubernetes.io/) control plane and a [Virtual Kubelet](https://github.com/virtual-kubelet/virtual-kubelet) Provider
 implementation to translate container lifecycle management commands from Kubernetes-native
 to [Slurm](https://slurm.schedmd.com/)/[Apptainer](https://github.com/apptainer/apptainer).
 
@@ -26,7 +26,7 @@ HPK is a continuation of the [KNoC](https://github.com/CARV-ICS-FORTH/knoc) proj
 
 ## Trying it out
 
-First you need to configure Apptainer for HPK. The [install-slurm.sh](deploy/aws/install-hpk-requirements.sh) script showcases how we implement the requirements in a single node for testing.
+First, you need to install and configure the dependencies requireed by HPK. The [install-hpk-requirements.sh](deploy/aws/install-hpk-requirements.sh) script demonstrates how we set up the environment for HPK in AWS ParallelCluster.
 
 Once setup, compile the `hpk-kubelet` using `make`.
 
@@ -34,7 +34,7 @@ Once setup, compile the `hpk-kubelet` using `make`.
 make build
 ```
 
-Then you need to start the Kubernetes Master and `hpk-kubelet` seperately.
+Then, you need to start the Kubernetes Master and `hpk-kubelet` seperately.
 
 To run the Kubernetes Master:
 
