@@ -38,8 +38,6 @@ func SubmitJob(scriptFile string) (string, error) {
 	// Submit Job
 	out, err := process.Execute(Slurm.SubmitCmd, ExcludeNodes, NewUserEnv, scriptFile)
 
-	fmt.Println("SCRIPT FILE: ", scriptFile)
-
 	if err != nil {
 		compute.SystemPanic(err, "job submission error. out : '%s'", out)
 	}

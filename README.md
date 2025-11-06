@@ -1,7 +1,7 @@
 # High-Performance Kubernetes
 
 High-Performance [Kubernetes](https://kubernetes.io/) (HPK), allows HPC users to run their own private "mini Clouds" on
-a typical HPC cluster. HPK uses [a single container](https://github.com/chazapis/kubernetes-from-scratch) (there is also an [experimental version](https://k3s.io)) to run the
+a typical HPC cluster. HPK uses [a single container](https://k3s.io) (based on k3s) to run the
 Kubernetes control plane and a [Virtual Kubelet](https://github.com/virtual-kubelet/virtual-kubelet) Provider
 implementation to translate container lifecycle management commands from Kubernetes-native
 to [Slurm](https://slurm.schedmd.com/)/[Apptainer](https://github.com/apptainer/apptainer).
