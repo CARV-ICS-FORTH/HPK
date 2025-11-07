@@ -14,6 +14,8 @@
 
 package image
 
+import "os"
+
 const Docker = Transport("docker://")
 
 type Transport string
@@ -23,4 +25,4 @@ func (t Transport) Wrap(imageName string) string {
 }
 
 // const PauseImage = "icsforth/pause:apptainer"
-const PauseImage = "malvag/pause:1.1.9"
+var PauseImage = os.Getenv("PAUSE_IMAGE_TAG")

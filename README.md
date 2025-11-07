@@ -1,7 +1,6 @@
 # HPK
 
-HPK allows HPC users to run their own private "mini Clouds" on
-a typical HPC cluster. HPK uses [a single container](https://github.com/chazapis/kubernetes-from-scratch) to run the
+HPK allows HPC users to run their own private "mini Clouds" on a typical HPC cluster. HPK uses [a single container](https://k3s.io) (based on k3s) to run the
 [Kubernetes](https://kubernetes.io/) control plane and a [Virtual Kubelet](https://github.com/virtual-kubelet/virtual-kubelet) Provider
 implementation to translate container lifecycle management commands from Kubernetes-native
 to [Slurm](https://slurm.schedmd.com/)/[Apptainer](https://github.com/apptainer/apptainer).
@@ -26,15 +25,16 @@ HPK is a continuation of the [KNoC](https://github.com/CARV-ICS-FORTH/knoc) proj
 
 ## Trying it out
 
-First you need to install and configure some requirements for HPK. The [install-hpk-requirements.sh](deploy/aws/install-hpk-requirements.sh) script showcases how we prepared the environment for HPK in AWS ParallelCluster.
+First, you need to install and configure the dependencies requireed by HPK. The [install-hpk-requirements.sh](deploy/aws/install-hpk-requirements.sh) script demonstrates how we set up the environment for HPK in AWS ParallelCluster.
 
-Once setup, compile the `hpk-kubelet` using `make`.
+Once setup, compile the `hpk-kubelet` and `hpk-pause` binaries and build and push the kubemaster image with:
 
 ```bash
-make build
+export REGISTRY_NAME=<your_dockerhub_username>
+make build-all
 ```
 
-Then you need to start the Kubernetes Master and `hpk-kubelet` seperately.
+Then, you need to start the Kubernetes Master and `hpk-kubelet` seperately.
 
 To run the Kubernetes Master:
 
@@ -59,7 +59,7 @@ kubectl get nodes
 In case that you experience DNS issues, you should retry starting the Kubernetes Master with:
 ```
 export EXTERNAL_DNS=<your dns server>
-make run-kubemaster
+make run-hpk-master
 ```
 
 The above command will set CoreDNS to forward requests for external names to your DNS server.

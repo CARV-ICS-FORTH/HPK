@@ -19,6 +19,8 @@ import (
 	"regexp"
 	"strconv"
 
+	"fmt"
+
 	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/pkg/process"
 )
@@ -35,6 +37,7 @@ var NewUserEnv = "--get-user-env=10L"
 func SubmitJob(scriptFile string) (string, error) {
 	// Submit Job
 	out, err := process.Execute(Slurm.SubmitCmd, ExcludeNodes, NewUserEnv, scriptFile)
+
 	if err != nil {
 		compute.SystemPanic(err, "job submission error. out : '%s'", out)
 	}

@@ -21,9 +21,12 @@ proxy:
       enabled: false
 singleuser:
   serviceAccountName: training-operator
+  cloudMetadata:
+    blockWithIptables: false
   storage:
-    dynamic:
-      storageClass: openebs-hostpath
+    type: none
+    # dynamic:
+      # storageClass: openebs-hostpath
     capacity: 30Gi 
     # type: "static"
     # capacity: "10Gi"

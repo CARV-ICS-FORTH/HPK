@@ -78,6 +78,7 @@ type NodeInfo struct {
 	Name     string `json:"name"`
 	CPUs     uint64 `json:"cpus"`
 	CPUCores uint64 `json:"cores"`
+	GPUs	 uint64 `json:"nvidia.com/gpu"`
 
 	EphemeralStorage uint64 `json:"temporary_disk"`
 
@@ -90,10 +91,11 @@ type NodeInfo struct {
 // ResourceList converts the Slurm-reported stats into Kubernetes-Stats.
 func (i NodeInfo) ResourceList() corev1.ResourceList {
 	return corev1.ResourceList{
-		"cpu":       *resource.NewQuantity(int64(i.CPUs), resource.DecimalSI),
-		"memory":    *resource.NewScaledQuantity(int64(i.FreeMemory), resource.Mega),
-		"ephemeral": *resource.NewQuantity(int64(i.EphemeralStorage), resource.DecimalSI),
-		"pods":      resource.MustParse("110"),
+		"cpu":       			*resource.NewQuantity(int64(i.CPUs), resource.DecimalSI),
+		"memory":    			*resource.NewScaledQuantity(int64(i.FreeMemory), resource.Mega),
+		"ephemeral": 			*resource.NewQuantity(int64(i.EphemeralStorage), resource.DecimalSI),
+		"pods":      			resource.MustParse("110"),
+		"gpu":       			*resource.NewQuantity(int64(i.GPUs), resource.DecimalSI),
 	}
 }
 

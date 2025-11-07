@@ -24,7 +24,11 @@ REGISTRY_NAME ?= carvicsforth
 
 K3S_IMAGE_TAG=$(REGISTRY_NAME)/hpk-master:$(VERSION)
 
+<<<<<<< HEAD
 PAUSE_IMAGE_TAG=$(REGISTRY_NAME)/pause:$(VERSION)
+=======
+export PAUSE_IMAGE_TAG=$(REGISTRY_NAME)/pause:$(VERSION)
+>>>>>>> gpetsis/main
 
 define WEBHOOK_CONFIGURATION
 apiVersion: admissionregistration.k8s.io/v1
@@ -92,6 +96,7 @@ help: ## Display this help
 ##@ Build
 
 build: hpk-kubelet hpk-pause	## Build HPK binary
+
 build-race: ## Build HPK binary with race condition detector
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(VERSION_FLAGS) -race -o bin/hpk-kubelet ./cmd/hpk
 
@@ -103,15 +108,44 @@ hpk-pause:
 
 image-pause:
 	DOCKER_BUILDKIT=1 docker build . -t $(PAUSE_IMAGE_TAG) -f deploy/images/pause-apptainer-agent/pause.apptainer.Dockerfile
+<<<<<<< HEAD
 	sudo docker push $(PAUSE_IMAGE_TAG)
 
 image-kubemaster: ## Build and push the Kubernetes Master image
 	(cd k3s && DOCKER_BUILDKIT=1 docker build . -t $(K3S_IMAGE_TAG) -f Dockerfile)
 	sudo docker push $(K3S_IMAGE_TAG)
+=======
+	docker push $(PAUSE_IMAGE_TAG)
+
+image-kubemaster: ## Build and push the Kubernetes Master image
+	(cd k3s && DOCKER_BUILDKIT=1 docker build . -t $(K3S_IMAGE_TAG) -f Dockerfile)
+	docker push $(K3S_IMAGE_TAG)
+>>>>>>> gpetsis/main
 
 build-all: image-kubemaster image-pause build ## Build kubemaster and binaries
 
 ##@ Deployment
+
+<<<<<<< HEAD
+run-hpk-master:
+=======
+run-kubemaster: ## Run the Kubernetes Master
+>>>>>>> gpetsis/main
+	mkdir -p ${HPK_MASTER_PATH}/log
+	apptainer run --net --dns ${EXTERNAL_DNS} --fakeroot \
+	--cleanenv --pid --containall \
+	--no-init --no-umask --no-eval \
+	--no-mount tmp,home --unsquash --writable \
+<<<<<<< HEAD
+	--bind ${HPK_MASTER_PATH}:/usr/local/etc \
+	--bind ${HPK_MASTER_PATH}/log:/var/log \
+	docker://$(K3S_IMAGE_TAG)
+=======
+	--env K8SFS_MOCK_KUBELET=0 \
+	--bind ${HPK_MASTER_PATH}:/usr/local/etc \
+	--bind ${HPK_MASTER_PATH}/log:/var/log \
+	docker://chazapis/kubernetes-from-scratch:20230425
+>>>>>>> gpetsis/main
 
 run-hpk-master:
 	mkdir -p ${HPK_MASTER_PATH}/log
