@@ -35,12 +35,19 @@ func Sum(aggr corev1.ResourceList, rlist ...corev1.ResourceList) {
 	totalStorage := aggr.Storage()
 	totalEphemeral := aggr.StorageEphemeral()
 	totalPods := aggr.Pods()
+	totalGPU := (aggr["gpu"]).DeepCopy()
+
+	gpuQuantity := &totalGPU
 
 	// summarize
 	for _, list := range rlist {
 
 		if cpu := list.Cpu(); !cpu.IsZero() {
 			totalCPU.Add(*cpu)
+		}
+
+		if gpu := list[corev1.ResourceName("nvidia.com/gpu")]; !gpu.IsZero() {
+			gpuQuantity.Add(list[corev1.ResourceName("nvidia.com/gpu")])
 		}
 
 		if mem := list.Memory(); !mem.IsZero() {
@@ -66,6 +73,7 @@ func Sum(aggr corev1.ResourceList, rlist ...corev1.ResourceList) {
 	aggr[corev1.ResourceStorage] = totalStorage.DeepCopy()
 	aggr[corev1.ResourceEphemeralStorage] = totalEphemeral.DeepCopy()
 	aggr[corev1.ResourcePods] = totalPods.DeepCopy()
+	aggr[corev1.ResourceName("nvidia.com/gpu")] = gpuQuantity.DeepCopy()
 }
 
 // ResourceList is a conversion between Kubernetes and Slurm Resource Request abstractions
@@ -75,6 +83,8 @@ type ResourceList struct {
 
 	// Memory is the number of requests MBs of memory.
 	Memory *int64
+
+	GPU *int64
 }
 
 func ResourceListToStruct(list corev1.ResourceList) ResourceList {
@@ -83,6 +93,11 @@ func ResourceListToStruct(list corev1.ResourceList) ResourceList {
 	if cpu := list.Cpu(); !cpu.IsZero() {
 		val := cpu.Value()
 		rlist.CPU = &val
+	}
+
+	if gpu := list[corev1.ResourceName("nvidia.com/gpu")]; !gpu.IsZero() {
+		val := gpu.Value()
+		rlist.GPU = &val
 	}
 
 	if mem := list.Memory(); !mem.IsZero() {

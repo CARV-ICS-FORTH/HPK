@@ -2,7 +2,7 @@ Region: eu-central-1
 Image:
   Os: ubuntu2004
 HeadNode:
-  InstanceType: t2.medium
+  InstanceType: t3.medium
   Networking:
     SubnetId: subnet-033628d96d018f1eb
   Ssh:
@@ -15,11 +15,11 @@ Scheduling:
   SlurmQueues:
   - Name: queue1
     ComputeResources:
-    - Name: t2medium
+    - Name: gpus
       Instances:
-      - InstanceType: t2.medium
-      MinCount: 2
-      MaxCount: 2
+      - InstanceType: g4dn.4xlarge
+      MinCount: 4
+      MaxCount: 4
     Networking:
       SubnetIds:
       - subnet-0f0e94ed7bbde6d68

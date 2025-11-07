@@ -44,7 +44,10 @@ Back to the head node, as the local user:
 ```sh
 git clone https://github.com/CARV-ICS-FORTH/HPK.git
 cd HPK
-make build
+
+# Build and push the kubemaster image and build hpk-kubelet and hpk-pause binaries
+export REGISTRY_NAME=<your_dockerhub_username>
+make build-all
 ```
 
 Run each of the following in a separate window:
@@ -55,8 +58,7 @@ make run-kubelet
 
 And you are all set:
 ```sh
-export KUBE_PATH=~/.hpk-master/kubernetes/
-export KUBECONFIG=${KUBE_PATH}/admin.conf
+export KUBECONFIG=~/.hpk-master/kubernetes/admin.conf
 kubectl get nodes
 ```
 

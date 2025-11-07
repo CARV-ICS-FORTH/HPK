@@ -209,7 +209,8 @@ function handle_containers() {
 	sh -c {{$container.EnvFilePath}} > /scratch/{{$container.InstanceName}}.env
 	{{- end}}
 
-	$(apptainer {{ $container.ExecutionMode }} --cleanenv --writable-tmpfs --no-mount home --unsquash \
+	$(apptainer {{ $container.ExecutionMode }} \
+	--nv --cleanenv --writable-tmpfs --no-mount home --unsquash \
 	{{- if $container.RunAsUser}}
 	--security uid:{{$container.RunAsUser}},gid:{{$container.RunAsUser}} --userns \
 	{{- end}}
@@ -281,6 +282,12 @@ const HostScriptTemplate = `#!/bin/bash
 #SBATCH --ntasks-per-node={{.ResourceRequest.CPU}}
 {{end}}
 
+{{- if .ResourceRequest.GPU}}
+module load cuda
+module load nvidia
+#SBATCH --gres=gpu:{{.ResourceRequest.GPU}}
+{{end}}
+
 {{- if .ResourceRequest.Memory}}
 #SBATCH --mem={{.ResourceRequest.Memory}} 
 {{end}} 
@@ -309,11 +316,10 @@ chmod +x  {{.VirtualEnv.ConstructorFilePath}}
 export workdir=/tmp/{{.Pod.Namespace}}_{{.Pod.Name}}
 echo "[Host] Creating workdir: ${workdir} "
 mkdir -p ${workdir}
-trap 'echo [HOST] Deleting workdir ${workdir}; rm -rf ${workdir}' EXIT
 
 # --network-args "portmap=8080:80/tcp"
 # --container is needed to start a separate /dev/sh
-#exec {{$.HostEnv.ApptainerBin}} exec --containall --net --fakeroot --scratch /scratch --workdir ${workdir} \
+#exec {{$.HostEnv.ApptainerBin}} exec --nv --containall --net --fakeroot --scratch /scratch --workdir ${workdir} \
 #{{- if .HostEnv.EnableCgroupV2}}
 #--apply-cgroups {{.VirtualEnv.CgroupFilePath}} 		\
 #{{- end}}
@@ -325,7 +331,7 @@ trap 'echo [HOST] Deleting workdir ${workdir}; rm -rf ${workdir}' EXIT
 
 export APPTAINERENV_KUBEDNS_IP={{.HostEnv.KubeDNS}}
 
-exec {{$.HostEnv.ApptainerBin}} exec --containall --net --fakeroot --scratch /scratch --workdir ${workdir} \
+exec {{$.HostEnv.ApptainerBin}} exec --nv --containall --net --fakeroot --scratch /scratch --workdir ${workdir} \
 {{- if .HostEnv.EnableCgroupV2}}
 --apply-cgroups {{.VirtualEnv.CgroupFilePath}} 		\
 {{- end}}
