@@ -61,5 +61,5 @@ func SystemPanic(err error, errFormat string, errArgs ...any) {
 	DefaultLogger.Error(werr, "SystemERROR")
 
 	//[TODO:] reinstate it after debugging
-	panic(werr)
+	//panic(werr)
 }

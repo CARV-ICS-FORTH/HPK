@@ -8,11 +8,8 @@ if [[ -z "${TEST_NAMESPACE}" ]]; then
 fi
 ################################
 
-# Remove pod
-kubectl delete -f manifest.yaml -n "${TEST_NAMESPACE}"
+# Remove Dask Cluster
+helm uninstall dask --namespace "${TEST_NAMESPACE}"
 
 # Remove namespace
 kubectl delete namespace "${TEST_NAMESPACE}"
-
-# Delete testing dir
-rm -rf /home/ubuntu/sea/

@@ -59,6 +59,8 @@ type InitConfig struct {
 	FSPollingInterval time.Duration
 
 	RestConfig *rest.Config
+
+	UseTmp bool
 }
 
 // VirtualK8S implements the virtual-kubelet provider interface and stores pods in memory.
@@ -203,7 +205,7 @@ func (v *VirtualK8S) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	go func() {
 		// acknowledge the creation request and do the creation in the background.
 		// if the creation fails, the pod should be marked as failed and returned to the provider.
-		PodHandler.CreatePod(ctx, pod, v.fileWatcher)
+		PodHandler.CreatePod(ctx, pod, v.fileWatcher, v.UseTmp)
 
 		v.updatedPod(pod)
 	}()
@@ -452,7 +454,7 @@ func (v *VirtualK8S) PortForward(ctx context.Context, namespace, pod string, por
 	podKey := client.ObjectKey{Namespace: namespace, Name: pod}
 	logger := v.Logger.WithValues("obj", podKey)
 
-	logger.Info("[K8s] receive PortForward %q", pod)
+	logger.Info("[K8s] receive PortForward", "pod", pod)
 
 	// in newer virtual-kubelet version we have support for port-forwarding
 	return nil

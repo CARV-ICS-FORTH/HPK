@@ -24,6 +24,7 @@ func init() {
 	Slurm.SubmitCmd = "sbatch"  // path.GetPathOrDie("sbatch")
 	Slurm.CancelCmd = "scancel" // path.GetPathOrDie("scancel")
 	Slurm.StatsCmd = "sinfo"
+	Slurm.SqueueCmd = "squeue"
 }
 
 // Slurm represents a SLURM installation.
@@ -31,6 +32,7 @@ var Slurm struct {
 	SubmitCmd string
 	CancelCmd string
 	StatsCmd  string
+	SqueueCmd string
 }
 
 // ConnectionOK return true if HPK maintains connection with the Slurm manager.

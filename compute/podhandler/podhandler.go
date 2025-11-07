@@ -212,7 +212,7 @@ type PodHandler struct {
 	logger logr.Logger
 }
 
-func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatcher) {
+func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatcher, useTmp bool) {
 	/*---------------------------------------------------
 	 * Prepare the Pod Execution Environment
 	 *---------------------------------------------------*/
@@ -246,8 +246,15 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	}
 
 	// create directory for volumes.
-	if err := os.MkdirAll(h.podDirectory.VolumeDir(), endpoint.PodGlobalDirectoryPermissions); err != nil {
-		compute.SystemPanic(err, "cannot create volume directory '%s'", h.podDirectory.VolumeDir())
+	//if err := os.MkdirAll(h.podDirectory.VolumeDir(), endpoint.PodGlobalDirectoryPermissions); err != nil {
+	//	compute.SystemPanic(err, "cannot create volume directory '%s'", h.podDirectory.VolumeDir())
+	//}
+
+	if !useTmp {
+		// create directory for volumes.
+		if err := os.MkdirAll(h.podDirectory.VolumeDir(), endpoint.PodGlobalDirectoryPermissions); err != nil {
+			compute.SystemPanic(err, "cannot create volume directory '%s'", h.podDirectory.VolumeDir())
+		}
 	}
 
 	// create directory for control files.
@@ -405,6 +412,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 		Containers:      containers,
 		ResourceRequest: resources.ResourceListToStruct(resourceRequest),
 		CustomFlags:     customFlags,
+                UseTmp:          useTmp,
 	}); err != nil {
 		/*-- since both the template and fields are internal to the code, the evaluation should always succeed	--*/
 		compute.SystemPanic(err, "failed to evaluate sbatch template")
