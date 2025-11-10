@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Certificate authority
-openssl genrsa -out ca.key 2048
-openssl req -x509 -new -nodes -key ca.key -days 365 -out ca.crt -subj "/CN=hpk-ca" \
-  -addext "basicConstraints=CA:TRUE" \
-  -addext "keyUsage=digitalSignature,keyEncipherment,keyCertSign"
+#openssl genrsa -out ca.key 2048
+#openssl req -x509 -new -nodes -key ca.key -days 365 -out ca.crt -subj "/CN=hpk-ca" \
+#  -addext "basicConstraints=CA:TRUE" \
+#  -addext "keyUsage=digitalSignature,keyEncipherment,keyCertSign"
 
 # Key and certificate for the services webhook
 openssl genrsa -out services-webhook.key 2048

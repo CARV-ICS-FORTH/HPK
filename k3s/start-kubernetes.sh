@@ -23,6 +23,7 @@ k3s server \
   --bind-address ${IP_ADDRESS} \
   --node-ip=${IP_ADDRESS} \
   --write-kubeconfig ${HPK_MASTER_CONF_DIR}/kubernetes/admin.conf \
+  --egress-selector-mode disabled \
   &> ${HPK_MASTER_LOG_DIR}/k3s.log &
 
 echo -e "\n----------\nWaiting for K3s server to be created...\n----------"
@@ -97,8 +98,10 @@ EOF
 
 # Prepare the keys for the services webhook
 mkdir -p ${HPK_MASTER_CONF_DIR}/kubernetes/pki
+cp /var/lib/rancher/k3s/server/tls/server-ca.crt ${HPK_MASTER_CONF_DIR}/kubernetes/pki/ca.crt
+cp /var/lib/rancher/k3s/server/tls/server-ca.key ${HPK_MASTER_CONF_DIR}/kubernetes/pki/ca.key
 (cd ${HPK_MASTER_CONF_DIR}/kubernetes/pki && generate-keys.sh)
-  
+
 # Start the services webhook
 CA_BUNDLE=$(cat ${HPK_MASTER_CONF_DIR}/kubernetes/pki/ca.crt | base64 | tr -d '\n')
 cat <<EOF | k3s kubectl apply -f -
