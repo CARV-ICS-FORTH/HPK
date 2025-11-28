@@ -127,7 +127,7 @@ run-kubemaster: ## Run the Kubernetes Master
 
 run-hpk-master:
 	mkdir -p ${HPK_MASTER_PATH}/log
-	apptainer run --net --dns ${EXTERNAL_DNS} --fakeroot \
+	apptainer run --network=fakeroot --net --dns ${EXTERNAL_DNS} --fakeroot \
 	--cleanenv --pid --containall \
 	--no-init --no-umask --no-eval \
 	--no-mount tmp,home --unsquash --writable \

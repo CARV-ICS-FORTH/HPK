@@ -267,31 +267,6 @@ trap 'cleanup "${BASH_COMMAND}" "$?"'  EXIT
 `
 
 const HostScriptTemplate = `#!/bin/bash
-#SBATCH --job-name={{.Pod.Name}}
-#SBATCH --output={{.VirtualEnv.StdoutPath}}
-#SBATCH --error={{.VirtualEnv.StderrPath}}
-{{- range $index, $flag := .CustomFlags}}
-#SBATCH {{$flag}}
-{{end}}
-#SBATCH --signal=B:TERM@60 # tells the controller
-                            # to send SIGTERM to the job 60 secs
-                            # before its time ends to give it a
-                            # chance for better cleanup.
-
-{{- if .ResourceRequest.CPU}}
-#SBATCH --ntasks-per-node={{.ResourceRequest.CPU}}
-{{end}}
-
-{{- if .ResourceRequest.GPU}}
-module load cuda
-module load nvidia
-#SBATCH --gres=gpu:{{.ResourceRequest.GPU}}
-{{end}}
-
-{{- if .ResourceRequest.Memory}}
-#SBATCH --mem={{.ResourceRequest.Memory}} 
-{{end}} 
-
 #### BEGIN SECTION: VirtualEnvironment Builder ####
 # Description
 # 	Builds a script for running a Virtual Environment
@@ -317,21 +292,9 @@ export workdir=/tmp/{{.Pod.Namespace}}_{{.Pod.Name}}
 echo "[Host] Creating workdir: ${workdir} "
 mkdir -p ${workdir}
 
-# --network-args "portmap=8080:80/tcp"
-# --container is needed to start a separate /dev/sh
-#exec {{$.HostEnv.ApptainerBin}} exec --nv --containall --net --fakeroot --scratch /scratch --workdir ${workdir} \
-#{{- if .HostEnv.EnableCgroupV2}}
-#--apply-cgroups {{.VirtualEnv.CgroupFilePath}} 		\
-#{{- end}}
-#--env PARENT=${PPID}								\
-#--bind $HOME,/tmp										\
-#--hostname {{.Pod.Name}}							\
-#{{$.PauseImageFilePath}} sh -ci {{.VirtualEnv.ConstructorFilePath}} ||
-#echo "[HOST] **SYSTEMERROR** apptainer exited with code $?" | tee {{.VirtualEnv.SysErrorFilePath}}
-
 export APPTAINERENV_KUBEDNS_IP={{.HostEnv.KubeDNS}}
 
-exec {{$.HostEnv.ApptainerBin}} exec --nv --containall --net --fakeroot --scratch /scratch --workdir ${workdir} \
+{{$.HostEnv.ApptainerBin}} exec --nv --containall --net --fakeroot --scratch /scratch --workdir ${workdir} \
 {{- if .HostEnv.EnableCgroupV2}}
 --apply-cgroups {{.VirtualEnv.CgroupFilePath}} 		\
 {{- end}}

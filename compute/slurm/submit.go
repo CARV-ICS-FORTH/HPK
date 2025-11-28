@@ -16,8 +16,8 @@
 package slurm
 
 import (
-	"regexp"
-	"strconv"
+	// "regexp"
+	// "strconv"
 
 	"fmt"
 
@@ -36,19 +36,25 @@ var NewUserEnv = "--get-user-env=10L"
 
 func SubmitJob(scriptFile string) (string, error) {
 	// Submit Job
-	out, err := process.Execute(Slurm.SubmitCmd, ExcludeNodes, NewUserEnv, scriptFile)
+	// out, err := process.Execute(Slurm.SubmitCmd, ExcludeNodes, NewUserEnv, scriptFile)
+
+	outputFile := "~/.hpk/logs.log"
+	commandString := scriptFile + " > " + outputFile + " 2>&1"
+	out, err := process.Execute("bash", "-c", commandString)
+
+	fmt.Println("Submitting: ", commandString)
 
 	if err != nil {
 		compute.SystemPanic(err, "job submission error. out : '%s'", out)
 	}
 
 	// Parse Job ID
-	expectedOutput := regexp.MustCompile(`Submitted batch job (?P<jid>\d+)`)
-	jid := expectedOutput.FindStringSubmatch(string(out))
+	// expectedOutput := regexp.MustCompile(`Submitted batch job (?P<jid>\d+)`)
+	// jid := expectedOutput.FindStringSubmatch(string(out))
 
-	if _, err := strconv.Atoi(jid[1]); err != nil {
-		compute.SystemPanic(err, "Invalid JobID")
-	}
+	// if _, err := strconv.Atoi(jid[1]); err != nil {
+	// 	compute.SystemPanic(err, "Invalid JobID")
+	// }
 
-	return jid[1], nil
+	return "0", nil
 }
