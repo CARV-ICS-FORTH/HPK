@@ -104,26 +104,25 @@ hpk-pause:
 
 image-pause:
 	DOCKER_BUILDKIT=1 docker build . -t $(PAUSE_IMAGE_TAG) -f deploy/images/pause-apptainer-agent/pause.apptainer.Dockerfile
-	docker push $(PAUSE_IMAGE_TAG)
+	sudo docker push $(PAUSE_IMAGE_TAG)
 
 image-kubemaster: ## Build and push the Kubernetes Master image
 	(cd k3s && DOCKER_BUILDKIT=1 docker build . -t $(K3S_IMAGE_TAG) -f Dockerfile)
-	docker push $(K3S_IMAGE_TAG)
+	sudo docker push $(K3S_IMAGE_TAG)
 
 build-all: image-kubemaster image-pause build ## Build kubemaster and binaries
 
 ##@ Deployment
 
-run-kubemaster: ## Run the Kubernetes Master
+run-hpk-master:
 	mkdir -p ${HPK_MASTER_PATH}/log
 	apptainer run --net --dns ${EXTERNAL_DNS} --fakeroot \
 	--cleanenv --pid --containall \
 	--no-init --no-umask --no-eval \
 	--no-mount tmp,home --unsquash --writable \
-	--env K8SFS_MOCK_KUBELET=0 \
 	--bind ${HPK_MASTER_PATH}:/usr/local/etc \
 	--bind ${HPK_MASTER_PATH}/log:/var/log \
-	docker://chazapis/kubernetes-from-scratch:20230425
+	docker://$(K3S_IMAGE_TAG)
 
 run-hpk-master:
 	mkdir -p ${HPK_MASTER_PATH}/log

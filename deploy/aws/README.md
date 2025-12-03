@@ -58,7 +58,8 @@ make run-kubelet
 
 And you are all set:
 ```sh
-export KUBECONFIG=~/.hpk-master/kubernetes/admin.conf
+export KUBE_PATH=~/.hpk-master/kubernetes/
+export KUBECONFIG=${KUBE_PATH}/admin.conf
 kubectl get nodes
 ```
 
