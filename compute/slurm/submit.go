@@ -20,6 +20,7 @@ import (
 	// "strconv"
 
 	"fmt"
+	"os"
 
 	"github.com/carv-ics-forth/hpk/compute"
 	"github.com/carv-ics-forth/hpk/pkg/process"
@@ -38,9 +39,10 @@ func SubmitJob(scriptFile string) (string, error) {
 	// Submit Job
 	// out, err := process.Execute(Slurm.SubmitCmd, ExcludeNodes, NewUserEnv, scriptFile)
 
-	outputFile := "~/.hpk/logs.log"
-	commandString := scriptFile + " > " + outputFile + " 2>&1"
-	out, err := process.Execute("bash", "-c", commandString)
+	outputFile := os.Getenv("HOME") + "/.hpk/logs.log" 
+
+	commandString := fmt.Sprintf("source %s > %s 2>&1", scriptFile, outputFile)
+	out, err := process.Execute("bash", "-l", "-c", commandString)
 
 	fmt.Println("Submitting: ", commandString)
 

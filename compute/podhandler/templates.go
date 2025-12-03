@@ -245,8 +245,6 @@ function handle_containers() {
 	echo "[Virtual] ... Containers terminated ..."
 }
 
-
-
 debug_info
 
 echo "[Virtual] Resetting Environment ..."
@@ -294,7 +292,7 @@ mkdir -p ${workdir}
 
 export APPTAINERENV_KUBEDNS_IP={{.HostEnv.KubeDNS}}
 
-{{$.HostEnv.ApptainerBin}} exec --nv --containall --net --fakeroot --scratch /scratch --workdir ${workdir} \
+exec {{$.HostEnv.ApptainerBin}} exec --nv --containall --net --fakeroot --scratch /scratch --workdir ${workdir} \
 {{- if .HostEnv.EnableCgroupV2}}
 --apply-cgroups {{.VirtualEnv.CgroupFilePath}} 		\
 {{- end}}
