@@ -25,7 +25,10 @@ trap cleanup INT TERM
 [ -f resolv.conf ] || echo "nameserver $DNS_ADDR" > resolv.conf
 apptainer instance run \
 	--fakeroot \
-	--containall \
+	--no-mount home \
+	--no-mount cwd \
+	--no-mount tmp \
+	--no-mount hostfs \
 	--writable-tmpfs \
 	--network=none \
 	--bind resolv.conf:/etc/resolv.conf \
@@ -40,6 +43,6 @@ SLIRP_PID=$!
 while [ ! -e $NAME-slirp4netns.sock ]; do
     sleep 1
 done
-echo -n '{"execute": "add_hostfwd", "arguments": {"proto": "udp", "host_addr": "0.0.0.0", "host_port": '$((BUBBLE_ID + 8471))', "guest_addr": "'$NS_ADDR'", "guest_port": 8472}}' | nc -U $NAME-slirp4netns.sock
+echo -n '{"execute": "add_hostfwd", "arguments": {"proto": "udp", "host_addr": "0.0.0.0", "host_port": 8472, "guest_addr": "'$NS_ADDR'", "guest_port": 8472}}' | nc -U $NAME-slirp4netns.sock
 
 wait $SLIRP_PID
