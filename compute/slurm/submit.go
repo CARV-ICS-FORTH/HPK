@@ -16,8 +16,8 @@
 package slurm
 
 import (
-	// "regexp"
-	// "strconv"
+	"regexp"
+	"strconv"
 
 	"fmt"
 	"os"
@@ -36,27 +36,49 @@ var ExcludeNodes = "--exclude="
 var NewUserEnv = "--get-user-env=10L"
 
 func SubmitJob(scriptFile string) (string, error) {
-	// Submit Job
-	// out, err := process.Execute(Slurm.SubmitCmd, ExcludeNodes, NewUserEnv, scriptFile)
+	return SubmitJobWithRunSlurm(scriptFile, true)
+}
 
-	outputFile := os.Getenv("HOME") + "/.hpk/logs.log" 
+// SubmitJobWithRunSlurm submits a job either via SLURM (if runSlurm is true) or directly via bash (if false).
+func SubmitJobWithRunSlurm(scriptFile string, runSlurm bool) (string, error) {
+	outputFile := os.Getenv("HOME") + "/.hpk/logs.log"
 
-	commandString := fmt.Sprintf("source %s > %s 2>&1", scriptFile, outputFile)
-	out, err := process.Execute("bash", "-l", "-c", commandString)
+	var out []byte
+	var err error
 
-	fmt.Println("Submitting: ", commandString)
+	if runSlurm {
+		// Submit Job via SLURM
+		out, err = process.Execute(Slurm.SubmitCmd, ExcludeNodes, NewUserEnv, scriptFile)
+		fmt.Println("Submitting (SLURM mode): ", Slurm.SubmitCmd, ExcludeNodes, NewUserEnv, scriptFile)
+	} else {
+		// Execute script directly via bash in background
+		commandString := fmt.Sprintf("nohup bash -l -c 'source %s' > %s 2>&1 &", scriptFile, outputFile)
+		out, err = process.Execute("bash", "-c", commandString)
+		fmt.Println("Submitting (Direct bash mode): ", commandString)
+	}
 
 	if err != nil {
 		compute.SystemPanic(err, "job submission error. out : '%s'", out)
 	}
 
-	// Parse Job ID
-	// expectedOutput := regexp.MustCompile(`Submitted batch job (?P<jid>\d+)`)
-	// jid := expectedOutput.FindStringSubmatch(string(out))
+	var jobID string
 
-	// if _, err := strconv.Atoi(jid[1]); err != nil {
-	// 	compute.SystemPanic(err, "Invalid JobID")
-	// }
+	if runSlurm {
+		// Parse Job ID from SLURM output
+		// Expected format: "Submitted batch job <jobid>"
+		expectedOutput := regexp.MustCompile(`Submitted batch job (?P<jid>\d+)`)
+		jid := expectedOutput.FindStringSubmatch(string(out))
 
-	return "0", nil
+		if _, err := strconv.Atoi(jid[1]); err != nil {
+			compute.SystemPanic(err, "Invalid JobID")
+		}
+
+		jobID = jid[1]
+	} else {
+		// For direct bash mode, return a placeholder job ID
+		// The actual PID will be read from the container's jobid file by the event system
+		jobID = "0"
+	}
+
+	return jobID, nil
 }

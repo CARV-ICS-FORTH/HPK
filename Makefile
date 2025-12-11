@@ -116,16 +116,6 @@ build-all: image-kubemaster image-pause build ## Build kubemaster and binaries
 
 run-hpk-master:
 	mkdir -p ${HPK_MASTER_PATH}/log
-	apptainer run --net --dns ${EXTERNAL_DNS} --fakeroot \
-	--cleanenv --pid --containall \
-	--no-init --no-umask --no-eval \
-	--no-mount tmp,home --unsquash --writable \
-	--bind ${HPK_MASTER_PATH}:/usr/local/etc \
-	--bind ${HPK_MASTER_PATH}/log:/var/log \
-	docker://$(K3S_IMAGE_TAG)
-
-run-hpk-master:
-	mkdir -p ${HPK_MASTER_PATH}/log
 	apptainer run --network=fakeroot --net --dns ${EXTERNAL_DNS} --fakeroot \
 	--cleanenv --pid --containall \
 	--no-init --no-umask --no-eval \
@@ -136,7 +126,8 @@ run-hpk-master:
 
 run-kubelet: CA_BUNDLE = $(shell cat ${KUBE_PATH}/pki/ca.crt | base64 | tr -d '\n')
 run-kubelet: HOST_ADDRESS = $(shell ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p')
-run-kubelet: ## Run the HPK Virtual Kubelet
+run-kubelet: RUN_SLURM ?= true
+run-kubelet: ## Run the HPK Virtual Kubelet (use RUN_SLURM=false to disable SLURM)
 	@echo "===> Generate HPK Certificates <==="
 	mkdir -p ./bin
 
@@ -159,7 +150,7 @@ run-kubelet: ## Run the HPK Virtual Kubelet
 	APISERVER_KEY_LOCATION=bin/kubelet.key \
 	APISERVER_CERT_LOCATION=bin/kubelet.crt \
 	VKUBELET_ADDRESS=${HOST_ADDRESS} \
-	./bin/hpk-kubelet
+	./bin/hpk-kubelet --run-slurm=$(RUN_SLURM)
 
 ##@ Test
 

@@ -1,10 +1,10 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: hello
+  name: hello3
 spec:
   containers:
   - name: hello-container
     image: alpine:latest
     command: ["/bin/sh", "-c"]
-    args: ["echo 'Hello World!'"]
+    args: ["echo 'Hello World!'; sleep 20"]

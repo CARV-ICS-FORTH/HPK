@@ -405,6 +405,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 		Containers:      containers,
 		ResourceRequest: resources.ResourceListToStruct(resourceRequest),
 		CustomFlags:     customFlags,
+		RunSlurm:        compute.Environment.RunSlurm,
 	}); err != nil {
 		/*-- since both the template and fields are internal to the code, the evaluation should always succeed	--*/
 		compute.SystemPanic(err, "failed to evaluate sbatch template")
@@ -421,7 +422,7 @@ func CreatePod(ctx context.Context, pod *corev1.Pod, watcher filenotify.FileWatc
 	/*---------------------------------------------------
 	 * Submit job to Slurm, and store the JobID
 	 *---------------------------------------------------*/
-	jobID, err := slurm.SubmitJob(scriptFilePath)
+	jobID, err := slurm.SubmitJobWithRunSlurm(scriptFilePath, compute.Environment.RunSlurm)
 	if err != nil {
 		compute.SystemPanic(err, "failed to submit job")
 		//[TODO:] update pod status with insufficient resources
