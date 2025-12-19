@@ -1,6 +1,6 @@
 # RUN INTERNAL CONTAINERS
 
-apptainer exec --network=none --writable-tmpfs docker://chazapis/hpk-bubble:2 /bin/bash
+apptainer exec --network=none --writable-tmpfs docker://chazapis/hpk-bubble:3 /bin/bash
 
 # INSIDE BUBBLE
 

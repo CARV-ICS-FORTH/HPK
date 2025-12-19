@@ -2,7 +2,7 @@ FROM ubuntu:24.04
 
 # Basic utilities
 RUN apt-get update && \
-    apt-get install -y vim-tiny curl iproute2 net-tools bridge-utils
+    apt-get install -y vim-tiny curl iproute2 net-tools bridge-utils socat iputils-ping
 
 # Apptainer
 RUN apt-get install -y software-properties-common && \

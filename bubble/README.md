@@ -2,8 +2,8 @@
 
 Package and push container with:
 ```bash
-docker build -t chazapis/hpk-bubble:2 .
-docker push chazapis/hpk-bubble:2
+docker build -t chazapis/hpk-bubble:3 .
+docker push chazapis/hpk-bubble:3
 ```
 
 Now you need two VMs: 192.168.64.9 and 192.168.64.10.
