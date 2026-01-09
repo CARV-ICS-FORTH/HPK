@@ -32,7 +32,7 @@ apptainer instance run \
 	--writable-tmpfs \
 	--network=none \
 	--bind resolv.conf:/etc/resolv.conf \
-	docker://chazapis/hpk-bubble:2 \
+	docker://chazapis/hpk-bubble:4 \
 	$NAME
 PID=$(apptainer instance list -j $NAME | jq -r '.instances[] | .pid')
 
