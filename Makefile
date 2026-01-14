@@ -3,6 +3,12 @@
 GO111MODULE := on
 export GO111MODULE
 
+# Detect architecture if not set
+GOARCH ?= $(shell go env GOARCH)
+ifeq ($(GOARCH),)
+	GOARCH := amd64
+endif
+
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell git))
 BUILD_VERSION=$(git describe --tags --always --dirty="-dev")
@@ -94,13 +100,13 @@ help: ## Display this help
 build: hpk-kubelet hpk-pause	## Build HPK binary
 
 build-race: ## Build HPK binary with race condition detector
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(VERSION_FLAGS) -race -o bin/hpk-kubelet ./cmd/hpk
+	GOOS=linux GOARCH=$(GOARCH) CGO_ENABLED=0 go build $(VERSION_FLAGS) -race -o bin/hpk-kubelet ./cmd/hpk
 
 hpk-kubelet:
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(VERSION_FLAGS) -ldflags '-extldflags "-static"' -o bin/hpk-kubelet ./cmd/hpk
+	GOOS=linux GOARCH=$(GOARCH) CGO_ENABLED=0 go build $(VERSION_FLAGS) -ldflags '-extldflags "-static"' -o bin/hpk-kubelet ./cmd/hpk
 
 hpk-pause:
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(VERSION_FLAGS) -ldflags '-extldflags "-static"' -o bin/hpk-pause ./cmd/pause
+	GOOS=linux GOARCH=$(GOARCH) CGO_ENABLED=0 go build $(VERSION_FLAGS) -ldflags '-extldflags "-static"' -o bin/hpk-pause ./cmd/pause
 
 image-pause:
 	DOCKER_BUILDKIT=1 docker build . -t $(PAUSE_IMAGE_TAG) -f deploy/images/pause-apptainer-agent/pause.apptainer.Dockerfile

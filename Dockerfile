@@ -1,7 +1,9 @@
 # Build the HPK operator binary
 FROM golang:1.19 as builder
 
-WORKDIR /build
+ARG TARGETARCH
+
+WORKSPACE /build
 
 # Copy the Go Modules manifests
 COPY go.mod go.mod
@@ -14,10 +16,10 @@ RUN go mod download
 # Copy the project's source code (except for whatever is included in the .dockerignore)
 COPY . .
 # Build release
-#RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build  -a -o /hpk ./cmd/hpk
+#RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build  -a -o /hpk ./cmd/hpk
 
 # Build dev
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -race -a -o /hpk ./cmd/hpk
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=${TARGETARCH} go build -race -a -o /hpk ./cmd/hpk
 
 
 # Super minimal image just to package the hpk binary. It does not include anything.
