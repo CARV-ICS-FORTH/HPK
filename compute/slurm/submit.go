@@ -35,10 +35,6 @@ var ExcludeNodes = "--exclude="
 // With a mode value of "L", "su" is executed with the "-" option, replicating the login environment.
 var NewUserEnv = "--get-user-env=10L"
 
-func SubmitJob(scriptFile string) (string, error) {
-	return SubmitJobWithRunSlurm(scriptFile, true)
-}
-
 // SubmitJobWithRunSlurm submits a job either via SLURM (if runSlurm is true) or directly via bash (if false).
 func SubmitJobWithRunSlurm(scriptFile string, runSlurm bool) (string, error) {
 	outputFile := os.Getenv("HOME") + "/.hpk/logs.log"

@@ -104,7 +104,7 @@ hpk-pause:
 
 image-pause:
 	DOCKER_BUILDKIT=1 docker build . -t $(PAUSE_IMAGE_TAG) -f deploy/images/pause-apptainer-agent/pause.apptainer.Dockerfile
-	sudo docker push $(PAUSE_IMAGE_TAG)
+	docker push $(PAUSE_IMAGE_TAG)
 
 image-kubemaster: ## Build and push the Kubernetes Master image
 	(cd k3s && DOCKER_BUILDKIT=1 docker build . -t $(K3S_IMAGE_TAG) -f Dockerfile)

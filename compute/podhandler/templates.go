@@ -328,6 +328,8 @@ export workdir=/tmp/{{.Pod.Namespace}}_{{.Pod.Name}}
 echo "[Host] Creating workdir: ${workdir} "
 mkdir -p ${workdir}
 
+echo $$ > "${workdir}/.pid"
+
 export APPTAINERENV_KUBEDNS_IP={{.HostEnv.KubeDNS}}
 
 exec {{$.HostEnv.ApptainerBin}} exec --nv --containall --net --fakeroot --scratch /scratch --workdir ${workdir} \

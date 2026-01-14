@@ -61,3 +61,27 @@ func CancelJob(args string) (string, error) {
 
 	return string(out), nil
 }
+
+// KillProcessByPID terminates a process by its PID using kill command.
+// Returns an error if the process cannot be terminated.
+func KillProcessByPID(pid string) (string, error) {
+	/*
+	 Install trap for the signals INT and TERM to
+	 terminate the process and its children.
+	 Send SIGTERM using kill to the main process
+	 and wait for it to close gracefully.
+	*/
+	out, err := process.Execute("kill", "-9", pid)
+	if err != nil {
+		outStr := string(out)
+
+		// if the process does not exist, consider it as terminated
+		if strings.Contains(outStr, "No such process") {
+			return outStr, ErrInvalidJob
+		}
+
+		return string(out), errors.Wrap(err, "Could not kill process")
+	}
+
+	return string(out), nil
+}

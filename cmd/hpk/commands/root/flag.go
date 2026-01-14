@@ -102,5 +102,5 @@ func installFlags(flags *pflag.FlagSet, c *Opts) {
 	flags.StringVar(&c.TaintValue, "taint-value", "hpk", "Set node taint value")
 	flags.StringVar(&c.TaintEffect, "taint-effect", string(corev1.TaintEffectNoSchedule), "Set node taint effect")
 
-	flags.BoolVar(&c.RunSlurm, "run-slurm", true, "run jobs under SLURM or Apptainer (default: true)")
+	flags.BoolVar(&c.RunSlurm, "run-slurm", true, "run jobs under SLURM or Apptainer")
 }
