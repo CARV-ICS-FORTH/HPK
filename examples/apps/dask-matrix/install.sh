@@ -11,10 +11,13 @@ if [[ -z "${TEST_NAMESPACE}" ]]; then
 fi
 ################################
 
-# Create testing dir with a populated file.
-mkdir -p /home/ubuntu/sea/
-echo "Yaar ! I 'm a pirate file hijacking your tmpfs" >> /home/ubuntu/sea/pirate
-echo "Sir, I 'm a privateer hunting down your pirate file" >> /home/ubuntu/sea/privateer
+# Update Helm repo
+helm repo add dask https://helm.dask.org
+helm repo update
 
-# Set pod
-kubectl apply -f manifest.yaml -n "${TEST_NAMESPACE}"
+helm install dask dask/dask \
+  --namespace "${TEST_NAMESPACE}" \
+  --set image.tag=2024.1.0 \
+  --set jupyter.image.tag=2024.1.0 \
+  --set worker.image.tag=2024.1.0 \
+  --values values.yaml

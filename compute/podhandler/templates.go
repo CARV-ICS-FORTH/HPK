@@ -18,6 +18,10 @@ import (
 	"fmt"
 	"strings"
 	"text/template"
+	"os"
+	"path/filepath"
+	"errors"
+	"strconv"
 
 	"github.com/Masterminds/sprig"
 	"github.com/alessio/shellescape"
@@ -30,7 +34,15 @@ import (
 
 var genericMap = map[string]interface{}{
 	"param": EscapeSingleQuote,
+	"truncate": truncate,
+        "generateTmpCommands": generateTmpCommands,
 }
+
+type TmpCommandsResult struct {
+    Cmds []string
+    Err  error
+}
+
 
 // ParseTemplate returns a custom 'text/template' enhanced with functions for processing HPK templates.
 func ParseTemplate(text string) (*template.Template, error) {
@@ -53,6 +65,13 @@ func EscapeSingleQuote(str ...interface{}) string {
 	return strings.Join(out, " ")
 }
 
+func truncate(s string, max int) string {
+    if len(s) <= max {
+        return s
+    }
+    return s[:max]
+}
+
 func strval(v interface{}) string {
 	switch v := v.(type) {
 	case string:
@@ -67,6 +86,83 @@ func strval(v interface{}) string {
 		return fmt.Sprintf("%v", v)
 	}
 }
+
+func makeTmpPath(binds []string) (oldPath string, newPath string, err error) {
+    oldPath, err = findVolumesBind(binds)
+    if err != nil {
+        return "", "", err
+    }
+
+    tmpBase := os.TempDir()
+    tmpBase = strings.TrimRight(tmpBase, string(os.PathSeparator))
+
+    parts := strings.Split(oldPath, string(os.PathSeparator))
+
+    hpkIndex := -1
+    for i, p := range parts {
+        if p == ".hpk" {
+            hpkIndex = i
+            break
+        }
+    }
+    if hpkIndex == -1 {
+        return "", "", errors.New(".hpk directory not found in path")
+    }
+
+    remainder := parts[hpkIndex+1:]
+
+    newPath = filepath.Join(tmpBase, filepath.Join(remainder...))
+
+    return oldPath, newPath, nil
+}
+
+func findVolumesBind(binds []string) (string, error) {
+    foundPath := ""
+
+    for _, b := range binds {
+        hostPath := b
+        if i := strings.Index(b, ":"); i != -1 {
+            hostPath = b[:i]
+        }
+
+        idx := strings.Index(hostPath, "volumes")
+        if idx != -1 {
+            foundPath = hostPath[:idx+len("volumes")]
+            break
+        }
+    }
+
+    if foundPath == "" {
+        return "", errors.New("no bind contains 'volumes'")
+    }
+
+    return foundPath, nil
+}
+
+func generateTmpCommands(binds []string) TmpCommandsResult {
+    oldPath, newPath, err := makeTmpPath(binds)
+    if err != nil {
+        return TmpCommandsResult{Err: err}
+    }
+
+    mkdirCmd := fmt.Sprintf("mkdir -p %s || { echo 'mkdir failed'; exit 1; }", strconv.Quote(newPath))
+
+    moveContentsCmd := fmt.Sprintf(
+        `if [ -d "%s" ] && [ ! -L "%s" ]; then ( shopt -s dotglob nullglob; mv "%s/"* "%s/" ); fi`,
+        oldPath, oldPath, oldPath, newPath,
+    )
+
+    rmIfDirCmd := fmt.Sprintf(
+        "[ -e %s ] && [ ! -L %s ] && rm -rf %s || true",
+        strconv.Quote(oldPath), strconv.Quote(oldPath), strconv.Quote(oldPath),
+    )
+
+
+    lnCmd := fmt.Sprintf("ln -sfn %s %s || { echo 'ln failed'; exit 1; }", strconv.Quote(newPath), strconv.Quote(oldPath))
+
+    return TmpCommandsResult{Cmds: []string{mkdirCmd, moveContentsCmd, rmIfDirCmd, lnCmd}}
+}
+
 
 /*
 	PauseScriptTemplate provides the template for building pods.
@@ -255,6 +351,10 @@ function handle_containers() {
 	echo "[Virtual] ... Containers terminated ..."
 }
 
+
+
+
+
 debug_info
 
 echo "[Virtual] Resetting Environment ..."
@@ -271,7 +371,7 @@ trap 'cleanup "${BASH_COMMAND}" "$?"'  EXIT
 
 {{if gt (len .InitContainers) 0 }} handle_init_containers {{end}}
 
-{{if gt (len .Containers) 0 }} handle_containers {{end}}
+{{- if gt (len .Containers) 0 }} handle_containers {{end}}
 `
 
 const HostScriptTemplate = `#!/bin/bash
@@ -289,7 +389,7 @@ const HostScriptTemplate = `#!/bin/bash
                            # before its time ends to give it a
                            # chance for better cleanup.
 {{- if .ResourceRequest.CPU}}
-#SBATCH --ntasks-per-node={{.ResourceRequest.CPU}}
+#SBATCH --cpus-per-task={{.ResourceRequest.CPU}}
 {{end}}
 
 {{- if .ResourceRequest.GPU}}
@@ -329,6 +429,33 @@ echo "[Host] Creating workdir: ${workdir} "
 mkdir -p ${workdir}
 
 echo $$ > "${workdir}/.pid"
+{{- if .UseTmp }}
+  {{- range $index, $container := .Containers }}
+    {{- $result := generateTmpCommands $container.Binds }}
+    {{- if $result.Err }}
+      echo "Error generating tmp commands for container {{$index}}: {{ $result.Err }}" >&2
+      exit 1
+    {{- else }}
+      {{- range $cmd := $result.Cmds }}
+      {{ $cmd }}
+      {{- end }}
+    {{ end }}
+  {{- end }}
+{{- end }}
+
+
+
+# --network-args "portmap=8080:80/tcp"
+# --container is needed to start a separate /dev/sh
+#exec {{$.HostEnv.ApptainerBin}} exec --nv --containall --net --fakeroot --scratch /scratch --workdir ${workdir} \
+#{{- if .HostEnv.EnableCgroupV2}}
+#--apply-cgroups {{.VirtualEnv.CgroupFilePath}} 		\
+#{{- end}}
+#--env PARENT=${PPID}								\
+#--bind $HOME,/tmp										\
+#--hostname {{.Pod.Name}}							\
+#{{$.PauseImageFilePath}} sh -ci {{.VirtualEnv.ConstructorFilePath}} ||
+#echo "[HOST] **SYSTEMERROR** apptainer exited with code $?" | tee {{.VirtualEnv.SysErrorFilePath}}
 
 export APPTAINERENV_KUBEDNS_IP={{.HostEnv.KubeDNS}}
 
@@ -340,7 +467,7 @@ exec {{$.HostEnv.ApptainerBin}} exec --nv --containall --net --fakeroot --scratc
 --bind $HOME/.hpk-master/kubernetes:/k8s-data			\
 --bind /etc/apptainer/apptainer.conf				\
 --bind $HOME,/tmp									\
---hostname {{.Pod.Name}}							\
+--hostname {{truncate .Pod.Name 63}}							\
 {{$.PauseImageFilePath}} /usr/local/bin/hpk-pause -namespace {{.Pod.Namespace}} -pod {{.Pod.Name}} ||
 echo "[HOST] **SYSTEMERROR** hpk-pause exited with code $?" | tee {{.VirtualEnv.SysErrorFilePath}}
 
@@ -373,6 +500,9 @@ type JobFields struct {
 
 	// RunSlurm indicates whether to run the job under slurm control or via apptainer directly.
 	RunSlurm bool
+  
+  // UseTmp is a flag that shows if tmp directories should be used.
+  UseTmp  bool
 }
 
 // The Container creates new within the Pod and resemble the "Container" semantics.

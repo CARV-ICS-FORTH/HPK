@@ -1,7 +1,6 @@
 # HPK
 
-HPK allows HPC users to run their own private "mini Clouds" on
-a typical HPC cluster. HPK uses [a single container](https://k3s.io) (based on k3s) to run the
+HPK allows HPC users to run their own private "mini Clouds" on a typical HPC cluster. HPK uses [a single container](https://k3s.io) (based on k3s) to run the
 [Kubernetes](https://kubernetes.io/) control plane and a [Virtual Kubelet](https://github.com/virtual-kubelet/virtual-kubelet) Provider
 implementation to translate container lifecycle management commands from Kubernetes-native
 to [Slurm](https://slurm.schedmd.com/)/[Apptainer](https://github.com/apptainer/apptainer).
@@ -28,10 +27,11 @@ HPK is a continuation of the [KNoC](https://github.com/CARV-ICS-FORTH/knoc) proj
 
 First, you need to install and configure the dependencies requireed by HPK. The [install-hpk-requirements.sh](deploy/aws/install-hpk-requirements.sh) script demonstrates how we set up the environment for HPK in AWS ParallelCluster.
 
-Once setup, compile the `hpk-kubelet` using `make`.
+Once setup, compile the `hpk-kubelet` and `hpk-pause` binaries and build and push the kubemaster image with:
 
 ```bash
-make build
+export REGISTRY_NAME=<your_dockerhub_username>
+make build-all
 ```
 
 Then, you need to start the Kubernetes Master and `hpk-kubelet` seperately.

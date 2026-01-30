@@ -65,6 +65,9 @@ type Opts struct {
 
 	// RunSlurm indicates whether to run jobs under SLURM control or via apptainer directly
 	RunSlurm bool
+  
+	// Use tmp for the volume directories of the pods
+  UseTmp       bool
 }
 
 const (
@@ -103,4 +106,5 @@ func installFlags(flags *pflag.FlagSet, c *Opts) {
 	flags.StringVar(&c.TaintEffect, "taint-effect", string(corev1.TaintEffectNoSchedule), "Set node taint effect")
 
 	flags.BoolVar(&c.RunSlurm, "run-slurm", true, "run jobs under SLURM or Apptainer")
+	flags.BoolVar(&c.UseTmp, "use-tmp", true, "symlink the pods' volume directories under tmp")
 }

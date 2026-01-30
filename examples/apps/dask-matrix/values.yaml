@@ -1,0 +1,16 @@
+scheduler:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 2
+      memory: 4G
+
+worker:
+  replicas: 3
+  resources:
+    requests:
+      cpu: 7
+      memory: 12G
+
+jupyter:
+  enabled: false

@@ -7,7 +7,7 @@ spec:
   volumes:
     - name: local-dir
       hostPath:
-        path: /tmp/sea # created by install.sh
+        path: /home/ubuntu/sea # created by install.sh
   containers:
     - name: main
       image: busybox
@@ -34,7 +34,7 @@ spec:
   volumes:
     - name: local-dir
       hostPath:
-        path: /tmp/sea # created by install.sh
+        path: /home/ubuntu/sea # created by install.sh
   containers:
     - name: main
       image: busybox

@@ -27,6 +27,15 @@ spec:
     # Logging set to WARN
     - "true"
   sparkConf:
+    #"spark.eventLog.enabled": "true"
+    #"spark.eventLog.dir": "s3a://spark-k8s-data/spark-events"
+    "spark.ui.live": "true"
+    "spark.jars.ivy": "/tmp/.ivy2/"
+    "spark.hadoop.hadoop.security.authentication": "simple"
+    "spark.hadoop.hadoop.security.authorization": "false"
+    "spark.hadoop.hadoop.security.kerberos.keytab": ""
+    "spark.hadoop.hadoop.security.kerberos.principal": ""
+    "spark.hadoop.log.lever": "DEBUG"
     "spark.speculation": "false"
     "spark.network.timeout": "2400"
     # S3 Credential
@@ -38,43 +47,14 @@ spec:
     "spark.hadoop.fs.s3a.fast.upload": "true"
     "spark.hadoop.fs.s3a.connection.timeout": "1200000"
     "spark.hadoop.fs.s3a.connection.maximum": "8192"
-    #"spark.hadoop.fs.s3a.readahead.range": "256K"
-    #"spark.hadoop.fs.s3a.input.fadvise": "random"
-    # S3A Committer
-    #"spark.hadoop.mapreduce.outputcommitter.factory.scheme.s3a": "org.apache.hadoop.fs.s3a.commit.S3ACommitterFactory"
-    # "spark.sql.sources.commitProtocolClass": "org.apache.spark.internal.io.cloud.PathOutputCommitProtocol"
-    # "spark.sql.parquet.output.committer.class": "org.apache.hadoop.mapreduce.lib.output.BindingPathOutputCommitter"
-    #"spark.hadoop.fs.s3a.committer.name": "directory"
-    #"spark.hadoop.fs.s3a.committer.staging.conflict-mode": "append"
-    #spark.hadoop.fs.s3a.block.size 512M
-    #spark.hadoop.fs.s3a.buffer.dir ${hadoop.tmp.dir}/s3a
-    #spark.hadoop.fs.s3a.committer.magic.enabled false
-    #spark.hadoop.fs.s3a.committer.name directory
-    #spark.hadoop.fs.s3a.committer.staging.abort.pending.uploads true
-    #spark.hadoop.fs.s3a.committer.staging.conflict-mode append
-    #spark.hadoop.fs.s3a.committer.staging.tmp.path /tmp/staging
-    #spark.hadoop.fs.s3a.committer.staging.unique-filenames true
-    #spark.hadoop.fs.s3a.committer.threads 2048 # number of threads writing to MinIO
-    #spark.hadoop.fs.s3a.connection.establish.timeout 5000
-    #spark.hadoop.fs.s3a.connection.ssl.enabled false
-
-    #spark.hadoop.fs.s3a.fast.upload.active.blocks 2048 # number of parallel uploads
-    #spark.hadoop.fs.s3a.fast.upload.buffer disk # use disk as the buffer for uploads
-    #spark.hadoop.fs.s3a.max.total.tasks 2048 # maximum number of parallel tasks
-    #spark.hadoop.fs.s3a.multipart.size 512M # size of each multipart chunk
-    #spark.hadoop.fs.s3a.multipart.threshold 512M # size before using multipart uploads
-    #spark.hadoop.fs.s3a.socket.recv.buffer 65536 # read socket buffer hint
-    #spark.hadoop.fs.s3a.socket.send.buffer 65536 # write socket buffer hint
-    #spark.hadoop.fs.s3a.threads.max 2048 # maximum number of threads for S3A
   driver:
     cores: 2
-    coreLimit: "2048m"
-    memory: "1000m"
-    serviceAccount: spark
+    memory: 8g
+    serviceAccount: spark-operator-spark
   executor:
-    instances: 1
+    instances: 8
     cores: 1
-    memory: "1000m"
-    memoryOverhead: 1g
+    memory: 4g
+    serviceAccount: spark-operator-spark
   restartPolicy:
     type: Never
