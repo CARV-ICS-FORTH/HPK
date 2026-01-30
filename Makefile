@@ -3,6 +3,12 @@
 GO111MODULE := on
 export GO111MODULE
 
+# Detect architecture if not set
+GOARCH ?= $(shell go env GOARCH)
+ifeq ($(GOARCH),)
+	GOARCH := amd64
+endif
+
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell git))
 BUILD_VERSION=$(git describe --tags --always --dirty="-dev")
@@ -22,7 +28,7 @@ EXTERNAL_DNS ?= 8.8.8.8
 
 REGISTRY_NAME ?= carvicsforth
 
-K3S_IMAGE_TAG=$(REGISTRY_NAME)/hpk-master:$(VERSION)
+K3S_IMAGE_TAG=$(REGISTRY_NAME)/hpk-master:$(VERSION)-$(GOARCH)
 
 export PAUSE_IMAGE_TAG=$(REGISTRY_NAME)/pause:$(VERSION)
 
@@ -94,13 +100,13 @@ help: ## Display this help
 build: hpk-kubelet hpk-pause	## Build HPK binary
 
 build-race: ## Build HPK binary with race condition detector
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(VERSION_FLAGS) -race -o bin/hpk-kubelet ./cmd/hpk
+	GOOS=linux GOARCH=$(GOARCH) CGO_ENABLED=0 go build $(VERSION_FLAGS) -race -o bin/hpk-kubelet ./cmd/hpk
 
 hpk-kubelet:
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(VERSION_FLAGS) -ldflags '-extldflags "-static"' -o bin/hpk-kubelet ./cmd/hpk
+	GOOS=linux GOARCH=$(GOARCH) CGO_ENABLED=0 go build $(VERSION_FLAGS) -ldflags '-extldflags "-static"' -o bin/hpk-kubelet ./cmd/hpk
 
 hpk-pause:
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build $(VERSION_FLAGS) -ldflags '-extldflags "-static"' -o bin/hpk-pause ./cmd/pause
+	GOOS=linux GOARCH=$(GOARCH) CGO_ENABLED=0 go build $(VERSION_FLAGS) -ldflags '-extldflags "-static"' -o bin/hpk-pause ./cmd/pause
 
 image-pause:
 	DOCKER_BUILDKIT=1 docker build . -t $(PAUSE_IMAGE_TAG) -f deploy/images/pause-apptainer-agent/pause.apptainer.Dockerfile
@@ -108,7 +114,7 @@ image-pause:
 
 image-kubemaster: ## Build and push the Kubernetes Master image
 	(cd k3s && DOCKER_BUILDKIT=1 docker build . -t $(K3S_IMAGE_TAG) -f Dockerfile)
-	docker push $(K3S_IMAGE_TAG)
+	sudo docker push $(K3S_IMAGE_TAG)
 
 build-all: image-kubemaster image-pause build ## Build kubemaster and binaries
 
@@ -116,7 +122,7 @@ build-all: image-kubemaster image-pause build ## Build kubemaster and binaries
 
 run-hpk-master:
 	mkdir -p ${HPK_MASTER_PATH}/log
-	apptainer run --net --dns ${EXTERNAL_DNS} --fakeroot \
+	apptainer run --network=fakeroot --net --dns ${EXTERNAL_DNS} --fakeroot \
 	--cleanenv --pid --containall \
 	--no-init --no-umask --no-eval \
 	--no-mount tmp,home --unsquash --writable \
@@ -126,7 +132,8 @@ run-hpk-master:
 
 run-kubelet: CA_BUNDLE = $(shell cat ${KUBE_PATH}/pki/ca.crt | base64 | tr -d '\n')
 run-kubelet: HOST_ADDRESS = $(shell ip route get 1 | sed -n 's/.*src \([0-9.]\+\).*/\1/p')
-run-kubelet: ## Run the HPK Virtual Kubelet
+run-kubelet: RUN_SLURM ?= true
+run-kubelet: ## Run the HPK Virtual Kubelet (use RUN_SLURM=false to disable SLURM)
 	@echo "===> Generate HPK Certificates <==="
 	mkdir -p ./bin
 
@@ -149,7 +156,7 @@ run-kubelet: ## Run the HPK Virtual Kubelet
 	APISERVER_KEY_LOCATION=bin/kubelet.key \
 	APISERVER_CERT_LOCATION=bin/kubelet.crt \
 	VKUBELET_ADDRESS=${HOST_ADDRESS} \
-	./bin/hpk-kubelet
+	./bin/hpk-kubelet --run-slurm=$(RUN_SLURM)
 
 ##@ Test
 

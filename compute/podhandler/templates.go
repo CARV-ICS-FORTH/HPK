@@ -328,8 +328,18 @@ function handle_containers() {
 	echo $? > {{$container.ExitCodePath}}) &
 
 	pid=$!
+	{{- if not $.RunSlurm}}
+	# When not running under SLURM, get the actual appinit PID
+	# Find appinit process that is a descendant of the subshell we just backgrounded
+	sleep 0.5
+	echo "$appinit_pid searching for appinit under pid $pid" > ~/.hpk/logs2.log
+	appinit_pid=$(pgrep -P $pid appinit 2>/dev/null || pgrep -n appinit 2>/dev/null || echo "")
+	if [ -n "$appinit_pid" ]; then
+		pid=$appinit_pid
+	fi
+	{{- end}}
 	echo pid://${pid} > {{$container.JobIDPath}}
-	echo "[Virtual] Container started: {{$container.InstanceName}} ${pid}"
+	echo "[Virtual] Container started: {{$container.InstanceName}} PID: ${pid}"
 {{end}}
 
 	######################
@@ -365,17 +375,19 @@ trap 'cleanup "${BASH_COMMAND}" "$?"'  EXIT
 `
 
 const HostScriptTemplate = `#!/bin/bash
+{{- if .RunSlurm}}
+
 #SBATCH --job-name={{.Pod.Name}}
 #SBATCH --output={{.VirtualEnv.StdoutPath}}
 #SBATCH --error={{.VirtualEnv.StderrPath}}
 {{- range $index, $flag := .CustomFlags}}
 #SBATCH {{$flag}}
 {{end}}
-#SBATCH --signal=B:TERM@60 # tells the controller
-                            # to send SIGTERM to the job 60 secs
-                            # before its time ends to give it a
-                            # chance for better cleanup.
 
+#SBATCH --signal=B:TERM@60 # tells the controller
+                           # to send SIGTERM to the job 60 secs
+                           # before its time ends to give it a
+                           # chance for better cleanup.
 {{- if .ResourceRequest.CPU}}
 #SBATCH --cpus-per-task={{.ResourceRequest.CPU}}
 {{end}}
@@ -388,8 +400,9 @@ module load nvidia
 
 {{- if .ResourceRequest.Memory}}
 #SBATCH --mem={{.ResourceRequest.Memory}} 
-{{end}} 
+{{end}}
 
+{{end}}
 #### BEGIN SECTION: VirtualEnvironment Builder ####
 # Description
 # 	Builds a script for running a Virtual Environment
@@ -415,6 +428,7 @@ export workdir=/tmp/{{.Pod.Namespace}}_{{.Pod.Name}}
 echo "[Host] Creating workdir: ${workdir} "
 mkdir -p ${workdir}
 
+echo $$ > "${workdir}/.pid"
 {{- if .UseTmp }}
   {{- range $index, $container := .Containers }}
     {{- $result := generateTmpCommands $container.Binds }}
@@ -484,8 +498,11 @@ type JobFields struct {
 	// CustomFlags are flags given by the user via 'slurm.hpk.io/flags' annotations
 	CustomFlags []string
 
-        // UseTmp is a flag that shows if tmp directories should be used.
-        UseTmp  bool
+	// RunSlurm indicates whether to run the job under slurm control or via apptainer directly.
+	RunSlurm bool
+  
+  // UseTmp is a flag that shows if tmp directories should be used.
+  UseTmp  bool
 }
 
 // The Container creates new within the Pod and resemble the "Container" semantics.

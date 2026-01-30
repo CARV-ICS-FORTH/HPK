@@ -33,6 +33,9 @@ type HostEnvironment struct {
 
 	// KubeDNS points to the internal DNS of a Kubernetes cluster.
 	KubeDNS string
+
+	// RunSlurm indicates whether to run jobs under SLURM control or via Apptainer directly.
+	RunSlurm bool
 }
 
 // The VirtualEnvironment create lightweight "virtual environments" that resemble "Pods" semantics.

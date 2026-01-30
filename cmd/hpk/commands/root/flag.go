@@ -63,8 +63,11 @@ type Opts struct {
 	TaintValue   string
 	TaintEffect  string
 
+	// RunSlurm indicates whether to run jobs under SLURM control or via apptainer directly
+	RunSlurm bool
+  
 	// Use tmp for the volume directories of the pods
-        UseTmp       bool
+  UseTmp       bool
 }
 
 const (
@@ -101,5 +104,7 @@ func installFlags(flags *pflag.FlagSet, c *Opts) {
 	flags.StringVar(&c.TaintKey, "taint-key", "virtual-kubelet.io/provider", "Set node taint key")
 	flags.StringVar(&c.TaintValue, "taint-value", "hpk", "Set node taint value")
 	flags.StringVar(&c.TaintEffect, "taint-effect", string(corev1.TaintEffectNoSchedule), "Set node taint effect")
+
+	flags.BoolVar(&c.RunSlurm, "run-slurm", true, "run jobs under SLURM or Apptainer")
 	flags.BoolVar(&c.UseTmp, "use-tmp", true, "symlink the pods' volume directories under tmp")
 }

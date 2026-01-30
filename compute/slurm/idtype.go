@@ -15,6 +15,7 @@
 package slurm
 
 import (
+	"os"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -83,4 +84,28 @@ func parseIDType(raw string) string {
 	}
 
 	*/
+}
+
+// GetPIDFromFile reads the process ID from a .pid file in the pod's working directory.
+// Returns an error if the file cannot be read or parsed.
+func GetPIDFromFile(pidFilePath string) (string, error) {
+	content, err := os.ReadFile(pidFilePath)
+	if err != nil {
+		return "", err
+	}
+
+	pid := strings.TrimSpace(string(content))
+	return pid, nil
+}
+
+// IsProcessJobID checks if the given job ID represents a direct process PID (non-SLURM mode).
+// A job ID that consists only of digits is considered a process PID.
+func IsProcessJobID(jobID string) bool {
+	// If it's all digits, it's a process PID. Otherwise, it's a SLURM job ID.
+	for _, ch := range jobID {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	return true
 }
