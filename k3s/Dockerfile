@@ -13,7 +13,7 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && \
-    apt-get install -y iproute2 curl openssl && \
+    apt-get install -y iproute2 curl openssl nano && \
     apt-get clean \
     && rm -rf \
         /var/lib/apt/lists/* \
@@ -26,7 +26,7 @@ RUN apt-get update && \
 ARG TARGETARCH
 
 # K3s
-ARG K3S_VERSION=v1.29.1+k3s1
+ARG K3S_VERSION=v1.31.2+k3s1
 
 RUN set -eux; \
     if [ "${TARGETARCH}" = "amd64" ]; then \

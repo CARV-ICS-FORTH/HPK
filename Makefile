@@ -128,6 +128,7 @@ run-hpk-master:
 	--no-mount tmp,home --unsquash --writable \
 	--bind ${HPK_MASTER_PATH}:/usr/local/etc \
 	--bind ${HPK_MASTER_PATH}/log:/var/log \
+	--env EXTERNAL_DNS=${EXTERNAL_DNS} \
 	docker://$(K3S_IMAGE_TAG)
 
 run-kubelet: CA_BUNDLE = $(shell cat ${KUBE_PATH}/pki/ca.crt | base64 | tr -d '\n')

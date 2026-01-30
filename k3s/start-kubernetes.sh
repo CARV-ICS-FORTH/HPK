@@ -20,10 +20,12 @@ k3s server \
   --disable metrics-server \
   --disable-cloud-controller \
   --write-kubeconfig-mode 777 \
-  --bind-address ${IP_ADDRESS} \
   --node-ip=${IP_ADDRESS} \
+  --bind-address=${IP_ADDRESS} \
+  --https-listen-port=443 \
   --write-kubeconfig ${HPK_MASTER_CONF_DIR}/kubernetes/admin.conf \
   --egress-selector-mode disabled \
+  --kube-apiserver-arg=enable-aggregator-routing=true \
   &> ${HPK_MASTER_LOG_DIR}/k3s.log &
 
 echo -e "\n----------\nWaiting for K3s server to be created...\n----------"
@@ -40,6 +42,12 @@ done
 
 echo -e "K3s server started\n----------"
 
+cat > /etc/resolv.conf <<EOF
+nameserver 127.0.0.1
+search svc.cluster.local cluster.local
+options ndots:5
+EOF
+
 # Run Core DNS Here, after k3s server is up and running
 mkdir -p ${HPK_MASTER_CONF_DIR}/coredns
 cat > ${HPK_MASTER_CONF_DIR}/coredns/Corefile <<EOF
@@ -52,7 +60,7 @@ cat > ${HPK_MASTER_CONF_DIR}/coredns/Corefile <<EOF
         fallthrough in-addr.arpa ip6.arpa
         ttl 5
     }
-    forward . /etc/resolv.conf
+    forward . ${EXTERNAL_DNS}
     cache 30
     loop
     reload
@@ -133,6 +141,19 @@ services-webhook \
 # Start the random scheduler
 random-scheduler \
   &> ${HPK_MASTER_LOG_DIR}/random-scheduler.log &
+
+k3s kubectl delete svc kubernetes -n default --ignore-not-found=true >/dev/null 2>&1
+
+echo -e "----------\nWaiting for kubernetes Service to be recreated as headless...\n----------"
+while true; do
+  cip="$(k3s kubectl get svc kubernetes -n default -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)"
+  if [ "${cip}" = "None" ]; then
+    break
+  fi
+  sleep 1
+done
+
+echo -e "HPK-master is ready!"
 
 # Done
 sleep infinity

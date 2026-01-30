@@ -20,6 +20,9 @@ proxy:
     networkPolicy:
       enabled: false
 singleuser:
+#  image:
+#    name: jupyterhub/k8s-singleuser-sample
+#    tag: "4.1.6"
   serviceAccountName: training-operator
   cloudMetadata:
     blockWithIptables: false
@@ -27,7 +30,7 @@ singleuser:
     type: none
     # dynamic:
       # storageClass: openebs-hostpath
-    capacity: 30Gi 
+    capacity: 15Gi
     # type: "static"
     # capacity: "10Gi"
     # static:

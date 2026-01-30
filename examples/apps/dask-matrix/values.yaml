@@ -3,14 +3,14 @@ scheduler:
   resources:
     requests:
       cpu: 2
-      memory: 4G
+      memory: 500M
 
 worker:
-  replicas: 3
+  replicas: 2
   resources:
     requests:
-      cpu: 7
-      memory: 12G
+      cpu: 2
+      memory: 1G
 
 jupyter:
   enabled: false

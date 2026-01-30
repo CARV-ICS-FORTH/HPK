@@ -1,0 +1,132 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fabric8-selfget
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: fabric8-selfget
+  namespace: default
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: fabric8-selfget
+  namespace: default
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: fabric8-selfget
+subjects:
+  - kind: ServiceAccount
+    name: fabric8-selfget
+    namespace: default
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fabric8-force-service
+  namespace: default
+spec:
+  restartPolicy: Never
+  serviceAccountName: fabric8-selfget
+  volumes:
+    - name: work
+      emptyDir: {}
+  containers:
+    - name: run
+      image: maven:3.9-eclipse-temurin-17
+      volumeMounts:
+        - name: work
+          mountPath: /work
+      env:
+        - name: POD_NAME
+          valueFrom: {fieldRef: {fieldPath: metadata.name}}
+        - name: POD_NAMESPACE
+          valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+      command: ["/bin/bash","-lc"]
+      args:
+        - |
+          set -euo pipefail
+          cd /work
+
+          echo "=== ENV (KUBERNETES_*) actually seen by shell ==="
+          env | egrep '^KUBERNETES_' | sort || true
+          echo
+
+          mkdir -p src/main/java
+
+          cat > pom.xml <<'POM'
+          <project xmlns="http://maven.apache.org/POM/4.0.0">
+            <modelVersion>4.0.0</modelVersion>
+            <groupId>local</groupId><artifactId>fabric8-force-service</artifactId><version>1.0.0</version>
+            <properties><maven.compiler.source>17</maven.compiler.source><maven.compiler.target>17</maven.compiler.target></properties>
+            <dependencies>
+              <dependency>
+                <groupId>io.fabric8</groupId><artifactId>kubernetes-client</artifactId><version>6.13.1</version>
+              </dependency>
+            </dependencies>
+            <build>
+              <plugins>
+                <plugin>
+                  <groupId>org.apache.maven.plugins</groupId>
+                  <artifactId>maven-dependency-plugin</artifactId>
+                  <version>3.6.1</version>
+                  <executions>
+                    <execution>
+                      <id>cp</id><phase>package</phase><goals><goal>build-classpath</goal></goals>
+                      <configuration><outputFile>cp.txt</outputFile></configuration>
+                    </execution>
+                  </executions>
+                </plugin>
+              </plugins>
+            </build>
+          </project>
+          POM
+
+          cat > src/main/java/Main.java <<'JAVA'
+          import io.fabric8.kubernetes.client.Config;
+          import io.fabric8.kubernetes.client.ConfigBuilder;
+          import io.fabric8.kubernetes.client.KubernetesClient;
+          import io.fabric8.kubernetes.client.KubernetesClientBuilder;
+          import io.fabric8.kubernetes.client.KubernetesClientException;
+          import io.fabric8.kubernetes.api.model.Pod;
+
+          public class Main {
+            public static void main(String[] args) {
+              String name = System.getenv("POD_NAME");
+              String ns = System.getenv("POD_NAMESPACE");
+
+              System.out.println("POD_NAME=" + name);
+              System.out.println("POD_NAMESPACE=" + ns);
+              System.out.println("JAVA getenv KUBERNETES_SERVICE_HOST=" + System.getenv("KUBERNETES_SERVICE_HOST"));
+              System.out.println("JAVA getenv KUBERNETES_SERVICE_PORT=" + System.getenv("KUBERNETES_SERVICE_PORT"));
+
+              Config cfg = new ConfigBuilder().build();
+              cfg.setMasterUrl("https://10.244.2.118:6443"); // force Service VIP
+
+              try (KubernetesClient client = new KubernetesClientBuilder().withConfig(cfg).build()) {
+                System.out.println("FORCED masterUrl=" + client.getConfiguration().getMasterUrl());
+                Pod p = client.pods().inNamespace(ns).withName(name).get();
+                System.out.println("RESULT: " + (p == null ? "Pod null" : "OK (got pod)"));
+              } catch (KubernetesClientException e) {
+                System.out.println("RESULT: KubernetesClientException");
+                System.out.println("message=" + e.getMessage());
+                System.out.println("code=" + e.getCode());
+                e.printStackTrace(System.out);
+              } catch (Exception e) {
+                System.out.println("RESULT: Exception");
+                e.printStackTrace(System.out);
+              }
+            }
+          }
+          JAVA
+
+          mvn -q -DskipTests package
+          java -cp "$(cat cp.txt):target/classes" Main

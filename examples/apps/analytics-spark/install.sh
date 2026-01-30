@@ -40,10 +40,11 @@ helm install \
   --namespace "${TEST_NAMESPACE}" \
   --set sparkJobNamespace="${TEST_NAMESPACE}" \
   --set serviceAccounts.spark.name="spark" \
-  --set enableWebhook="true" \
-  --set webhook.volumeMounts[0].name=serving-certs \
-  --set webhook.volumeMounts[0].mountPath=/etc/k8s-webhook-server/serving-certs \
-  --set webhook.volumes[0].name=serving-certs
+  --set enableWebhook="false" \
+  --set webhook.enable=false
+#  --set webhook.volumeMounts[0].name=serving-certs \
+#  --set webhook.volumeMounts[0].mountPath=/etc/k8s-webhook-server/serving-certs \
+#  --set webhook.volumes[0].name=serving-certs
 
 # Install Spark Application
 #kubectl apply -f manifest.yaml -n "${TEST_NAMESPACE}"

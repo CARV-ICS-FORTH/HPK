@@ -12,9 +12,9 @@ spec:
         command: ["python", "/app/benchmark.py"]
         env:
         - name: MATRIX_SIZE
-          value: "40000"
-        - name: CHUNK_SIZE
           value: "4000"
+        - name: CHUNK_SIZE
+          value: "400"
         volumeMounts:
         - name: report
           mountPath: /report

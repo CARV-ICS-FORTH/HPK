@@ -72,7 +72,7 @@ func main() {
     mux.HandleFunc("/mutate", whsvr.serve)
     whsvr.server.Handler = mux
 
-    // Start webhook server in new rountine
+    // Start webhook server in new routine
     go func() {
         if err := whsvr.server.ListenAndServeTLS("", ""); err != nil {
             errorLogger.Fatalf("Failed to listen and serve webhook server: %v", err)
